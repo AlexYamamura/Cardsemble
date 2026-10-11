@@ -1,0 +1,6 @@
+.env
+.venv/
+.plaid_state.json
+__pycache__/
+transactions.db
+google_pay_capture_log.jsonl

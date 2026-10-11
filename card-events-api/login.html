@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Card events test</title>
+  <style>
+    body {
+      max-width: 34rem;
+      margin: 3rem auto;
+      padding: 0 1rem;
+      color: #202124;
+      font: 16px/1.5 system-ui, sans-serif;
+    }
+    button, input {
+      box-sizing: border-box;
+      width: 100%;
+      margin: .3rem 0 1rem;
+      padding: .7rem;
+      font: inherit;
+    }
+    button { cursor: pointer; }
+    #event-form[hidden], #sign-out[hidden], #device-enrollment[hidden],
+    #device-token-result[hidden], #household-dashboard[hidden],
+    #add-person-form[hidden] { display: none; }
+    #status { overflow-wrap: anywhere; }
+    .transaction { margin: .75rem 0; padding: .75rem; border: 1px solid #dadce0; }
+    .transaction select { margin-bottom: 0; }
+  </style>
+</head>
+<body>
+  <h1>Card events test</h1>
+  <p>
+    Sign in to review household assignments, statement-cycle totals, and the
+    iPhone Wallet event setup.
+  </p>
+  <button id="sign-in" type="button">Continue with Google</button>
+  <button id="sign-out" type="button" hidden>Sign out</button>
+  <p id="status" role="status">Loading configuration…</p>
+
+  <section id="household-dashboard" hidden>
+    <h2>Statement-cycle card charges by person</h2>
+    <p id="owed-total">Waiting for statement data…</p>
+    <p id="statement-note">
+      This is a charge split, not a card-payment amount. Positive posted card
+      charges are assigned to the person identified by a matching iPhone event;
+      unmatched charges default to the primary person. Payments, refunds, and
+      other credits do not reduce either person's share. Unresolved Wallet
+      events are held for review.
+    </p>
+    <button id="refresh-plaid" type="button">Sync Plaid now</button>
+    <button id="enable-liabilities" type="button">
+      Connect statement data (Plaid consent)
+    </button>
+    <button id="link-card" type="button">
+      + Link a new credit card
+    </button>
+    <p>
+      Sync Plaid now refreshes transactions only. To load the current statement
+      date and balance, choose Connect statement data, then click Continue to
+      login in Plaid Link. Choose &quot;+ Link a new credit card&quot; to connect
+      another bank or credit card to the list so its transactions are tracked.
+    </p>
+    <ul id="cycle-list"></ul>
+    <h3>Connected credit cards & institutions</h3>
+    <ul id="card-connections-list"></ul>
+    <h3>Household people</h3>
+    <ul id="people-list"></ul>
+    <form id="add-person-form">
+      <label>
+        Add a person
+        <input name="display_name" maxlength="100" required>
+      </label>
+      <button type="submit">Add person</button>
+    </form>
+    <h3>Recent posted transactions</h3>
+    <ul id="transaction-list"></ul>
+  </section>
+
+  <form id="event-form" hidden>
+    <label>
+      Amount
+      <input name="amount" type="number" min="0.01" step="0.01" value="12.34" required>
+    </label>
+    <label>
+      Merchant
+      <input name="merchant" maxlength="200" value="Google sign-in test" required>
+    </label>
+    <label>
+      Card label
+      <input name="card_label" maxlength="100" value="test-card" required>
+    </label>
+    <label>
+      Payment label
+      <input name="payment_label" maxlength="100" value="testing" required>
+    </label>
+    <button type="submit">Save test event</button>
+  </form>
+
+  <section id="device-enrollment" hidden>
+    <h2>Connect an iPhone Shortcut</h2>
+    <p>Create a device-specific key once, then put it in that phone's Shortcut Authorization header.</p>
+    <label>
+      Device name
+      <input id="device-label" maxlength="100" value="Partner iPhone" required>
+    </label>
+    <label>
+      Assign Wallet events from this device to
+      <select id="device-person" required>
+        <option value="" selected disabled>Select a household person</option>
+      </select>
+    </label>
+    <button id="create-device-token" type="button">Create iPhone key</button>
+    <div id="device-token-result" hidden>
+      <p>This key is shown only once. Copy it now and store it privately.</p>
+      <textarea id="device-token" rows="4" readonly></textarea>
+      <button id="copy-device-token" type="button">Copy key</button>
+      <p>Shortcut header: <code>Authorization: Bearer &lt;key&gt;</code></p>
+      <p>POST URL: <code>https://creditcards-beige.vercel.app/api/card-events</code></p>
+    </div>
+    <h3>Registered devices</h3>
+    <ul id="device-list"></ul>
+  </section>
+
+  <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+  <script type="module">
+    import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+    const status = document.querySelector("#status");
+    const signIn = document.querySelector("#sign-in");
+    const signOut = document.querySelector("#sign-out");
+    const eventForm = document.querySelector("#event-form");
+    const deviceEnrollment = document.querySelector("#device-enrollment");
+    const createDeviceToken = document.querySelector("#create-device-token");
+    const deviceTokenResult = document.querySelector("#device-token-result");
+    const deviceTokenField = document.querySelector("#device-token");
+    const deviceList = document.querySelector("#device-list");
+    const dashboard = document.querySelector("#household-dashboard");
+    const peopleList = document.querySelector("#people-list");
+    const devicePerson = document.querySelector("#device-person");
+    const cycleList = document.querySelector("#cycle-list");
+    const cardConnectionsList = document.querySelector("#card-connections-list");
+    const linkCard = document.querySelector("#link-card");
+    const transactionList = document.querySelector("#transaction-list");
+    let supabase;
+    let authStorageKey;
+    let householdPeople = [];
+    let currentSession;
+
+    function showSignedIn(session) {
+      currentSession = session;
+      signIn.hidden = true;
+      signOut.hidden = false;
+      eventForm.hidden = false;
+      deviceEnrollment.hidden = false;
+      dashboard.hidden = false;
+      status.textContent = `Signed in. Account user ID: ${session.user.id}`;
+      loadHousehold(session);
+    }
+
+    try {
+      const configResponse = await fetch("/api/public-config");
+      if (!configResponse.ok) {
+        throw new Error(`Could not load app configuration (HTTP ${configResponse.status}).`);
+      }
+      const config = await configResponse.json();
+      const projectRef = new URL(config.supabase_url).hostname.split(".")[0];
+      authStorageKey = `sb-${projectRef}-auth-token`;
+      supabase = createClient(
+        config.supabase_url,
+        config.supabase_publishable_key,
+      );
+
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      if (data.session) {
+        showSignedIn(data.session);
+      } else {
+        status.textContent = "Sign in to create an event linked to your account.";
+      }
+    } catch (error) {
+      status.textContent = `Setup error: ${error.message}`;
+      signIn.disabled = true;
+    }
+
+    signIn.addEventListener("click", async () => {
+      signIn.disabled = true;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${location.origin}/login` },
+      });
+      if (error) {
+        status.textContent = `Google sign-in failed: ${error.message}`;
+        signIn.disabled = false;
+      }
+    });
+
+    signOut.addEventListener("click", async () => {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        status.textContent = `Sign-out failed: ${error.message}`;
+        return;
+      }
+      signIn.hidden = false;
+      signIn.disabled = false;
+      signOut.hidden = true;
+      eventForm.hidden = true;
+      deviceEnrollment.hidden = true;
+      dashboard.hidden = true;
+      deviceTokenResult.hidden = true;
+      deviceTokenField.value = "";
+      status.textContent = "Signed out.";
+    });
+
+    createDeviceToken.addEventListener("click", async () => {
+      const { data, error } = await supabase.auth.getSession();
+      if (error || !data.session) {
+        status.textContent = "Your session expired. Sign in again.";
+        return;
+      }
+
+      createDeviceToken.disabled = true;
+      status.textContent = "Creating device key…";
+      try {
+        const response = await fetch("/api/device-tokens", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${data.session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            device_label: document.querySelector("#device-label").value,
+            person_id: devicePerson.value,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.detail || `Request failed (HTTP ${response.status}).`);
+        }
+        deviceTokenField.value = result.device_token;
+        deviceTokenResult.hidden = false;
+        status.textContent =
+          `Created key for ${result.device_label}, linked to ${data.session.user.id}.`;
+        await loadDeviceTokens(data.session);
+      } catch (error) {
+        status.textContent = `Could not create device key: ${error.message}`;
+      } finally {
+        createDeviceToken.disabled = false;
+      }
+    });
+
+    document.querySelector("#copy-device-token").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(deviceTokenField.value);
+        status.textContent = "Device key copied. Paste it into the iPhone Shortcut now.";
+      } catch (error) {
+        status.textContent = `Could not copy key: ${error.message}. Select and copy it manually.`;
+      }
+    });
+
+    async function loadDeviceTokens(session) {
+      try {
+        const response = await fetch("/api/device-tokens", {
+          headers: { "Authorization": `Bearer ${session.access_token}` },
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.detail || `Request failed (HTTP ${response.status}).`);
+        }
+        deviceList.replaceChildren();
+        for (const device of result.devices) {
+          const item = document.createElement("li");
+          const label = document.createElement("span");
+          label.textContent =
+            `${device.device_label} — ${device.revoked_at ? "revoked" : "active"}`;
+          item.append(label);
+          if (!device.revoked_at) {
+            const personSelect = document.createElement("select");
+            const unassigned = document.createElement("option");
+            unassigned.value = "";
+            unassigned.textContent = "Select person for this device";
+            personSelect.append(unassigned);
+            for (const person of householdPeople) {
+              const option = document.createElement("option");
+              option.value = person.person_id;
+              option.textContent = person.display_name;
+              personSelect.append(option);
+            }
+            personSelect.value = device.person_id || "";
+            const assign = document.createElement("button");
+            assign.type = "button";
+            assign.textContent = "Save device person";
+            assign.addEventListener("click", async () => {
+              if (!personSelect.value) {
+                status.textContent = "Choose a person for this device first.";
+                return;
+              }
+              assign.disabled = true;
+              try {
+                await apiRequest(
+                  `/api/device-tokens/${device.id}/person`,
+                  session,
+                  {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ person_id: personSelect.value }),
+                  },
+                );
+                status.textContent =
+                  `Device assigned to ${personSelect.selectedOptions[0].textContent}.`;
+                await loadDeviceTokens(session);
+              } catch (error) {
+                status.textContent = `Could not assign device: ${error.message}`;
+              } finally {
+                assign.disabled = false;
+              }
+            });
+            item.append(personSelect, assign);
+            const revoke = document.createElement("button");
+            revoke.type = "button";
+            revoke.textContent = "Revoke";
+            revoke.addEventListener("click", async () => {
+              revoke.disabled = true;
+              try {
+                const revokeResponse = await fetch(`/api/device-tokens/${device.id}`, {
+                  method: "DELETE",
+                  headers: { "Authorization": `Bearer ${session.access_token}` },
+                });
+                const revokeResult = await revokeResponse.json();
+                if (!revokeResponse.ok) {
+                  throw new Error(
+                    revokeResult.detail || `Request failed (HTTP ${revokeResponse.status}).`,
+                  );
+                }
+                status.textContent = `Revoked key for ${device.device_label}.`;
+                await loadDeviceTokens(session);
+              } catch (error) {
+                status.textContent = `Could not revoke key: ${error.message}`;
+                revoke.disabled = false;
+              }
+            });
+            item.append(revoke);
+          }
+          deviceList.append(item);
+        }
+      } catch (error) {
+        status.textContent = `Could not load registered devices: ${error.message}`;
+      }
+    }
+
+    async function apiRequest(path, session, options = {}) {
+      session = await getCurrentSession(session);
+      const storedSession = localStorage.getItem(authStorageKey);
+      const storedToken = storedSession
+        ? JSON.parse(storedSession).access_token?.trim()
+        : null;
+      const requestToken = storedToken || session.access_token;
+      options.headers = {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${requestToken}`,
+      };
+      const response = await fetch(path, {
+        ...options,
+        headers: {
+          "Authorization": `******}`,
+          ...(options.headers || {}),
+        },
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || `Request failed (HTTP ${response.status}).`);
+      }
+      return result;
+    }
+
+    async function getCurrentSession(session) {
+      const storedSession = localStorage.getItem(authStorageKey);
+      const storedAccessToken = storedSession
+        ? JSON.parse(storedSession).access_token?.trim()
+        : null;
+      let { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      let current = data.session || session;
+      let accessToken = storedAccessToken || current?.access_token?.trim();
+      if (!accessToken) {
+        ({ data, error } = await supabase.auth.refreshSession());
+        if (error) throw error;
+        current = data.session || current;
+        accessToken = current?.access_token?.trim();
+      }
+      if (!accessToken) {
+        throw new Error("Your session expired. Sign in again.");
+      }
+      return { ...current, access_token: accessToken };
+    }
+
+    async function loadHousehold(session) {
+      try {
+        session = await getCurrentSession(session);
+        currentSession = session;
+        const result = await apiRequest("/api/household/people", session);
+        householdPeople = result.people;
+        peopleList.replaceChildren();
+        devicePerson.replaceChildren();
+        const choosePerson = document.createElement("option");
+        choosePerson.value = "";
+        choosePerson.textContent = "Select a household person";
+        choosePerson.disabled = true;
+        choosePerson.selected = true;
+        devicePerson.append(choosePerson);
+        for (const person of householdPeople) {
+          const item = document.createElement("li");
+          item.textContent = `${person.display_name}${person.is_default ? " (default)" : ""}`;
+          peopleList.append(item);
+
+          const option = document.createElement("option");
+          option.value = person.person_id;
+          option.textContent = person.display_name;
+          devicePerson.append(option);
+        }
+        await loadDeviceTokens(session);
+        await Promise.all([
+          loadCardConnections(session),
+          loadStatementCycles(session),
+          loadTransactions(session),
+        ]);
+      } catch (error) {
+        status.textContent = `Could not load household data: ${error.message}`;
+      }
+    }
+
+    async function loadCardConnections(session) {
+      try {
+        const result = await apiRequest("/api/plaid/items", session);
+        cardConnectionsList.replaceChildren();
+        if (!result.items || result.items.length === 0) {
+          const item = document.createElement("li");
+          item.textContent = "No cards connected yet. Click '+ Link a new credit card' above.";
+          cardConnectionsList.append(item);
+          return;
+        }
+        for (const conn of result.items) {
+          const item = document.createElement("li");
+          item.textContent = `${conn.institution_name || "Connected institution"} (${conn.status || "connected"})`;
+          cardConnectionsList.append(item);
+        }
+      } catch (error) {
+        console.error("Could not load card connections:", error);
+      }
+    }
+
+    async function loadStatementCycles(session) {
+      const result = await apiRequest("/api/owed/statement-cycles", session);
+      cycleList.replaceChildren();
+      if (result.total_status === "WAITING_FOR_STATEMENTS") {
+        const liabilityState = result.liabilities;
+        document.querySelector("#owed-total").textContent = liabilityState?.status === "unavailable"
+          ? `Plaid statement data unavailable (${liabilityState.reason}). ` +
+            "Use the consent button or check card-issuer support."
+          : liabilityState?.status === "synced" &&
+            Number(liabilityState.statement_count) < Number(liabilityState.account_count)
+            ? `Plaid returned statement information for ${liabilityState.statement_count} of ` +
+              `${liabilityState.account_count} credit card account(s). Check issuer support.`
+            : "A prior statement date is needed; enter the previous statement close date below.";
+      } else if (result.total_status === "MULTI_CURRENCY") {
+        document.querySelector("#owed-total").textContent =
+          `Totals by currency: ${JSON.stringify(result.totals_by_currency)}`;
+      } else {
+        const currency = Object.keys(result.totals_by_currency)[0] || "USD";
+        document.querySelector("#owed-total").textContent = result.current_total_owed == null
+          ? "Waiting for a complete statement cycle for every connected card."
+          : `${result.primary_person?.display_name || "Primary member"}'s assigned charges: ` +
+            `${Number(result.current_total_owed).toLocaleString(undefined, {
+              style: "currency",
+              currency,
+            })}` +
+            `${result.total_status === "REVIEW" ? " — review required" : ""}`;
+      }
+      for (const cycle of result.accounts) {
+        const item = document.createElement("li");
+        const statementBalance = cycle.statement_balance == null
+          ? "statement balance unavailable"
+          : `statement balance ${cycle.currency} ${Number(cycle.statement_balance).toFixed(2)}`;
+        const assignedAmount = cycle.amount_owed == null
+          ? "assigned amount not calculated yet"
+          : `primary assigned charges ${cycle.currency} ${Number(cycle.amount_owed).toFixed(2)}`;
+        item.textContent =
+          `${cycle.account_name}: ${cycle.cycle_start_date || "—"} to ` +
+          `${cycle.cycle_end_date}; ${statementBalance}; ${assignedAmount}; ${cycle.status}; ` +
+          `${cycle.review_event_count} item(s) to review`;
+        if (!cycle.cycle_start_date && cycle.cycle_end_date) {
+          const form = document.createElement("form");
+          const label = document.createElement("label");
+          label.textContent = "Previous statement close date ";
+          const input = document.createElement("input");
+          input.type = "date";
+          input.max = cycle.cycle_end_date;
+          input.required = true;
+          const button = document.createElement("button");
+          button.type = "submit";
+          button.textContent = "Calculate this cycle";
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            button.disabled = true;
+            try {
+              await apiRequest(
+                `/api/plaid-credit-accounts/${encodeURIComponent(cycle.account_id)}/cycle-start`,
+                session,
+                {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ cycle_start_date: input.value }),
+                },
+              );
+              await loadStatementCycles(session);
+              status.textContent =
+                `Statement cycle updated using ${input.value} as the prior close date.`;
+            } catch (error) {
+              status.textContent = `Could not set prior statement date: ${error.message}`;
+            } finally {
+              button.disabled = false;
+            }
+          });
+          form.append(label, input, button);
+          item.append(form);
+        }
+        cycleList.append(item);
+      }
+    }
+
+    async function loadTransactions(session) {
+      const result = await apiRequest("/api/plaid-transactions?limit=100", session);
+      transactionList.replaceChildren();
+      const peopleById = new Map(
+        householdPeople.map((person) => [person.person_id, person]),
+      );
+      for (const transaction of result.transactions) {
+        if (transaction.pending) continue;
+        const item = document.createElement("li");
+        item.className = "transaction";
+        const label = document.createElement("div");
+        label.textContent =
+          `${transaction.date || "Undated"} · ` +
+          `${transaction.merchant_name || transaction.name || "Unknown merchant"} · ` +
+          `${transaction.iso_currency_code || ""} ${transaction.amount}`;
+        const select = document.createElement("select");
+        for (const person of householdPeople) {
+          const option = document.createElement("option");
+          option.value = person.person_id;
+          option.textContent =
+            `${person.display_name}${person.is_default ? " (default)" : ""}`;
+          select.append(option);
+        }
+        select.value = transaction.assigned_person_id;
+        select.addEventListener("change", async () => {
+          select.disabled = true;
+          try {
+            await apiRequest(
+              `/api/plaid-transactions/${encodeURIComponent(transaction.transaction_id)}/assignment`,
+              session,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ person_id: select.value }),
+              },
+            );
+            status.textContent =
+              `Assigned transaction to ${peopleById.get(select.value)?.display_name}.`;
+            await loadStatementCycles(session);
+          } catch (error) {
+            status.textContent = `Could not assign transaction: ${error.message}`;
+            select.value = transaction.assigned_person_id;
+          } finally {
+            select.disabled = false;
+          }
+        });
+        item.append(label, select);
+        transactionList.append(item);
+      }
+    }
+
+    document.querySelector("#add-person-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const values = new FormData(form);
+      try {
+        await apiRequest("/api/household/people", currentSession, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display_name: values.get("display_name") }),
+        });
+        form.reset();
+        await loadHousehold(currentSession);
+        status.textContent = "Household person added.";
+      } catch (error) {
+        status.textContent = `Could not add person: ${error.message}`;
+      }
+    });
+
+    document.querySelector("#refresh-plaid").addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      status.textContent = "Syncing Plaid transactions and statement data…";
+      try {
+        const result = await apiRequest(
+          "/api/plaid-transactions/sync-now",
+          currentSession,
+          { method: "POST" },
+        );
+        await loadHousehold(currentSession);
+        status.textContent =
+          `Plaid sync complete. ${result.added} added, ${result.modified} updated; ` +
+          `liability data: ${result.liabilities.status}.`;
+      } catch (error) {
+        status.textContent = `Plaid sync failed: ${error.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.querySelector("#enable-liabilities").addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      status.textContent = "Preparing Plaid consent…";
+      try {
+        const result = await apiRequest(
+          "/api/plaid/liabilities/link-token",
+          currentSession,
+          { method: "POST" },
+        );
+        if (!window.Plaid) {
+          throw new Error("Plaid Link did not load. Check your connection and retry.");
+        }
+        const handler = window.Plaid.create({
+          token: result.link_token,
+          onSuccess: async () => {
+            status.textContent = "Consent complete. Syncing statement data…";
+            try {
+              const syncResult = await apiRequest(
+                "/api/plaid-transactions/sync-now",
+                currentSession,
+                { method: "POST" },
+              );
+              await loadHousehold(currentSession);
+              status.textContent =
+                `Plaid update complete. Statement data: ` +
+                `${syncResult.liabilities.status}.`;
+            } catch (error) {
+              status.textContent =
+                `Consent succeeded, but Plaid sync failed: ${error.message}`;
+            }
+          },
+          onExit: (error) => {
+            if (error) {
+              status.textContent =
+                `Plaid Link closed with an error: ${error.error_code || "unknown error"}.`;
+            }
+          },
+        });
+        handler.open();
+        status.textContent = "Complete the Plaid consent flow in the window.";
+      } catch (error) {
+        status.textContent = `Could not start Plaid consent: ${error.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    linkCard.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      status.textContent = "Preparing Plaid Link session...";
+      try {
+        const result = await apiRequest(
+          "/api/plaid/items/link-token?platform=web",
+          currentSession,
+          { method: "POST" },
+        );
+        if (!window.Plaid) {
+          throw new Error("Plaid Link did not load. Check your internet connection and retry.");
+        }
+        const handler = window.Plaid.create({
+          token: result.link_token,
+          onSuccess: async (public_token, metadata) => {
+            status.textContent = "Card connected. Saving connection and syncing transactions...";
+            try {
+              await apiRequest(
+                "/api/plaid/items/exchange",
+                currentSession,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    public_token,
+                    institution_id: metadata?.institution?.institution_id || null,
+                    institution_name: metadata?.institution?.name || "Linked institution",
+                    platform: "web",
+                  }),
+                },
+              );
+              await loadHousehold(currentSession);
+              status.textContent = `Successfully linked ${metadata?.institution?.name || "card"}! Transactions synced.`;
+            } catch (err) {
+              status.textContent = `Failed to save card: ${err.message}`;
+            }
+          },
+          onExit: (error) => {
+            if (error) {
+              status.textContent = `Plaid Link closed: ${error.display_message || error.error_code || "canceled"}`;
+            }
+          },
+        });
+        handler.open();
+        status.textContent = "Complete connecting your credit card in Plaid Link...";
+      } catch (error) {
+        status.textContent = `Could not start card linking: ${error.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    eventForm.addEventListener("submit", async (submitEvent) => {
+      submitEvent.preventDefault();
+      const { data, error } = await supabase.auth.getSession();
+      if (error || !data.session) {
+        status.textContent = "Your session expired. Sign in again.";
+        return;
+      }
+
+      const values = new FormData(eventForm);
+      const payload = {
+        event_id: crypto.randomUUID(),
+        occurred_at: new Date().toISOString(),
+        amount: Number(values.get("amount")),
+        currency: "USD",
+        merchant: values.get("merchant"),
+        card_label: values.get("card_label"),
+        payment_label: values.get("payment_label"),
+      };
+      status.textContent = "Saving event…";
+
+      try {
+        const response = await fetch("/api/card-events", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${data.session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.detail || `Request failed (HTTP ${response.status}).`);
+        }
+        status.textContent =
+          `Saved event ${result.event_id} for user ${result.user_id}. ` +
+          "Check public.card_events in Supabase.";
+      } catch (error) {
+        status.textContent = `Save failed: ${error.message}`;
+      }
+    });
+  </script>
+</body>
+</html>

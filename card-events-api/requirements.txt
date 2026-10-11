@@ -1,0 +1,3 @@
+fastapi
+uvicorn
+plaid-python==45.0.0
