@@ -6,8 +6,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 abstract interface class LedgerApi {
   String get apiBaseUrl;
-  Future<List<HouseholdPerson>> loadPeople();
-  Future<void> createPerson(String displayName);
+  Future<List<HouseholdMember>> loadHouseholdMembers();
+  Future<List<HouseholdPerson>> loadHouseholdPeople();
+  Future<void> createHouseholdPerson(String displayName, {bool isDefault = false});
+  Future<void> updateHouseholdPerson(String personId, String displayName, {bool? isDefault});
+  Future<void> deleteHouseholdPerson(String personId);
+  Future<void> addHouseholdMember(String userId);
   Future<DeviceCaptureCredentials> createGooglePayDeviceToken(String personId);
   Future<void> revokeDeviceToken(String deviceId);
   Future<List<CardTransaction>> loadTransactions();
@@ -27,6 +31,8 @@ abstract interface class LedgerApi {
     String? displayName,
   );
   Future<void> assignTransaction(String transactionId, String? personId);
+  Future<void> setTransactionHouseholdVisible(String transactionId, bool visible);
+  Future<void> setEventHouseholdVisible(String eventId, bool visible);
 }
 
 class DeviceCaptureCredentials {
@@ -79,6 +85,34 @@ class HybridLedgerApi implements LedgerApi {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> _patch(String path, Map<String, dynamic> body) async {
+    final response = await _client.patch(
+      Uri.parse('$_baseUrl$path'),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    _decodeResponse(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> _delete(String path) async {
+    final response = await _client.delete(
+      Uri.parse('$_baseUrl$path'),
+      headers: _headers(),
+    );
+    _decodeResponse(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> _edgeGet(String path) async {
+    final response = await _client.get(
+      Uri.parse('$_baseUrl$path'),
+      headers: _headers(),
+    );
+    _decodeResponse(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   void _decodeResponse(http.Response response) {
     dynamic decoded;
     try {
@@ -110,34 +144,56 @@ class HybridLedgerApi implements LedgerApi {
   }
 
   @override
-  Future<List<HouseholdPerson>> loadPeople() async {
-    final userId = _currentUserId();
-    try {
-      final data = await supabase
-          .from('household_people')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', ascending: true)
-          .order('person_id', ascending: true);
-      return (data as List?)
-          ?.map((row) => HouseholdPerson.fromJson(row))
-          .toList(growable: false) ??
-          [];
-    } catch (error) {
-      throw LedgerApiException('Could not load household members: $error');
+  Future<List<HouseholdMember>> loadHouseholdMembers() async {
+    final payload = await _edgeGet('/api/household/members');
+    final members = _records(payload, 'members');
+    return members.map((m) => HouseholdMember.fromJson(m)).toList(growable: false);
+  }
+
+  @override
+  Future<List<HouseholdPerson>> loadHouseholdPeople() async {
+    final payload = await _edgeGet('/api/household/people');
+    final people = _records(payload, 'people');
+    return people.map((p) => HouseholdPerson.fromJson(p)).toList(growable: false);
+  }
+
+  @override
+  Future<void> createHouseholdPerson(String displayName, {bool isDefault = false}) async {
+    final payload = await _post(
+      '/api/household/people',
+      {'display_name': displayName.trim(), 'is_default': isDefault},
+    );
+    if (!payload['ok']) {
+      throw LedgerApiException('Could not add household person.');
     }
   }
 
   @override
-  Future<void> createPerson(String displayName) async {
-    final userId = _currentUserId();
-    try {
-      await supabase.from('household_people').insert({
-        'user_id': userId,
-        'display_name': displayName.trim(),
-        'is_default': false,
-      });
-    } catch (error) {
+  Future<void> updateHouseholdPerson(String personId, String displayName, {bool? isDefault}) async {
+    final payload = await _patch(
+      '/api/household/people/$personId',
+      {'display_name': displayName.trim(), if (isDefault != null) 'is_default': isDefault},
+    );
+    if (!payload['ok']) {
+      throw LedgerApiException('Could not update household person.');
+    }
+  }
+
+  @override
+  Future<void> deleteHouseholdPerson(String personId) async {
+    final payload = await _delete('/api/household/people/$personId');
+    if (!payload['ok']) {
+      throw LedgerApiException('Could not delete household person.');
+    }
+  }
+
+  @override
+  Future<void> addHouseholdMember(String userId) async {
+    final payload = await _post(
+      '/api/household/members',
+      {'user_id': userId},
+    );
+    if (!payload['ok']) {
       throw LedgerApiException('Could not add household member.');
     }
   }
@@ -168,10 +224,10 @@ class HybridLedgerApi implements LedgerApi {
 
     try {
       await supabase
-          .from('household_people')
-          .select('person_id')
+          .from('household_members')
+          .select('user_id')
           .eq('user_id', userId)
-          .eq('person_id', personId)
+          .eq('user_id', personId)
           .limit(1);
     } catch (error) {
       throw LedgerApiException('Could not verify household member: $error');
@@ -232,15 +288,6 @@ class HybridLedgerApi implements LedgerApi {
     final payload = await _edgeGet('/api/plaid-transactions');
     final transactions = _records(payload, 'transactions');
     return transactions.map(CardTransaction.fromJson).toList(growable: false);
-  }
-
-  Future<Map<String, dynamic>> _edgeGet(String path) async {
-    final response = await _client.get(
-      Uri.parse('$_baseUrl$path'),
-      headers: _headers(),
-    );
-    _decodeResponse(response);
-    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
   @override
@@ -373,6 +420,28 @@ class HybridLedgerApi implements LedgerApi {
       throw LedgerApiException('Could not assign transaction.');
     }
   }
+
+  @override
+  Future<void> setTransactionHouseholdVisible(String transactionId, bool visible) async {
+    final payload = await _patch(
+      '/api/plaid-transactions/$transactionId/household-visible',
+      {'household_visible': visible},
+    );
+    if (!payload['ok']) {
+      throw LedgerApiException('Could not update transaction visibility.');
+    }
+  }
+
+  @override
+  Future<void> setEventHouseholdVisible(String eventId, bool visible) async {
+    final payload = await _patch(
+      '/api/card-events/$eventId/household-visible',
+      {'household_visible': visible},
+    );
+    if (!payload['ok']) {
+      throw LedgerApiException('Could not update event visibility.');
+    }
+  }
 }
 
 List<Map<String, dynamic>> _records(Map<String, dynamic> payload, String key) {
@@ -414,9 +483,29 @@ class HouseholdPerson {
 
   factory HouseholdPerson.fromJson(Map<String, dynamic> json) {
     return HouseholdPerson(
-      id: json['person_id'] as String,
+      id: json['id'] as String? ?? json['person_id'] as String,
       displayName: json['display_name'] as String,
       isDefault: json['is_default'] as bool? ?? false,
+    );
+  }
+}
+
+class HouseholdMember {
+  const HouseholdMember({
+    required this.userId,
+    required this.role,
+    required this.joinedAt,
+  });
+
+  final String userId;
+  final String role;
+  final String joinedAt;
+
+  factory HouseholdMember.fromJson(Map<String, dynamic> json) {
+    return HouseholdMember(
+      userId: json['user_id'] as String,
+      role: json['role'] as String,
+      joinedAt: json['joined_at'] as String,
     );
   }
 }

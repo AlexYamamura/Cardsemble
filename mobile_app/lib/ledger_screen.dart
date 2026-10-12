@@ -200,13 +200,15 @@ Future<void> _closeSettings() async {
       _error = null;
     });
     try {
-      late List<HouseholdPerson> people;
+      late List<HouseholdMember> householdMembers;
+      late List<HouseholdPerson> householdPeople;
       late List<CardTransaction> transactions;
       late List<CardEventRecord> events;
       late List<PlaidConnection> plaidConnections;
       late StatementCycleSummary summary;
       await Future.wait<void>([
-        widget.api.loadPeople().then<void>((value) => people = value),
+        widget.api.loadHouseholdMembers().then<void>((value) => householdMembers = value),
+        widget.api.loadHouseholdPeople().then<void>((value) => householdPeople = value),
         widget.api.loadTransactions().then<void>(
           (value) => transactions = value,
         ),
@@ -217,13 +219,22 @@ Future<void> _closeSettings() async {
         widget.api.loadStatementCycles().then<void>((value) => summary = value),
       ]);
       if (!mounted) return;
+      // Combine household members and people for assignment dropdown
+      final allPeople = <HouseholdPerson>[
+        ...householdPeople,
+        ...householdMembers.map((m) => HouseholdPerson(
+          id: m.userId,
+          displayName: m.userId, // Will be resolved via user lookup
+          isDefault: false,
+        )),
+      ];
       setState(() {
-        _people = people;
+        _people = allPeople;
         _transactions = transactions;
         _events = events;
         _plaidConnections = plaidConnections;
         _statementSummary = summary;
-        _capturePersonId ??= people
+        _capturePersonId ??= allPeople
             .where((person) => person.isDefault)
             .firstOrNull
             ?.id;
@@ -417,11 +428,11 @@ Future<void> _closeSettings() async {
       _error = null;
     });
     try {
-      await widget.api.createPerson(displayName);
+      await widget.api.createHouseholdPerson(displayName);
       await _refresh();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$displayName added to the household.')),
+        SnackBar(content: Text('$displayName added as household person.')),
       );
     } catch (error) {
       if (!mounted) return;
