@@ -1,0 +1,1737 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// supabase/functions/_shared/supabase.ts
+import { createClient } from "jsr:@supabase/supabase-js@2";
+function createSupabaseAdmin() {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) {
+    throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set");
+  }
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
+}
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createSupabaseAdmin();
+  }
+  return _supabase;
+}
+var _supabase, supabase;
+var init_supabase = __esm({
+  "supabase/functions/_shared/supabase.ts"() {
+    _supabase = null;
+    supabase = new Proxy({}, {
+      get(_target, prop) {
+        return getSupabase()[prop];
+      }
+    });
+  }
+});
+
+// supabase/functions/_shared/auth.ts
+var auth_exports = {};
+__export(auth_exports, {
+  ApiError: () => ApiError,
+  authenticateRequest: () => authenticateRequest,
+  badRequest: () => badRequest,
+  clearDefaultPersonCache: () => clearDefaultPersonCache,
+  ensureDefaultPerson: () => ensureDefaultPerson,
+  forbidden: () => forbidden,
+  genericError: () => genericError,
+  getBearerToken: () => getBearerToken,
+  getDefaultPerson: () => getDefaultPerson,
+  getHouseholdPerson: () => getHouseholdPerson,
+  notFound: () => notFound,
+  verifySupabaseUser: () => verifySupabaseUser
+});
+function getBearerToken(authorization) {
+  const parts = (authorization || "").split(" ");
+  if (parts.length !== 2 || parts[0]?.toLowerCase() !== "bearer" || !parts[1]) {
+    throw new Error("401: Bearer token required");
+  }
+  return parts[1];
+}
+async function verifySupabaseUser(token) {
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) {
+    throw new Error("401: Invalid or expired Supabase session");
+  }
+  if (!user.id) {
+    throw new Error("502: Supabase Auth returned an invalid user");
+  }
+  return user.id;
+}
+async function authenticateRequest(authorization) {
+  const token = getBearerToken(authorization);
+  const testToken = Deno.env.get("CARD_EVENTS_API_TOKEN");
+  if (testToken && token === testToken) {
+    return { userId: null, authSource: "test_api_token" };
+  }
+  try {
+    const userId = await verifySupabaseUser(token);
+    return { userId, authSource: "supabase_auth" };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("401:")) {
+    } else {
+      throw error;
+    }
+  }
+  const hashBuffer = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(token)
+  );
+  const tokenHash = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const { data: rows, error: dbError } = await supabase.from("device_tokens").select("user_id").eq("token_hash", tokenHash).is("revoked_at", null).limit(1);
+  if (dbError) {
+    throw new Error(`502: ${dbError.message}`);
+  }
+  if (rows && rows.length > 0) {
+    return { userId: rows[0].user_id, authSource: "device_token" };
+  }
+  throw new Error("401: Invalid, expired, or revoked bearer token");
+}
+async function ensureDefaultPerson(userId) {
+  const { data: existing, error } = await supabase.from("household_people").select("*").eq("user_id", userId).eq("is_default", true).limit(1);
+  if (error) throw new Error(`502: ${error.message}`);
+  if (existing && existing.length > 0) {
+    return {
+      person_id: existing[0].person_id,
+      display_name: existing[0].display_name
+    };
+  }
+  const { data: profiles, error: profileError } = await supabase.from("profiles").select("display_name").eq("id", userId).limit(1);
+  if (profileError) throw new Error(`502: ${profileError.message}`);
+  const displayName = profiles && profiles[0]?.display_name ? profiles[0].display_name : "Primary member";
+  const { data: inserted, error: insertError } = await supabase.from("household_people").insert({
+    user_id: userId,
+    display_name: displayName,
+    is_default: true
+  }).select();
+  if (insertError || !inserted || inserted.length === 0) {
+    throw new Error("503: Could not initialize the household's primary member");
+  }
+  return {
+    person_id: inserted[0].person_id,
+    display_name: inserted[0].display_name
+  };
+}
+async function getHouseholdPerson(userId, personId) {
+  const { data, error } = await supabase.from("household_people").select("*").eq("user_id", userId).eq("person_id", personId).limit(1);
+  if (error) throw new Error(`502: ${error.message}`);
+  return data && data.length > 0 ? data[0] : null;
+}
+function clearDefaultPersonCache(userId) {
+  _defaultPersonCache.delete(userId);
+}
+async function getDefaultPerson(userId, useCache = true) {
+  if (useCache && _defaultPersonCache.has(userId)) {
+    return _defaultPersonCache.get(userId);
+  }
+  const person = await ensureDefaultPerson(userId);
+  if (useCache) {
+    _defaultPersonCache.set(userId, person);
+  }
+  return person;
+}
+function genericError(message) {
+  return { statusCode: 502, error: message };
+}
+function badRequest(message) {
+  return { statusCode: 400, error: message };
+}
+function notFound(message) {
+  return { statusCode: 404, error: message };
+}
+function forbidden(message) {
+  return { statusCode: 403, error: message };
+}
+var _defaultPersonCache, ApiError;
+var init_auth = __esm({
+  "supabase/functions/_shared/auth.ts"() {
+    init_supabase();
+    _defaultPersonCache = /* @__PURE__ */ new Map();
+    ApiError = class extends Error {
+      constructor(statusCode, message) {
+        super(message);
+        this.statusCode = statusCode;
+        this.name = "ApiError";
+      }
+      statusCode;
+    };
+  }
+});
+
+// supabase/functions/_shared/reconcile.ts
+var reconcile_exports = {};
+__export(reconcile_exports, {
+  calculateStatementSummaries: () => calculateStatementSummaries,
+  creditCardDisplayName: () => creditCardDisplayName,
+  fetchUserRows: () => fetchUserRows,
+  isGenericCardName: () => isGenericCardName,
+  mappedPlaidCreditCardName: () => mappedPlaidCreditCardName,
+  reconcileUserCardEvents: () => reconcileUserCardEvents,
+  refreshWalletAssignments: () => refreshWalletAssignments,
+  statementIssueDate: () => statementIssueDate
+});
+import { Decimal } from "https://esm.sh/decimal.js@10.4.3";
+async function fetchUserRows(table, userId, options = {}) {
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    let query = supabase.from(table).select("*", { count: "exact" }).eq("user_id", userId);
+    if (options.activeOnly) {
+      query = query.eq("is_removed", false);
+    }
+    if (options.orderBy) {
+      const [column, direction] = options.orderBy.split(".");
+      query = query.order(column, { ascending: direction !== "desc" });
+    }
+    const { data, error } = await query.range(offset, offset + 499);
+    if (error) throw new Error(`Could not fetch ${table}: ${error.message}`);
+    rows.push(...data ?? []);
+    if (!data || data.length < 500) return rows;
+    offset += data.length;
+  }
+}
+function findLongestMatch(a, b, aStart, aEnd, bStart, bEnd) {
+  let bestI = aStart;
+  let bestJ = bStart;
+  let bestSize = 0;
+  const b2j = /* @__PURE__ */ new Map();
+  for (let j = bStart; j < bEnd; j++) {
+    const ch = b[j];
+    if (!b2j.has(ch)) b2j.set(ch, []);
+    b2j.get(ch).push(j);
+  }
+  let j2Len = /* @__PURE__ */ new Map();
+  for (let i = aStart; i < aEnd; i++) {
+    const ch = a[i];
+    const indices = b2j.get(ch);
+    if (!indices) {
+      j2Len.clear();
+      continue;
+    }
+    let newJ2Len = /* @__PURE__ */ new Map();
+    for (const j of indices) {
+      if (j < bStart) continue;
+      if (j >= bEnd) break;
+      const k = (j2Len.get(j - 1) || 0) + 1;
+      newJ2Len.set(j, k);
+      if (k > bestSize) {
+        bestI = i - k + 1;
+        bestJ = j - k + 1;
+        bestSize = k;
+      }
+    }
+    j2Len = newJ2Len;
+  }
+  return [bestI, bestJ, bestSize];
+}
+function sequenceMatcherRatio(a, b) {
+  if (a.length === 0 && b.length === 0) return 1;
+  if (a.length === 0 || b.length === 0) return 0;
+  const total = a.length + b.length;
+  let matches = 0;
+  function findMatches(a1, a2, b1, b2) {
+    const [i, j, k] = findLongestMatch(a, b, a1, a2, b1, b2);
+    if (k > 0) {
+      matches += k;
+      if (i > a1 && j > b1) findMatches(a1, i, b1, j);
+      if (i + k < a2 && j + k < b2) findMatches(i + k, a2, j + k, b2);
+    }
+  }
+  findMatches(0, a.length, 0, b.length);
+  return 2 * matches / total;
+}
+function isGenericCardName(val) {
+  if (!val || typeof val !== "string") return true;
+  return GENERIC_CARD_NAMES.has(val.trim().toLowerCase());
+}
+function creditCardDisplayName(account) {
+  const displayName = account.display_name;
+  if (typeof displayName === "string" && displayName.trim()) {
+    return displayName.trim();
+  }
+  const institutionName = account.institution_name;
+  if (typeof institutionName === "string" && !isGenericCardName(institutionName)) {
+    return institutionName.trim();
+  }
+  const mask = account.mask;
+  if (typeof mask === "string" && mask.trim()) {
+    return `Credit card \u2022\u2022${mask.trim()}`;
+  }
+  return "Credit card";
+}
+function mappedPlaidCreditCardName(officialName, name) {
+  for (const sourceName of [officialName, name]) {
+    if (!sourceName) continue;
+    const key = sourceName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const mapped = PLAID_CREDIT_CARD_NAME_MAPPINGS[key];
+    if (mapped) return mapped;
+  }
+  return null;
+}
+function normalizeMerchant(value) {
+  if (!value) return "";
+  let v = String(value);
+  v = v.normalize("NFKD").replace(/[^\x00-\x7F]/g, "");
+  v = v.toLowerCase();
+  v = v.replace(/^(sq|dd|tst|pos|paypal|venmo)\s*\*?\s*/, "");
+  v = v.replace(/[^a-z0-9]+/g, " ");
+  return v.replace(/\s+/g, " ").trim();
+}
+function merchantMatchScore(event, transaction) {
+  const eventNames = /* @__PURE__ */ new Set();
+  const em = normalizeMerchant(event.merchant);
+  const emn = normalizeMerchant(event.merchant_name);
+  if (em) eventNames.add(em);
+  if (emn) eventNames.add(emn);
+  if (eventNames.size === 0) return 0;
+  const transactionFields = ["merchant_name", "name", "original_description"];
+  const transactionNames = /* @__PURE__ */ new Set();
+  for (const field of transactionFields) {
+    const normalized = normalizeMerchant(transaction[field]);
+    if (normalized) transactionNames.add(normalized);
+  }
+  if (transactionNames.size === 0) return 0;
+  let best = 0;
+  for (const eventName of eventNames) {
+    for (const txName of transactionNames) {
+      if (eventName === txName) return 1;
+      if (eventName.includes(txName) || txName.includes(eventName)) {
+        best = Math.max(best, 0.9);
+      }
+      const eventWords = new Set(eventName.split(" "));
+      const txWords = new Set(txName.split(" "));
+      if (eventWords.size > 0 && txWords.size > 0) {
+        const intersection = new Set([...eventWords].filter((x) => txWords.has(x)));
+        const union = /* @__PURE__ */ new Set([...eventWords, ...txWords]);
+        const overlap = intersection.size / union.size;
+        best = Math.max(best, overlap);
+        if (intersection.size === eventWords.size) {
+          best = Math.max(best, 0.9);
+        }
+      }
+      best = Math.max(best, sequenceMatcherRatio(eventName, txName));
+    }
+  }
+  return best;
+}
+function parseDate(value) {
+  if (!value) return null;
+  try {
+    return new Date(String(value).replace("Z", "+00:00"));
+  } catch {
+    return null;
+  }
+}
+function eventCalendarDate(event) {
+  return parseDate(event.occurred_at);
+}
+function transactionCalendarDate(transaction) {
+  for (const field of ["datetime", "authorized_datetime", "date", "authorized_date"]) {
+    const value = transaction[field];
+    if (!value) continue;
+    const parsed = parseDate(value);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+function reconciliationCandidates(event, transactions) {
+  const eventDate = eventCalendarDate(event);
+  const postedPendingIds = new Set(
+    transactions.filter((tx) => !tx.pending && tx.pending_transaction_id).map((tx) => tx.pending_transaction_id)
+  );
+  const eventCurrency = event.currency;
+  const candidates = [];
+  for (const transaction of transactions) {
+    if (transaction.pending && postedPendingIds.has(transaction.pending_transaction_id)) {
+      continue;
+    }
+    const txCurrency = transaction.iso_currency_code;
+    if (eventCurrency && txCurrency && String(eventCurrency).toUpperCase() !== String(txCurrency).toUpperCase()) {
+      continue;
+    }
+    let amountDifference;
+    try {
+      amountDifference = new Decimal(String(event.amount)).sub(new Decimal(String(transaction.amount))).abs();
+    } catch {
+      continue;
+    }
+    const merchantSimilarity = merchantMatchScore(event, transaction);
+    const txDate = transactionCalendarDate(transaction);
+    const dateDifference = eventDate && txDate ? Math.abs(Math.floor((eventDate.getTime() - txDate.getTime()) / (1e3 * 60 * 60 * 24))) : null;
+    if (dateDifference !== null && dateDifference > 3) continue;
+    if (amountDifference.gt(new Decimal("0.01")) && (merchantSimilarity < 0.6 || dateDifference === null)) {
+      continue;
+    }
+    let score = amountDifference.lte(new Decimal("0.01")) ? 40 : 0;
+    score += merchantSimilarity >= 0.95 ? 40 : merchantSimilarity >= 0.8 ? 30 : merchantSimilarity >= 0.6 ? 20 : merchantSimilarity >= 0.4 ? 10 : 0;
+    score += dateDifference === 0 ? 15 : dateDifference === 1 ? 10 : dateDifference === 2 ? 5 : 0;
+    candidates.push({
+      transaction,
+      score,
+      merchant_similarity: merchantSimilarity,
+      date_difference_days: dateDifference,
+      amount_difference: amountDifference
+    });
+  }
+  return candidates.sort((a, b) => {
+    const pendingDiff = (b.transaction.pending ? 1 : 0) - (a.transaction.pending ? 1 : 0);
+    if (pendingDiff !== 0) return pendingDiff;
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.merchant_similarity !== a.merchant_similarity) {
+      return b.merchant_similarity - a.merchant_similarity;
+    }
+    const aDateDiff = a.date_difference_days ?? 999;
+    const bDateDiff = b.date_difference_days ?? 999;
+    return aDateDiff - bDateDiff;
+  }).slice(0, 5);
+}
+async function reconcileUserCardEvents(userId) {
+  const events = await fetchUserRows("card_events", userId, { orderBy: "event_id.asc" });
+  const transactions = await fetchUserRows("plaid_transactions", userId, {
+    activeOnly: true,
+    orderBy: "transaction_id.asc"
+  });
+  const reconciliations = [];
+  for (const event of events) {
+    const candidates = reconciliationCandidates(event, transactions);
+    const best = candidates.length > 0 ? candidates[0] : null;
+    let status;
+    if (!best) {
+      status = "UNMATCHED";
+    } else if (best.amount_difference.gt(new Decimal("0.01"))) {
+      status = "REVIEW";
+    } else if (best.transaction.pending) {
+      status = "PENDING";
+    } else if (best.score >= 90 && best.merchant_similarity >= 0.8) {
+      status = candidates.length === 1 || best.score - candidates[1].score >= 15 ? "HIGH" : "AMBIGUOUS";
+    } else if (best.score >= 70 && best.merchant_similarity >= 0.6) {
+      status = candidates.length === 1 || best.score - candidates[1].score >= 20 ? "MEDIUM" : "AMBIGUOUS";
+    } else {
+      status = "REVIEW";
+    }
+    const tx = best ? best.transaction : {};
+    reconciliations.push({
+      event_id: event.event_id,
+      user_id: userId,
+      candidate_transaction_id: tx.transaction_id ?? null,
+      status,
+      event_amount: event.amount,
+      plaid_amount: tx.amount ?? null,
+      amount_difference: best ? best.amount_difference.toFixed(2) : null,
+      details: {
+        reasons: best ? [
+          best.amount_difference.lte(new Decimal("0.01")) ? "exact amount" : "Plaid posted amount differs; review required",
+          `merchant similarity ${best.merchant_similarity.toFixed(3)}`
+        ] : ["no compatible Plaid transaction found"],
+        candidate_count: candidates.length
+      },
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
+  for (let i = 0; i < reconciliations.length; i += 500) {
+    const batch = reconciliations.slice(i, i + 500);
+    const { error } = await supabase.from("card_event_reconciliations").upsert(batch, { onConflict: "event_id" });
+    if (error) throw new Error(`Could not save reconciliations: ${error.message}`);
+  }
+  return reconciliations.length;
+}
+async function refreshWalletAssignments(userId) {
+  const events = await fetchUserRows("card_events", userId, { orderBy: "event_id.asc" });
+  const reconciliations = await fetchUserRows("card_event_reconciliations", userId, { orderBy: "event_id.asc" });
+  const assignments = await fetchUserRows("transaction_assignments", userId, { orderBy: "transaction_id.asc" });
+  const eventById = new Map(events.map((e) => [e.event_id, e]));
+  const currentByTx = new Map(assignments.map((a) => [a.transaction_id, a]));
+  const candidatesByTx = /* @__PURE__ */ new Map();
+  for (const result of reconciliations) {
+    const event = eventById.get(result.event_id);
+    const transactionId = result.candidate_transaction_id;
+    if (!event || !event.person_id || !transactionId || !["HIGH", "MEDIUM"].includes(result.status)) continue;
+    const arr = candidatesByTx.get(transactionId) || [];
+    arr.push([event, result]);
+    candidatesByTx.set(transactionId, arr);
+  }
+  const updates = [];
+  const ambiguousReconciliations = [];
+  const desiredTransactionIds = /* @__PURE__ */ new Set();
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  for (const [transactionId, matches] of candidatesByTx) {
+    const current = currentByTx.get(transactionId);
+    if (current && current.assignment_source === "manual") continue;
+    if (matches.length !== 1) {
+      if (current && current.assignment_source === "wallet_event") {
+        await supabase.from("transaction_assignments").delete().eq("transaction_id", transactionId).eq("user_id", userId);
+      }
+      for (const [event2, reconciliation] of matches) {
+        ambiguousReconciliations.push({
+          ...reconciliation,
+          status: "AMBIGUOUS",
+          details: {
+            ...reconciliation.details || {},
+            assignment_issue: "Multiple Wallet events match this Plaid transaction."
+          },
+          updated_at: now
+        });
+      }
+      continue;
+    }
+    const memberIds = new Set(matches.map(([e]) => e.person_id));
+    if (memberIds.size !== 1) continue;
+    const [event] = matches[0];
+    desiredTransactionIds.add(transactionId);
+    updates.push({
+      transaction_id: transactionId,
+      user_id: userId,
+      person_id: event.person_id,
+      assignment_source: "wallet_event",
+      event_id: event.event_id,
+      updated_at: now
+    });
+  }
+  for (const [transactionId, current] of currentByTx) {
+    if (current.assignment_source === "wallet_event" && !desiredTransactionIds.has(transactionId)) {
+      await supabase.from("transaction_assignments").delete().eq("transaction_id", transactionId).eq("user_id", userId);
+    }
+  }
+  if (ambiguousReconciliations.length > 0) {
+    const { error } = await supabase.from("card_event_reconciliations").upsert(ambiguousReconciliations, { onConflict: "event_id" });
+    if (error) throw new Error(`Could not save ambiguous reconciliations: ${error.message}`);
+  }
+  for (let i = 0; i < updates.length; i += 500) {
+    const batch = updates.slice(i, i + 500);
+    const { error } = await supabase.from("transaction_assignments").upsert(batch, { onConflict: "transaction_id" });
+    if (error) throw new Error(`Could not save transaction assignments: ${error.message}`);
+  }
+  return updates.length;
+}
+function statementIssueDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  try {
+    const d = new Date(String(value));
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
+}
+async function calculateStatementSummaries(userId) {
+  const primary = await Promise.resolve().then(() => (init_auth(), auth_exports)).then((m) => m.ensureDefaultPerson(userId));
+  const people = await fetchUserRows("household_people", userId, { orderBy: "created_at.asc,person_id.asc" });
+  const accounts = await fetchUserRows("plaid_credit_accounts", userId, { orderBy: "account_id.asc" });
+  const snapshots = await fetchUserRows("plaid_liability_snapshots", userId, { orderBy: "account_id.asc,statement_issue_date.asc" });
+  const cycleStartOverrides = await fetchUserRows("card_cycle_start_overrides", userId, { orderBy: "account_id.asc,statement_issue_date.asc" });
+  const transactions = await fetchUserRows("plaid_transactions", userId, { activeOnly: true, orderBy: "date.asc,transaction_id.asc" });
+  const assignments = await fetchUserRows("transaction_assignments", userId, { orderBy: "transaction_id.asc" });
+  const events = await fetchUserRows("card_events", userId, { orderBy: "occurred_at.asc,event_id.asc" });
+  const reconciliations = await fetchUserRows("card_event_reconciliations", userId, { orderBy: "event_id.asc" });
+  clearDefaultPersonCache(userId);
+  const peopleById = new Map(people.map((p) => [p.person_id, p]));
+  const assignmentByTx = new Map(assignments.map((a) => [a.transaction_id, a]));
+  const eventsById = new Map(events.map((e) => [e.event_id, e]));
+  const reconciliationByEvent = new Map(reconciliations.map((r) => [r.event_id, r]));
+  const snapshotsByAccount = /* @__PURE__ */ new Map();
+  for (const snapshot of snapshots) {
+    const arr = snapshotsByAccount.get(snapshot.account_id) || [];
+    arr.push(snapshot);
+    snapshotsByAccount.set(snapshot.account_id, arr);
+  }
+  const overridesByCycle = /* @__PURE__ */ new Map();
+  for (const row of cycleStartOverrides) {
+    const key = `${row.account_id}:${String(row.statement_issue_date).slice(0, 10)}`;
+    overridesByCycle.set(key, row);
+  }
+  const transactionsByAccount = /* @__PURE__ */ new Map();
+  for (const transaction of transactions) {
+    const accountId = transaction.account_id;
+    if (accountId) {
+      const arr = transactionsByAccount.get(accountId) || [];
+      arr.push(transaction);
+      transactionsByAccount.set(accountId, arr);
+    }
+  }
+  const summaryRows = [];
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  for (const account of accounts) {
+    const accountId = account.account_id;
+    const accountSnapshots = snapshotsByAccount.get(accountId) || [];
+    if (accountSnapshots.length === 0) continue;
+    const latest = accountSnapshots[accountSnapshots.length - 1];
+    const currentIssueDate = statementIssueDate(latest.statement_issue_date);
+    const prior = accountSnapshots.length > 1 ? accountSnapshots[accountSnapshots.length - 2] : null;
+    let priorIssueDate = prior ? statementIssueDate(prior.statement_issue_date) : null;
+    let cycleStartSource = "plaid";
+    const manualOverride = overridesByCycle.get(`${accountId}:${String(latest.statement_issue_date).slice(0, 10)}`);
+    if (!priorIssueDate && manualOverride) {
+      priorIssueDate = statementIssueDate(manualOverride.cycle_start_date);
+      cycleStartSource = "user_entered";
+    }
+    const base = {
+      user_id: userId,
+      account_id: accountId,
+      statement_issue_date: latest.statement_issue_date,
+      cycle_start_date: priorIssueDate ? priorIssueDate.toISOString().split("T")[0] : null,
+      cycle_end_date: currentIssueDate ? currentIssueDate.toISOString().split("T")[0] : null,
+      primary_person_id: primary.person_id,
+      statement_balance: latest.statement_balance,
+      updated_at: now
+    };
+    if (!priorIssueDate) {
+      summaryRows.push({
+        ...base,
+        status: "NEEDS_PRIOR_STATEMENT",
+        amount_owed: null,
+        primary_transaction_count: 0,
+        excluded_transaction_count: 0,
+        excluded_amount: 0,
+        review_event_count: 0,
+        details: {
+          reason: "Enter the prior statement close date to define the complete cycle."
+        }
+      });
+      continue;
+    }
+    const priorIssueDateVal = priorIssueDate;
+    const currentIssueDateVal = currentIssueDate;
+    let primaryTotal = new Decimal(0);
+    let excludedTotal = new Decimal(0);
+    let primaryCount = 0;
+    let excludedCount = 0;
+    const reviewTransactionIds = /* @__PURE__ */ new Set();
+    for (const [eventId, reconciliation] of reconciliations) {
+      if (!["AMBIGUOUS", "REVIEW", "PENDING"].includes(reconciliation.status)) continue;
+      const event = eventsById.get(eventId);
+      if (!event || event.person_id === null) continue;
+      const eventDate = statementIssueDate(event.occurred_at);
+      if (eventDate && priorIssueDateVal.getTime() < eventDate.getTime() && eventDate.getTime() <= currentIssueDateVal.getTime()) {
+        const candidateId = reconciliation.candidate_transaction_id;
+        if (candidateId) reviewTransactionIds.add(candidateId);
+      }
+    }
+    const reviewEventIds = /* @__PURE__ */ new Set();
+    for (const [eventId, event] of eventsById) {
+      const eventDate = statementIssueDate(event.occurred_at);
+      if (event.person_id && eventDate && priorIssueDateVal.getTime() < eventDate.getTime() && eventDate.getTime() <= currentIssueDateVal.getTime()) {
+        const reconciliation = reconciliationByEvent.get(eventId);
+        if (!reconciliation || !["HIGH", "MEDIUM"].includes(reconciliation.status)) {
+          reviewEventIds.add(eventId);
+        }
+      }
+    }
+    let excludedNonChargeCount = 0;
+    for (const transaction of transactionsByAccount.get(accountId) || []) {
+      const txDate = statementIssueDate(transaction.date);
+      if (!txDate || !(priorIssueDateVal.getTime() < txDate.getTime() && txDate.getTime() <= currentIssueDateVal.getTime()) || transaction.pending) continue;
+      const amount = new Decimal(String(transaction.amount));
+      const txCode = String(transaction.transaction_code || "").toLowerCase();
+      if (txCode === "payment" || amount.lte(0)) {
+        excludedNonChargeCount += 1;
+        continue;
+      }
+      const explicit = assignmentByTx.get(transaction.transaction_id);
+      if (reviewTransactionIds.has(transaction.transaction_id) && !(explicit && explicit.assignment_source === "manual")) continue;
+      const assignedPersonId = explicit ? explicit.person_id : primary.person_id;
+      if (assignedPersonId === primary.person_id) {
+        primaryTotal = primaryTotal.plus(amount);
+        primaryCount += 1;
+      } else if (peopleById.has(assignedPersonId)) {
+        excludedTotal = excludedTotal.plus(amount);
+        excludedCount += 1;
+      }
+    }
+    const reviewCount = reviewEventIds.size + reviewTransactionIds.size;
+    summaryRows.push({
+      ...base,
+      status: reviewCount > 0 ? "REVIEW" : "READY",
+      amount_owed: Decimal.max(new Decimal(0), primaryTotal).toFixed(2),
+      primary_transaction_count: primaryCount,
+      excluded_transaction_count: excludedCount,
+      excluded_amount: excludedTotal.toFixed(2),
+      review_event_count: reviewCount,
+      details: {
+        unresolved_event_count: reviewEventIds.size,
+        candidate_transaction_review_count: reviewTransactionIds.size,
+        excluded_non_charge_count: excludedNonChargeCount,
+        amounts_include_positive_posted_charges_only: true,
+        cycle_start_source: cycleStartSource,
+        primary_charge_total: primaryTotal.toFixed(2)
+      }
+    });
+  }
+  for (let i = 0; i < summaryRows.length; i += 500) {
+    const batch = summaryRows.slice(i, i + 500);
+    const { error } = await supabase.from("card_statement_summaries").upsert(batch, { onConflict: "user_id,account_id,statement_issue_date" });
+    if (error) throw new Error(`Could not save statement summaries: ${error.message}`);
+  }
+  return summaryRows.length;
+}
+var GENERIC_CARD_NAMES, PLAID_CREDIT_CARD_NAME_MAPPINGS;
+var init_reconcile = __esm({
+  "supabase/functions/_shared/reconcile.ts"() {
+    init_supabase();
+    init_auth();
+    GENERIC_CARD_NAMES = /* @__PURE__ */ new Set([
+      "credit card",
+      "credit",
+      "card",
+      "existing linked institution",
+      "linked institution",
+      "unknown"
+    ]);
+    PLAID_CREDIT_CARD_NAME_MAPPINGS = {
+      "ultimaterewards": "Chase Freedom Unlimited"
+    };
+  }
+});
+
+// supabase/functions/api/index.ts
+init_supabase();
+init_auth();
+
+// supabase/functions/_shared/plaid.ts
+init_supabase();
+var PLAID_BASE_URL = (Deno.env.get("PLAID_ENV") || "production").toLowerCase() === "sandbox" ? "https://sandbox.plaid.com" : "https://production.plaid.com";
+async function plaidCall(endpoint, body) {
+  const clientId = Deno.env.get("PLAID_CLIENT_ID");
+  const secret = Deno.env.get("PLAID_SECRET");
+  if (!clientId || !secret) {
+    throw new Error("PLAID_CLIENT_ID and PLAID_SECRET must be set");
+  }
+  const response = await fetch(`${PLAID_BASE_URL}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_id: clientId, secret, ...body })
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    const message = err.display_message || err.error_code || response.statusText;
+    const error = new Error(`Plaid API error: ${message}`);
+    error.code = err.error_code;
+    throw error;
+  }
+  return response.json();
+}
+async function createPlaidClient() {
+  const env = (Deno.env.get("PLAID_ENV") || "production").toLowerCase();
+  if (!["production", "sandbox"].includes(env)) {
+    throw new Error("PLAID_ENV must be production or sandbox");
+  }
+  const required = ["PLAID_CLIENT_ID", "PLAID_SECRET"];
+  for (const name of required) {
+    if (!Deno.env.get(name)) {
+      throw new Error(`Plaid API credentials are not configured`);
+    }
+  }
+}
+async function createPlaidLinkToken(userId, platform) {
+  await createPlaidClient();
+  const requestOptions = {
+    user: { client_user_id: userId },
+    client_name: "Card Household",
+    country_codes: ["US"],
+    language: "en",
+    products: ["transactions"],
+    optional_products: ["liabilities"]
+  };
+  if (platform === "android") {
+    requestOptions["android_package_name"] = "com.plaidtest.card_household_app";
+  }
+  const redirectUri = Deno.env.get("PLAID_REDIRECT_URI");
+  if (redirectUri) {
+    requestOptions["redirect_uri"] = redirectUri;
+  }
+  const response = await plaidCall("/link/token/create", requestOptions);
+  return response.link_token;
+}
+async function createLiabilitiesLinkToken(userId) {
+  await createPlaidClient();
+  const accessToken = Deno.env.get("PLAID_ACCESS_TOKEN");
+  if (!accessToken) {
+    throw new Error("Plaid connection is not configured");
+  }
+  const response = await plaidCall("/link/token/create", {
+    user: { client_user_id: userId },
+    client_name: "Credit Cards",
+    country_codes: ["US"],
+    language: "en",
+    access_token: accessToken,
+    additional_consented_products: ["liabilities"]
+  });
+  return response.link_token;
+}
+async function exchangePublicToken(payload, userId) {
+  await createPlaidClient();
+  const [exchange, itemResponse] = await Promise.all([
+    plaidCall("/item/public_token/exchange", {
+      public_token: payload.public_token
+    }),
+    (async () => {
+      const exchange2 = await plaidCall("/item/public_token/exchange", {
+        public_token: payload.public_token
+      });
+      return plaidCall("/item/get", {
+        access_token: exchange2.access_token
+      });
+    })()
+  ]);
+  const itemId = itemResponse.item.item_id;
+  const institutionId = payload.institution_id || itemResponse.item.institution_id;
+  const institutionName = payload.institution_name || "Linked institution";
+  const { error: upsertError } = await supabase.from("plaid_items").upsert({
+    item_id: itemId,
+    user_id: userId,
+    access_token: exchange.access_token,
+    institution_id: institutionId,
+    institution_name: institutionName,
+    status: "connected",
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  }, { onConflict: "item_id" });
+  if (upsertError) {
+    throw new Error("Plaid linked successfully, but its secure connection could not be saved");
+  }
+  const syncResult = await syncPlaidItemsForUser(userId);
+  return {
+    item_id: itemId,
+    institution_name: institutionName,
+    ...syncResult
+  };
+}
+async function syncPlaidTransactionPage(userId, added, modified, removed) {
+  const records = [];
+  for (const transaction of [...added, ...modified]) {
+    const location = transaction.location;
+    const category = transaction.personal_finance_category;
+    const counterparties = transaction.counterparties;
+    const paymentMeta = transaction.payment_meta;
+    records.push({
+      transaction_id: transaction.transaction_id,
+      account_id: transaction.account_id,
+      amount: transaction.amount,
+      iso_currency_code: transaction.iso_currency_code,
+      date: transaction.date,
+      authorized_date: transaction.authorized_date,
+      datetime: transaction.datetime,
+      authorized_datetime: transaction.authorized_datetime,
+      name: transaction.name,
+      original_description: transaction.original_description,
+      merchant_name: transaction.merchant_name,
+      merchant_entity_id: transaction.merchant_entity_id,
+      website: transaction.website,
+      merchant_category_code: transaction.merchant_category_code,
+      payment_channel: transaction.payment_channel,
+      location_address: location?.address,
+      location_city: location?.city,
+      location_region: location?.region,
+      location_postal_code: location?.postal_code,
+      location_country: location?.country,
+      location_lat: location?.lat,
+      location_lon: location?.lon,
+      location_store_number: location?.store_number,
+      personal_finance_category_primary: category?.primary,
+      personal_finance_category_detailed: category?.detailed,
+      personal_finance_category_confidence: category?.confidence_level,
+      transaction_type: transaction.transaction_type,
+      transaction_code: transaction.transaction_code,
+      pending: Boolean(transaction.pending),
+      pending_transaction_id: transaction.pending_transaction_id,
+      counterparties: counterparties ? counterparties.map((e) => e.to_dict ? e.to_dict() : e) : null,
+      payment_meta: paymentMeta && paymentMeta.to_dict ? paymentMeta.to_dict() : paymentMeta,
+      user_id: userId,
+      is_removed: false,
+      synced_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
+  if (records.length > 0) {
+    const { error } = await supabase.from("plaid_transactions").upsert(records, { onConflict: "transaction_id" });
+    if (error) throw new Error(`Could not save transactions: ${error.message}`);
+  }
+  let removedCount = 0;
+  for (const transaction of removed) {
+    const transactionId = typeof transaction === "string" ? transaction : transaction.transaction_id;
+    const { data, error } = await supabase.from("plaid_transactions").update({
+      is_removed: true,
+      synced_at: (/* @__PURE__ */ new Date()).toISOString()
+    }).eq("transaction_id", transactionId).eq("user_id", userId).select("transaction_id");
+    if (error) throw new Error(`Could not remove transaction: ${error.message}`);
+    removedCount += data?.length ?? 0;
+  }
+  return [added.length, modified.length, removedCount];
+}
+async function savePlaidCreditAccounts(accounts, userId, itemId, institutionName) {
+  const { data: existingAccounts, error: fetchError } = await supabase.from("plaid_credit_accounts").select("account_id,display_name").eq("user_id", userId);
+  if (fetchError) throw new Error(`Could not fetch credit accounts: ${fetchError.message}`);
+  const existingDisplayNames = new Map(
+    (existingAccounts ?? []).map((row) => [row.account_id, row.display_name])
+  );
+  const accountRows = [];
+  for (const account of accounts) {
+    const accountType = typeof account.type === "object" ? account.type.value : account.type;
+    if (accountType !== "credit") continue;
+    const officialName = account.official_name ?? null;
+    const name = account.name;
+    let displayName = existingDisplayNames.get(account.account_id);
+    if (!displayName) {
+      displayName = mappedPlaidCreditCardName2(officialName, name);
+    }
+    const balances = account.balances;
+    accountRows.push({
+      account_id: account.account_id,
+      item_id: itemId,
+      user_id: userId,
+      name,
+      official_name: officialName,
+      display_name: displayName,
+      mask: account.mask,
+      account_type: accountType,
+      subtype: account.subtype ? typeof account.subtype === "object" ? account.subtype.value : account.subtype : null,
+      iso_currency_code: balances?.iso_currency_code ?? null,
+      institution_name: institutionName,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
+  for (let i = 0; i < accountRows.length; i += 500) {
+    const batch = accountRows.slice(i, i + 500);
+    const { error } = await supabase.from("plaid_credit_accounts").upsert(batch, { onConflict: "account_id" });
+    if (error) throw new Error(`Could not save credit accounts: ${error.message}`);
+  }
+  return accountRows.length;
+}
+async function syncPlaidCreditAccounts(accessToken, userId, itemId, institutionName) {
+  const response = await plaidCall("/accounts/get", {
+    access_token: accessToken
+  });
+  return savePlaidCreditAccounts(response.accounts, userId, itemId, institutionName);
+}
+async function syncPlaidLiabilities(accessToken, userId, itemId, institutionName) {
+  let response;
+  try {
+    response = await plaidCall("/liabilities/get", {
+      access_token: accessToken
+    });
+  } catch (error) {
+    const code = error.code || "LIABILITIES_UNAVAILABLE";
+    const result2 = { status: "unavailable", reason: code, accounts: 0, statements: 0 };
+    const { error: upsertError } = await supabase.from("plaid_liability_sync_state").upsert({
+      user_id: userId,
+      status: result2.status,
+      account_count: result2.accounts,
+      statement_count: result2.statements,
+      reason: code,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    }, { onConflict: "user_id" });
+    if (upsertError) throw new Error(`Could not save liability sync state: ${upsertError.message}`);
+    return result2;
+  }
+  const accountRows = (response.accounts ?? []).filter((account) => {
+    const accountType = typeof account.type === "object" ? account.type.value : account.type;
+    return accountType === "credit";
+  }).map((account) => ({
+    account_id: account.account_id,
+    iso_currency_code: account.balances?.iso_currency_code ?? null
+  }));
+  if (itemId) {
+    await savePlaidCreditAccounts(response.accounts, userId, itemId, institutionName);
+  }
+  const accountsById = new Map(accountRows.map((row) => [row.account_id, row]));
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const snapshots = [];
+  const creditLiabilities = response.liabilities?.credit ?? [];
+  for (const liability of creditLiabilities) {
+    const accountId = liability.account_id;
+    const account = accountsById.get(accountId);
+    const issueDate = liability.last_statement_issue_date;
+    if (!account || !issueDate) continue;
+    snapshots.push({
+      user_id: userId,
+      account_id: accountId,
+      statement_issue_date: issueDate,
+      statement_balance: liability.last_statement_balance,
+      minimum_payment_amount: liability.minimum_payment_amount,
+      next_payment_due_date: liability.next_payment_due_date ?? null,
+      iso_currency_code: account.iso_currency_code,
+      fetched_at: now
+    });
+  }
+  if (snapshots.length > 0) {
+    const { error } = await supabase.from("plaid_liability_snapshots").upsert(snapshots, { onConflict: "user_id,account_id,statement_issue_date" });
+    if (error) throw new Error(`Could not save liability snapshots: ${error.message}`);
+  }
+  const result = {
+    status: "synced",
+    accounts: accountRows.length,
+    statements: snapshots.length
+  };
+  const { error: syncStateError } = await supabase.from("plaid_liability_sync_state").upsert({
+    user_id: userId,
+    status: result.status,
+    reason: null,
+    account_count: result.accounts,
+    statement_count: result.statements,
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  }, { onConflict: "user_id" });
+  if (syncStateError) throw new Error(`Could not save liability sync state: ${syncStateError.message}`);
+  return result;
+}
+async function resolveInstitutionName(client, institutionId) {
+  if (!institutionId) return null;
+  try {
+    const response = await plaidCall("/institutions/get_by_id", {
+      institution_id: institutionId,
+      country_codes: ["US"]
+    });
+    if (response.institution && response.institution.name) {
+      return response.institution.name;
+    }
+  } catch {
+    console.warn(`Could not resolve institution name for ${institutionId}`);
+  }
+  return null;
+}
+async function syncPlaidItemsForUser(userId) {
+  await createPlaidClient();
+  const { data: items, error: itemsError } = await supabase.from("plaid_items").select("*").eq("user_id", userId).order("created_at.asc,item_id.asc");
+  if (itemsError) throw new Error(`Could not fetch Plaid items: ${itemsError.message}`);
+  const connectedItems = (items ?? []).filter((item) => item.status === "connected");
+  const legacyAccessToken = Deno.env.get("PLAID_ACCESS_TOKEN");
+  const legacyUserId = Deno.env.get("PLAID_USER_ID");
+  if (legacyAccessToken && legacyUserId && legacyUserId === userId && !connectedItems.some((item) => item.access_token === legacyAccessToken)) {
+    try {
+      const itemResponse = await plaidCall("/item/get", {
+        access_token: legacyAccessToken
+      });
+      const legacyItem = itemResponse.item;
+      const itemId = legacyItem.item_id;
+      const existing = connectedItems.find((item) => item.item_id === itemId);
+      if (!existing) {
+        const instName = await resolveInstitutionName(null, legacyItem.institution_id) || "Chase";
+        const { error: insertError } = await supabase.from("plaid_items").upsert({
+          item_id: itemId,
+          user_id: userId,
+          access_token: legacyAccessToken,
+          institution_id: legacyItem.institution_id,
+          institution_name: instName,
+          status: "connected",
+          updated_at: (/* @__PURE__ */ new Date()).toISOString()
+        }, { onConflict: "item_id" });
+        if (insertError) throw new Error("Could not save the existing Plaid connection");
+        connectedItems.push({
+          item_id: itemId,
+          access_token: legacyAccessToken,
+          institution_id: legacyItem.institution_id,
+          institution_name: instName,
+          status: "connected",
+          updated_at: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+    } catch (error) {
+      if (error.message?.includes("Could not save the existing Plaid connection")) {
+        throw error;
+      }
+      throw new Error("Could not migrate the existing Plaid connection");
+    }
+  }
+  if (connectedItems.length === 0) {
+    throw new Error("No Plaid connections are available to sync");
+  }
+  let addedCount = 0;
+  let modifiedCount = 0;
+  let removedCount = 0;
+  let liabilityAccountCount = 0;
+  let liabilityStatementCount = 0;
+  let liabilityFailures = 0;
+  for (const item of connectedItems) {
+    let instName = item.institution_name;
+    if ((!instName || isGenericCardName2(instName)) && item.institution_id) {
+      const resolved = await resolveInstitutionName(null, item.institution_id);
+      if (resolved) {
+        instName = resolved;
+        item.institution_name = resolved;
+        await supabase.from("plaid_items").update({ institution_name: resolved }).eq("item_id", item.item_id);
+        await supabase.from("plaid_credit_accounts").update({ institution_name: resolved }).eq("item_id", item.item_id).in("institution_name", ["Existing linked institution", "Linked institution"]);
+      }
+    }
+    let cursor = item.transactions_cursor ?? null;
+    while (true) {
+      const requestOptions = {
+        access_token: item.access_token,
+        options: { include_original_description: true }
+      };
+      if (cursor) {
+        requestOptions["cursor"] = cursor;
+      }
+      const response = await plaidCall("/transactions/sync", requestOptions);
+      const [savedAdded, savedModified, savedRemoved] = await syncPlaidTransactionPage(
+        userId,
+        response.added ?? [],
+        response.modified ?? [],
+        response.removed ?? []
+      );
+      addedCount += savedAdded;
+      modifiedCount += savedModified;
+      removedCount += savedRemoved;
+      cursor = response.next_cursor;
+      if (!response.has_more) break;
+    }
+    await supabase.from("plaid_items").update({
+      transactions_cursor: cursor,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    }).eq("item_id", item.item_id).eq("user_id", userId);
+    await syncPlaidCreditAccounts(
+      item.access_token,
+      userId,
+      item.item_id,
+      item.institution_name
+    );
+    const liabilities = await syncPlaidLiabilities(
+      item.access_token,
+      userId,
+      item.item_id,
+      item.institution_name
+    );
+    liabilityAccountCount += liabilities.accounts;
+    liabilityStatementCount += liabilities.statements;
+    if (liabilities.status !== "synced") {
+      liabilityFailures += 1;
+    }
+  }
+  const liabilityStatus = liabilityStatementCount > 0 || !liabilityFailures ? "synced" : "unavailable";
+  const { error: syncStateError } = await supabase.from("plaid_liability_sync_state").upsert({
+    user_id: userId,
+    status: liabilityStatus,
+    reason: liabilityStatus === "unavailable" ? "LIABILITIES_UNAVAILABLE" : null,
+    account_count: liabilityAccountCount,
+    statement_count: liabilityStatementCount,
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  }, { onConflict: "user_id" });
+  if (syncStateError) throw new Error(`Could not save liability sync state: ${syncStateError.message}`);
+  const reconciledCount = await Promise.resolve().then(() => (init_reconcile(), reconcile_exports)).then((m) => m.reconcileUserCardEvents(userId));
+  const assignedCount = await Promise.resolve().then(() => (init_reconcile(), reconcile_exports)).then((m) => m.refreshWalletAssignments(userId));
+  const summaryCount = await Promise.resolve().then(() => (init_reconcile(), reconcile_exports)).then((m) => m.calculateStatementSummaries(userId));
+  return {
+    ok: true,
+    items_synced: connectedItems.length,
+    added: addedCount,
+    modified: modifiedCount,
+    removed: removedCount,
+    reconciled: reconciledCount,
+    wallet_assigned: assignedCount,
+    liabilities: {
+      status: liabilityStatus,
+      accounts: liabilityAccountCount,
+      statements: liabilityStatementCount
+    },
+    statement_summaries: summaryCount,
+    user_id: userId
+  };
+}
+async function runPlaidSync() {
+  const userId = Deno.env.get("PLAID_USER_ID");
+  if (!userId) {
+    throw new Error("Plaid scheduled sync is missing required configuration");
+  }
+  return syncPlaidItemsForUser(userId);
+}
+function isGenericCardName2(val) {
+  if (!val || typeof val !== "string") return true;
+  const GENERIC = /* @__PURE__ */ new Set([
+    "credit card",
+    "credit",
+    "card",
+    "existing linked institution",
+    "linked institution",
+    "unknown"
+  ]);
+  return GENERIC.has(val.trim().toLowerCase());
+}
+function mappedPlaidCreditCardName2(officialName, name) {
+  const PLAID_CREDIT_CARD_NAME_MAPPINGS2 = {
+    "ultimaterewards": "Chase Freedom Unlimited"
+  };
+  for (const sourceName of [officialName, name]) {
+    if (!sourceName) continue;
+    const key = sourceName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const mapped = PLAID_CREDIT_CARD_NAME_MAPPINGS2[key];
+    if (mapped) return mapped;
+  }
+  return null;
+}
+
+// supabase/functions/api/index.ts
+init_reconcile();
+import { Decimal as Decimal2 } from "https://esm.sh/decimal.js@10.4.3";
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
+}
+function errorResponse(error) {
+  if (error instanceof ApiError) {
+    return jsonResponse({ detail: error.message }, error.statusCode);
+  }
+  if (error instanceof Error) {
+    const codeMatch = error.message.match(/^(\d+):\s/);
+    if (codeMatch) {
+      return jsonResponse({ detail: error.message.slice(codeMatch[0].length) }, parseInt(codeMatch[1], 10));
+    }
+    return jsonResponse({ detail: error.message }, 500);
+  }
+  return jsonResponse({ detail: "Internal server error" }, 500);
+}
+Deno.serve(async (req) => {
+  const url = new URL(req.url);
+  let path = url.pathname;
+  path = path.replace(/^\/functions\/v1\/[^/]+/, "");
+  path = path.replace(/^\/api\/?/, "");
+  path = path.replace(/^\/+/, "").replace(/\/+$/, "");
+  const method = req.method;
+  const authorization = req.headers.get("Authorization");
+  try {
+    if (path === "" || path === "/" || path === "health") {
+      return jsonResponse({ ok: true, service: "card-events-api" });
+    }
+    if (method === "GET" && path === "public-config") {
+      const projectUrl = Deno.env.get("SUPABASE_URL");
+      const publishableKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
+      if (!projectUrl || !publishableKey) {
+        throw new ApiError(503, "Supabase public client configuration is not configured");
+      }
+      return jsonResponse({ supabase_url: projectUrl, supabase_publishable_key: publishableKey });
+    }
+    if (method === "POST" && path === "card-events") {
+      const auth = await authenticateRequest(authorization);
+      let userId = auth.userId;
+      const authSource = auth.authSource;
+      const body = await req.json();
+      if (body.occurred_at && !body.occurred_at.includes("T") || body.occurred_at && !body.occurred_at.includes("+")) {
+        const d = new Date(body.occurred_at);
+        if (isNaN(d.getTime()) || d.getTimezoneOffset() === 0 && !body.occurred_at.endsWith("Z") && !body.occurred_at.includes("+")) {
+          throw new ApiError(422, "occurred_at must include a timezone");
+        }
+      }
+      let personId = null;
+      let deviceTokenId = null;
+      let eventSource;
+      if (authSource === "test_api_token") {
+        eventSource = "api_test";
+      } else {
+        eventSource = authSource === "device_token" ? "ios_shortcut" : "authenticated_api";
+      }
+      if (userId && authSource === "device_token") {
+        const token = getBearerToken(authorization);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+        const tokenHash = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+        const { data: tokenRows, error: error2 } = await supabase.from("device_tokens").select("id,person_id,platform").eq("token_hash", tokenHash).eq("user_id", userId).is("revoked_at", null).limit(1);
+        if (error2) throw new ApiError(502, error2.message);
+        if (tokenRows && tokenRows.length > 0) {
+          personId = tokenRows[0].person_id;
+          deviceTokenId = tokenRows[0].id;
+          eventSource = tokenRows[0].platform || "ios_shortcut";
+        }
+      } else if (userId) {
+        personId = (await ensureDefaultPerson(userId)).person_id;
+      }
+      const occurredAt = new Date(body.occurred_at);
+      const utcString = occurredAt.toISOString();
+      const { data: rows, error } = await supabase.from("card_events").upsert({
+        ...body,
+        occurred_at: utcString,
+        user_id: userId,
+        person_id: personId,
+        device_token_id: deviceTokenId,
+        source: eventSource
+      }, { onConflict: "event_id" }).select();
+      if (error) throw new ApiError(502, error.message);
+      return jsonResponse({
+        ok: true,
+        saved: rows && rows.length > 0,
+        event_id: rows && rows.length > 0 ? rows[0].event_id : body.event_id,
+        user_id: userId,
+        person_id: personId
+      });
+    }
+    if (method === "GET" && path === "card-events") {
+      const auth = await authenticateRequest(authorization);
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "100", 10), 500);
+      const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+      const { data, error, count } = await supabase.from("card_events").select("event_id,user_id,person_id,occurred_at,amount,currency,merchant,card_label,payment_label,source,received_at", { count: "exact" }).eq("user_id", auth.userId ?? void 0).order("received_at.desc,event_id.asc").range(offset, offset + limit - 1);
+      if (error) throw new ApiError(502, error.message);
+      const events = (data ?? []).map((row) => ({
+        ...row,
+        user_id: auth.userId
+      }));
+      return jsonResponse({ events });
+    }
+    if (method === "GET" && path === "household/people") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      await ensureDefaultPerson(auth.userId);
+      const people = await fetchUserRows("household_people", auth.userId, { orderBy: "created_at.asc,person_id.asc" });
+      return jsonResponse({ people });
+    }
+    if (method === "POST" && path === "household/people") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const body = await req.json().catch(() => ({}));
+      const displayName = (body.display_name || "").trim();
+      if (!displayName || displayName.length > 100) {
+        throw new ApiError(400, "Invalid display_name");
+      }
+      await ensureDefaultPerson(auth.userId);
+      const { data, error } = await supabase.from("household_people").insert({ user_id: auth.userId, display_name: displayName, is_default: false }).select();
+      if (error) throw new ApiError(502, error.message);
+      return jsonResponse({ person: data?.[0] });
+    }
+    if (method === "POST" && path === "device-tokens") {
+      const bearerToken = getBearerToken(authorization);
+      const userId = await verifySupabaseUser(bearerToken);
+      const body = await req.json().catch(() => ({}));
+      const deviceLabel = (body.device_label || "").trim();
+      if (!deviceLabel || deviceLabel.length > 100) {
+        throw new ApiError(400, "Invalid device_label");
+      }
+      const personId = body.person_id ? String(body.person_id) : (await ensureDefaultPerson(userId)).person_id;
+      const person = await getHouseholdPerson(userId, personId);
+      if (!person) throw new ApiError(404, "Household member not found");
+      const platform = body.platform || "ios_shortcut";
+      const tokenChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+      let deviceToken = "";
+      const arr = new Uint8Array(32);
+      crypto.getRandomValues(arr);
+      for (const byte of arr) {
+        deviceToken += tokenChars[byte % tokenChars.length];
+      }
+      const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(deviceToken));
+      const tokenHash = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      const { data: rows, error } = await supabase.from("device_tokens").insert({
+        user_id: userId,
+        person_id: personId,
+        device_label: deviceLabel,
+        platform,
+        token_hash: tokenHash
+      }).select();
+      if (error) throw new ApiError(502, error.message);
+      return jsonResponse({
+        device_token: deviceToken,
+        id: rows[0].id,
+        device_label: deviceLabel,
+        person_id: personId,
+        warning: "Copy this token now; it cannot be retrieved later."
+      });
+    }
+    if (method === "GET" && path === "device-tokens") {
+      const bearerToken = getBearerToken(authorization);
+      const userId = await verifySupabaseUser(bearerToken);
+      const { data, error } = await supabase.from("device_tokens").select("id,device_label,person_id,created_at,last_used_at,revoked_at").eq("user_id", userId).order("created_at.desc");
+      if (error) throw new ApiError(502, error.message);
+      return jsonResponse({ devices: data ?? [] });
+    }
+    if (method === "DELETE" && path.startsWith("device-tokens/")) {
+      const bearerToken = getBearerToken(authorization);
+      const userId = await verifySupabaseUser(bearerToken);
+      const tokenId = path.split("/")[1];
+      const { data, error } = await supabase.from("device_tokens").update({ revoked_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", tokenId).eq("user_id", userId).is("revoked_at", null).select();
+      if (error) throw new ApiError(502, error.message);
+      if (!data || data.length === 0) throw new ApiError(404, "Active device key not found");
+      const uuid = tokenId;
+      return jsonResponse({ ok: true, revoked: true, id: uuid });
+    }
+    if (method === "PATCH" && path.match(/^device-tokens\/[^\/]+\/person$/)) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) throw new ApiError(403, "A signed-in user is required");
+      const parts = path.split("/");
+      const tokenId = parts[1];
+      const body = await req.json().catch(() => ({}));
+      const personId = String(body.person_id);
+      const person = await getHouseholdPerson(auth.userId, personId);
+      if (!person) throw new ApiError(404, "Household member not found");
+      const { data: rows, error } = await supabase.from("device_tokens").update({ person_id: personId }).eq("id", tokenId).eq("user_id", auth.userId).is("revoked_at", null).select();
+      if (error) throw new ApiError(502, error.message);
+      if (!rows || rows.length === 0) throw new ApiError(404, "Active device key not found");
+      await supabase.from("card_events").update({ person_id: personId }).eq("device_token_id", tokenId).eq("user_id", auth.userId);
+      await refreshWalletAssignments(auth.userId);
+      await calculateStatementSummaries(auth.userId);
+      return jsonResponse({ ok: true, device_id: tokenId, person_id: personId });
+    }
+    if (method === "GET" && path === "plaid/items") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const items = await fetchUserRows("plaid_items", auth.userId, { orderBy: "created_at.asc,item_id.asc" });
+      return jsonResponse({
+        items: items.filter((item) => item.status !== "disconnected").map((item) => ({
+          item_id: item.item_id,
+          institution_id: item.institution_id,
+          institution_name: item.institution_name,
+          status: item.status,
+          created_at: item.created_at
+        }))
+      });
+    }
+    if (method === "POST" && path === "plaid/items/link-token") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A Supabase session is required to link a bank");
+      }
+      const platform = url.searchParams.get("platform") || "web";
+      const linkToken = await createPlaidLinkToken(auth.userId, platform);
+      return jsonResponse({ link_token: linkToken });
+    }
+    if (method === "POST" && path === "plaid/items/exchange") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A Supabase session is required to link a bank");
+      }
+      const body = await req.json();
+      const result = await exchangePublicToken(body, auth.userId);
+      return jsonResponse(result);
+    }
+    if (method === "POST" && path === "plaid/items/sync") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const result = await syncPlaidItemsForUser(auth.userId);
+      return jsonResponse(result);
+    }
+    if (method === "POST" && path === "plaid-transactions/sync-now") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const configuredUserId = Deno.env.get("PLAID_USER_ID");
+      if (!configuredUserId || configuredUserId !== auth.userId) {
+        throw new ApiError(403, "This account is not configured for Plaid sync");
+      }
+      const result = await syncPlaidItemsForUser(auth.userId);
+      return jsonResponse(result);
+    }
+    if (method === "POST" && path === "plaid/liabilities/link-token") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A Supabase session is required to link a bank");
+      }
+      const configuredUserId = Deno.env.get("PLAID_USER_ID");
+      const accessToken = Deno.env.get("PLAID_ACCESS_TOKEN");
+      if (!configuredUserId || configuredUserId !== auth.userId || !accessToken) {
+        throw new ApiError(403, "This account is not configured for Plaid");
+      }
+      const linkToken = await createLiabilitiesLinkToken(auth.userId);
+      return jsonResponse({ link_token: linkToken });
+    }
+    if ((method === "GET" || method === "POST") && path === "cron/plaid-sync") {
+      const cronSecret = Deno.env.get("CRON_SECRET");
+      if (!cronSecret) throw new ApiError(503, "Scheduled sync is not configured");
+      let supplied = null;
+      try {
+        supplied = getBearerToken(authorization);
+      } catch {
+        throw new ApiError(401, "Unauthorized cron request");
+      }
+      if (supplied !== cronSecret) {
+        throw new ApiError(401, "Unauthorized cron request");
+      }
+      const result = await runPlaidSync();
+      return jsonResponse(result);
+    }
+    if (method === "POST" && path === "plaid-transactions/sync") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const body = await req.json();
+      const added = body.added ?? [];
+      const modified = body.modified ?? [];
+      const removed = body.removed ?? [];
+      const rows = [...added, ...modified].map((tx) => ({
+        ...tx,
+        user_id: auth.userId,
+        is_removed: false,
+        synced_at: (/* @__PURE__ */ new Date()).toISOString()
+      }));
+      if (rows.length > 0) {
+        const { error: upsertError } = await supabase.from("plaid_transactions").upsert(rows, { onConflict: "transaction_id" });
+        if (upsertError) throw new ApiError(502, upsertError.message);
+      }
+      let removedCount = 0;
+      for (const transactionId of removed) {
+        const { data, error } = await supabase.from("plaid_transactions").update({ is_removed: true, synced_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("transaction_id", transactionId).eq("user_id", auth.userId).select("transaction_id");
+        if (error) throw new ApiError(502, error.message);
+        removedCount += data?.length ?? 0;
+      }
+      return jsonResponse({ ok: true, saved: rows.length, removed: removedCount, user_id: auth.userId });
+    }
+    if (method === "GET" && path === "plaid-transactions") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "500", 10), 500);
+      const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+      const creditAccounts = await fetchUserRows("plaid_credit_accounts", auth.userId, { orderBy: "account_id.asc" });
+      const creditAccountIds = creditAccounts.filter((a) => a.account_id).map((a) => a.account_id);
+      if (creditAccountIds.length === 0) {
+        return jsonResponse({ transactions: [] });
+      }
+      const accountQuery = `eq.\`${creditAccountIds.join(",")}\``;
+      const { data: transactions, error: txError } = await supabase.from("plaid_transactions").select("*").eq("user_id", auth.userId).eq("is_removed", false).in("account_id", creditAccountIds).order("date.desc,transaction_id.asc").range(offset, offset + limit - 1);
+      if (txError) throw new ApiError(502, txError.message);
+      const creditAccountById = new Map(creditAccounts.map((a) => [a.account_id, a]));
+      const assignments = await fetchUserRows("transaction_assignments", auth.userId, { orderBy: "transaction_id.asc" });
+      const assignmentById = new Map(assignments.map((a) => [a.transaction_id, a]));
+      const primary = await ensureDefaultPerson(auth.userId);
+      const result = (transactions ?? []).map((tx) => ({
+        ...tx,
+        account_name: creditCardDisplayName(creditAccountById.get(tx.account_id) ?? {}),
+        display_name: creditAccountById.get(tx.account_id)?.display_name ?? null,
+        plaid_name: creditAccountById.get(tx.account_id)?.name ?? null,
+        official_name: creditAccountById.get(tx.account_id)?.official_name ?? null,
+        account_mask: creditAccountById.get(tx.account_id)?.mask ?? null,
+        assigned_person_id: assignmentById.has(tx.transaction_id) ? assignmentById.get(tx.transaction_id).person_id : primary.person_id,
+        assignment_source: assignmentById.has(tx.transaction_id) ? assignmentById.get(tx.transaction_id).assignment_source : "default"
+      }));
+      return jsonResponse({ transactions: result });
+    }
+    if (method === "POST" && path.match(/^plaid-transactions\/[^/]+\/assignment$/)) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const transactionId = path.split("/")[1];
+      const body = await req.json().catch(() => ({}));
+      await ensureDefaultPerson(auth.userId);
+      const personId = body.person_id ? String(body.person_id) : null;
+      if (personId) {
+        const person = await getHouseholdPerson(auth.userId, personId);
+        if (!person) throw new ApiError(404, "Household member not found");
+      }
+      const { data: txRows, error: txError } = await supabase.from("plaid_transactions").select("transaction_id").eq("transaction_id", transactionId).eq("user_id", auth.userId).eq("is_removed", false).limit(1);
+      if (txError) throw new ApiError(502, txError.message);
+      if (!txRows || txRows.length === 0) throw new ApiError(404, "Transaction not found");
+      if (!personId) {
+        const primary = await ensureDefaultPerson(auth.userId);
+        await supabase.from("transaction_assignments").delete().eq("transaction_id", transactionId).eq("user_id", auth.userId);
+        await calculateStatementSummaries(auth.userId);
+        return jsonResponse({
+          ok: true,
+          transaction_id: transactionId,
+          person_id: primary.person_id,
+          assignment_source: "default"
+        });
+      }
+      const { data: rows, error } = await supabase.from("transaction_assignments").upsert({
+        transaction_id: transactionId,
+        user_id: auth.userId,
+        person_id: personId,
+        assignment_source: "manual",
+        event_id: null,
+        updated_at: (/* @__PURE__ */ new Date()).toISOString()
+      }, { onConflict: "transaction_id" }).select();
+      if (error) throw new ApiError(502, error.message);
+      await calculateStatementSummaries(auth.userId);
+      return jsonResponse({ ok: true, assignment: rows?.[0] });
+    }
+    if (method === "PATCH" && path.match(/^plaid-credit-accounts\/[^/]+\/display-name$/)) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const accountId = path.split("/")[1];
+      const body = await req.json().catch(() => ({}));
+      const displayName = body.display_name?.trim() || null;
+      const { data: check, error: checkError } = await supabase.from("plaid_credit_accounts").select("account_id").eq("account_id", accountId).eq("user_id", auth.userId).limit(1);
+      if (checkError) throw new ApiError(502, checkError.message);
+      if (!check || check.length === 0) throw new ApiError(404, "Credit card not found");
+      const { data: updated, error: updateError } = await supabase.from("plaid_credit_accounts").update({ display_name: displayName }).eq("account_id", accountId).eq("user_id", auth.userId).select();
+      if (updateError) throw new ApiError(502, updateError.message);
+      if (!updated || updated.length === 0) throw new ApiError(502, "Could not save the credit card name");
+      return jsonResponse({
+        account_id: accountId,
+        display_name: displayName,
+        account_name: creditCardDisplayName(updated[0])
+      });
+    }
+    if (method === "PUT" && path.match(/^plaid-credit-accounts\/[^/]+\/cycle-start$/)) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const accountId = path.split("/")[1];
+      const body = await req.json().catch(() => ({}));
+      const cycleStartDate = body.cycle_start_date;
+      const { data: accounts, error: acctError } = await supabase.from("plaid_credit_accounts").select("account_id").eq("account_id", accountId).eq("user_id", auth.userId).limit(1);
+      if (acctError) throw new ApiError(502, acctError.message);
+      if (!accounts || accounts.length === 0) throw new ApiError(404, "Credit card not found");
+      const { data: statements, error: stmtError } = await supabase.from("plaid_liability_snapshots").select("statement_issue_date").eq("account_id", accountId).eq("user_id", auth.userId).order("statement_issue_date.desc").limit(1);
+      if (stmtError) throw new ApiError(502, stmtError.message);
+      if (!statements || statements.length === 0) throw new ApiError(409, "Sync statement data before setting the prior statement date");
+      const currentIssueDate = statements[0].statement_issue_date;
+      const currentDate = new Date(currentIssueDate);
+      const newDate = new Date(cycleStartDate);
+      if (newDate >= currentDate) {
+        throw new ApiError(422, "Prior statement date must be earlier than the current statement date");
+      }
+      await supabase.from("card_cycle_start_overrides").upsert({
+        user_id: auth.userId,
+        account_id: accountId,
+        statement_issue_date: currentIssueDate,
+        cycle_start_date: cycleStartDate,
+        updated_at: (/* @__PURE__ */ new Date()).toISOString()
+      }, { onConflict: "user_id,account_id,statement_issue_date" });
+      await calculateStatementSummaries(auth.userId);
+      return jsonResponse({
+        ok: true,
+        account_id: accountId,
+        statement_issue_date: currentIssueDate,
+        cycle_start_date: cycleStartDate,
+        cycle_start_source: "user_entered"
+      });
+    }
+    if (method === "GET" && path === "owed/statement-cycles") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      await ensureDefaultPerson(auth.userId);
+      const summaries = await fetchUserRows("card_statement_summaries", auth.userId, { orderBy: "statement_issue_date.desc,account_id.asc" });
+      const accounts = await fetchUserRows("plaid_credit_accounts", auth.userId, { orderBy: "account_id.asc" });
+      const people = await fetchUserRows("household_people", auth.userId, { orderBy: "created_at.asc,person_id.asc" });
+      const { data: liabilityStates, error: liabError } = await supabase.from("plaid_liability_sync_state").select("status,reason,account_count,statement_count,updated_at").eq("user_id", auth.userId).limit(1);
+      if (liabError) throw new ApiError(502, liabError.message);
+      const accountNames = new Map(accounts.map((row) => [row.account_id, creditCardDisplayName(row)]));
+      const latestByAccount = /* @__PURE__ */ new Map();
+      for (const summary of summaries) {
+        if (!latestByAccount.has(summary.account_id)) {
+          latestByAccount.set(summary.account_id, summary);
+        }
+      }
+      const readyRows = Array.from(latestByAccount.values()).filter(
+        (row) => ["READY", "REVIEW"].includes(row.status) && row.amount_owed !== null
+      );
+      const liabilityState = liabilityStates?.[0] ?? null;
+      const accountCurrency = new Map(accounts.map((row) => [row.account_id, row.iso_currency_code ?? "UNKNOWN"]));
+      const totalsByCurrency = {};
+      for (const row of readyRows) {
+        const currency = accountCurrency.get(row.account_id) ?? "UNKNOWN";
+        const amount = new Decimal2(String(row.amount_owed));
+        totalsByCurrency[currency] = (totalsByCurrency[currency] ?? new Decimal2(0)).plus(amount);
+      }
+      let total = null;
+      if (Object.keys(totalsByCurrency).length === 1) {
+        total = Object.values(totalsByCurrency)[0].toFixed(2);
+      }
+      const liabilityDataCurrent = liabilityState && liabilityState.status === "synced" && liabilityState.statement_count > 0;
+      const allAccountsReady = latestByAccount.size > 0 && latestByAccount.size === accounts.length && readyRows.length === latestByAccount.size && liabilityDataCurrent;
+      if (!allAccountsReady || Object.keys(totalsByCurrency).length !== 1) {
+        total = null;
+      }
+      let totalStatus;
+      if (anyReadyRow((row) => row.status === "REVIEW", readyRows)) {
+        totalStatus = "REVIEW";
+      } else if (!allAccountsReady) {
+        totalStatus = "WAITING_FOR_STATEMENTS";
+      } else if (Object.keys(totalsByCurrency).length > 1) {
+        totalStatus = "MULTI_CURRENCY";
+      } else if (readyRows.length > 0) {
+        totalStatus = "READY";
+      } else {
+        totalStatus = "WAITING_FOR_STATEMENTS";
+      }
+      return jsonResponse({
+        primary_person: people.find((p) => p.is_default) ?? null,
+        accounts: summaries.map((row) => ({
+          ...row,
+          account_name: accountNames.get(row.account_id) ?? "Card",
+          currency: accountCurrency.get(row.account_id) ?? "UNKNOWN"
+        })),
+        credit_accounts: accounts.map((row) => ({
+          ...row,
+          account_name: creditCardDisplayName(row),
+          plaid_name: row.name
+        })),
+        current_total_owed: total,
+        totals_by_currency: Object.fromEntries(
+          Object.entries(totalsByCurrency).map(([k, v]) => [k, v.toFixed(2)])
+        ),
+        liabilities: liabilityState,
+        total_status: totalStatus
+      });
+    }
+    if (method === "POST" && path === "card-event-reconciliations/sync") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const body = await req.json();
+      const reconciliations = Array.isArray(body) ? body : [];
+      for (const rec of reconciliations) {
+        const { data: eventExists, error: eventErr } = await supabase.from("card_events").select("event_id").eq("event_id", rec.event_id).eq("user_id", auth.userId).limit(1);
+        if (eventErr) throw new ApiError(502, eventErr.message);
+        if (!eventExists || eventExists.length === 0) {
+          throw new ApiError(403, "A reconciliation references an event not owned by this user");
+        }
+        if (rec.candidate_transaction_id) {
+          const { data: txExists, error: txErr } = await supabase.from("plaid_transactions").select("transaction_id").eq("transaction_id", rec.candidate_transaction_id).eq("user_id", auth.userId).limit(1);
+          if (txErr) throw new ApiError(502, txErr.message);
+          if (!txExists || txExists.length === 0) {
+            throw new ApiError(403, "A reconciliation references a transaction not owned by this user");
+          }
+        }
+      }
+      const rows = reconciliations.map((rec) => ({
+        ...rec,
+        user_id: auth.userId,
+        updated_at: (/* @__PURE__ */ new Date()).toISOString()
+      }));
+      if (rows.length > 0) {
+        const { error } = await supabase.from("card_event_reconciliations").upsert(rows, { onConflict: "event_id" });
+        if (error) throw new ApiError(502, error.message);
+      }
+      return jsonResponse({ ok: true, saved: rows.length, user_id: auth.userId });
+    }
+    if (method === "GET" && path === "card-event-reconciliations") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "500", 10), 500);
+      const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+      const { data, error } = await supabase.from("card_event_reconciliations").select("*").eq("user_id", auth.userId).order("updated_at.desc,event_id.asc").range(offset, offset + limit - 1);
+      if (error) throw new ApiError(502, error.message);
+      return jsonResponse({ reconciliations: data ?? [] });
+    }
+    if (method === "GET" && path === "login") {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "/login.html" }
+      });
+    }
+    return jsonResponse({ detail: "Not found" }, 404);
+  } catch (error) {
+    return errorResponse(error);
+  }
+});
+function anyReadyRow(predicate, rows) {
+  return rows.some(predicate);
+}

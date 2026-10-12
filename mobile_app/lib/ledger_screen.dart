@@ -11,6 +11,8 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'ledger_api.dart';
 import 'google_pay_capture.dart';
 
+const _pendingOrange = Color(0xFFB45309); // Darker orange (amber-700)
+
 class LedgerScreen extends StatefulWidget {
   const LedgerScreen({required this.api, required this.onSignOut, super.key});
 
@@ -33,6 +35,7 @@ class _LedgerScreenState extends State<LedgerScreen>
   String? _filterAccountId;
   String? _filterPersonId;
   DateTimeRange? _filterDateRange;
+  String? _filterStatus;
   bool _loading = true;
   bool _addingPerson = false;
   bool _showSettings = false;
@@ -474,6 +477,25 @@ Future<void> _closeSettings() async {
     }
   }
 
+  Future<void> _sendTestNotification() async {
+    try {
+      final granted = await _googlePayCapture.sendTestNotification();
+      if (granted == false) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please grant notification permission, then tap the button again.')),
+        );
+        return;
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Test notification sent. Check the Card Events tab.')),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _captureError = error.toString());
+    }
+  }
+
   Future<void> _disableGooglePayCapture() async {
     setState(() {
       _captureWorking = true;
@@ -504,23 +526,31 @@ Future<void> _closeSettings() async {
     // On first run, show settings as full-screen content, not overlay
     if (showingFirstRunSettings) {
       final canContinue = _captureConfigured && _notificationAccess;
-      return Scaffold(
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) {
+          if (!didPop) {
+            _closeSettings();
+          }
+        },
+        child: Scaffold(
         appBar: AppBar(
           title: const Text('Setup'),
           automaticallyImplyLeading: false,
         ),
         body: _buildSettingsOverlay(),
-        bottomNavigationBar: SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            child: FilledButton.icon(
-              onPressed: canContinue ? _closeSettings : null,
-              icon: const Icon(Icons.check_circle_outline),
-              label: const Text('Continue'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+bottomNavigationBar: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              child: FilledButton.icon(
+                onPressed: canContinue ? _closeSettings : null,
+                icon: const Icon(Icons.check_circle_outline),
+                label: const Text('Continue'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ),
@@ -530,20 +560,30 @@ Future<void> _closeSettings() async {
 
     // Settings opened from app bar - show as full screen
     if (_showSettings) {
-      return Scaffold(
-        appBar: AppBar(
-          leading: IconButton(
-            tooltip: 'Close settings',
-            onPressed: _closeSettings,
-            icon: const Icon(Icons.arrow_back),
+      return PopScope(
+        canPop: false,
+onPopInvokedWithResult: (didPop, result) {
+          if (!didPop) {
+            _closeSettings();
+          }
+        },
+        child: Scaffold(
+          appBar: AppBar(
+            leading: IconButton(
+              tooltip: 'Close settings',
+              onPressed: _closeSettings,
+              icon: const Icon(Icons.arrow_back),
+            ),
+            title: const Text('Settings'),
           ),
-          title: const Text('Settings'),
+          body: _buildSettingsOverlay(),
         ),
-        body: _buildSettingsOverlay(),
       );
     }
 
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      child: Scaffold(
       appBar: AppBar(
         title: AnimatedSwitcher(
           duration: const Duration(milliseconds: 200),
@@ -646,7 +686,8 @@ Future<void> _closeSettings() async {
             ),
           ],
         ),
-    );
+    )
+  );
   }
 
   Widget _buildSettingsOverlay() {
@@ -729,6 +770,7 @@ Future<void> _closeSettings() async {
     final effectiveAccountId = _drilldownAccountId ?? _filterAccountId;
     final effectivePersonId = _drilldownPersonId ?? _filterPersonId;
     final effectiveDateRange = _filterDateRange ?? _summaryRange;
+    final effectiveStatus = _filterStatus;
 
     final drilldownTransactions = _transactions
         .where((transaction) {
@@ -748,10 +790,12 @@ Future<void> _closeSettings() async {
               day != null &&
               day.compareTo(effectiveDateRange.start) >= 0 &&
               day.compareTo(effectiveDateRange.end) <= 0 &&
-              !transaction.pending &&
               (double.tryParse(transaction.amount) ?? 0) > 0 &&
               transaction.transactionCode?.toLowerCase() != 'payment';
-          return accountMatches && personMatches && dateMatches;
+          final statusMatches = effectiveStatus == null ||
+              (effectiveStatus == 'pending' && transaction.pending) ||
+              (effectiveStatus == 'approved' && !transaction.pending);
+          return accountMatches && personMatches && dateMatches && statusMatches;
         })
         .toList(growable: false);
 
@@ -762,7 +806,8 @@ Future<void> _closeSettings() async {
 
     final hasActiveFilters = effectiveAccountId != null ||
         effectivePersonId != null ||
-        _filterDateRange != null;
+        _filterDateRange != null ||
+        _filterStatus != null;
 
     // Calculate filtered total for PAY button
     double filteredTotal = 0;
@@ -788,16 +833,27 @@ Future<void> _closeSettings() async {
       _TransactionFilterBar(
         accounts: accountsById.values.toList(),
         people: _people,
-        selectedAccountId: _filterAccountId,
-        selectedPersonId: _filterPersonId,
-        selectedDateRange: _filterDateRange,
-        onAccountChanged: (id) => setState(() => _filterAccountId = id),
-        onPersonChanged: (id) => setState(() => _filterPersonId = id),
+        selectedAccountId: effectiveAccountId ?? '__all__',
+        selectedPersonId: effectivePersonId ?? '__everyone__',
+        selectedDateRange: effectiveDateRange,
+        selectedStatus: effectiveStatus ?? '__all__',
+        onAccountChanged: (id) => setState(() {
+          _filterAccountId = id == '__all__' ? null : id;
+          if (id == '__all__' || id == null) _drilldownAccountId = null;
+        }),
+        onPersonChanged: (id) => setState(() {
+          _filterPersonId = id == '__everyone__' ? null : id;
+          if (id == '__everyone__' || id == null) _drilldownPersonId = null;
+        }),
         onDateRangeChanged: (range) => setState(() => _filterDateRange = range),
+        onStatusChanged: (status) => setState(() {
+          _filterStatus = status == '__all__' ? null : status;
+        }),
         onClearAll: () => setState(() {
           _filterAccountId = null;
           _filterPersonId = null;
           _filterDateRange = null;
+          _filterStatus = null;
           _drilldownAccountId = null;
           _drilldownPersonId = null;
         }),
@@ -834,6 +890,11 @@ Future<void> _closeSettings() async {
               _FilterChip(
                 label: _rangeLabel(_filterDateRange!),
                 onRemove: () => setState(() => _filterDateRange = null),
+              ),
+            if (_filterStatus != null)
+              _FilterChip(
+                label: _filterStatus == 'pending' ? 'Pending' : 'Approved',
+                onRemove: () => setState(() => _filterStatus = null),
               ),
           ],
         ),
@@ -1050,6 +1111,21 @@ Future<void> _closeSettings() async {
         }).toList(),
       ),
       const SizedBox(height: 8),
+      Align(
+        alignment: Alignment.center,
+        child: TextButton.icon(
+          onPressed: _linkingPlaid ? null : _startPlaidLink,
+          icon: _linkingPlaid
+              ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+              : const Icon(Icons.add, size: 18),
+          label: const Text('Link a card'),
+        ),
+      ),
+      const SizedBox(height: 12),
       _SummaryBreakdownCard(
         title: 'By household member',
         emptyMessage: 'No assigned charges in this period.',
@@ -1147,7 +1223,7 @@ Future<void> _closeSettings() async {
 
   Future<void> _showPayActionSheet(BuildContext context, double amount, String currency) async {
     final theme = Theme.of(context);
-    final text = '$currency ${amount.toStringAsFixed(2)}';
+    final text = '${_currencySymbol(currency)} ${amount.toStringAsFixed(2)}';
 
     await showModalBottomSheet<void>(
       context: context,
@@ -1595,6 +1671,14 @@ Future<void> _closeSettings() async {
         const SizedBox(height: 8),
         _errorCard(_captureError!),
       ],
+      if (_captureConfigured && _notificationAccess) ...[
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _sendTestNotification,
+          icon: const Icon(Icons.notifications_none),
+          label: const Text('Send test Google Pay notification'),
+        ),
+      ],
       const SizedBox(height: 12),
       const Text(
         'Only Google Wallet transaction alerts that include a recognizable '
@@ -1660,7 +1744,7 @@ class _StatementSummaryCard extends StatelessWidget {
         : 'Statement total not ready';
     final amount = value?.total == null
         ? null
-        : '${value!.currency ?? ''} ${_money(value.total!, absolute: true)}'
+        : '${_currencySymbol(value!.currency ?? '')} ${_money(value.total!, absolute: true)}'
               .trim();
     return Card(
       color: Theme.of(context).colorScheme.primaryContainer,
@@ -1689,6 +1773,8 @@ class _StatementSummaryCard extends StatelessWidget {
     );
   }
 }
+
+const _approvedCharcoal = Color(0xFF3F4540);
 
 class _TransactionCard extends StatelessWidget {
   const _TransactionCard({
@@ -1722,6 +1808,9 @@ class _TransactionCard extends StatelessWidget {
         : _personColor(assignedPerson.id, people);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
+      color: transaction.pending
+          ? const Color(0xFFFEF3C7)
+          : const Color(0xFFE4EADF),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -1738,7 +1827,13 @@ class _TransactionCard extends StatelessWidget {
                         merchant?.isNotEmpty == true
                             ? merchant!
                             : transaction.name,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: transaction.pending
+                              ? _pendingOrange
+                              : _approvedCharcoal,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 18,
+                        ),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -1748,15 +1843,27 @@ class _TransactionCard extends StatelessWidget {
                             transaction.accountName!,
                           if (transaction.pending) 'Pending',
                         ].join(' · '),
+                        style: TextStyle(
+                          color: transaction.pending
+                              ? _pendingOrange
+                              : _approvedCharcoal,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '${transaction.currency} ${_money(transaction.amount)}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                  '${_currencySymbol(transaction.currency)} ${_money(transaction.amount)}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: transaction.pending
+                        ? _pendingOrange
+                        : _approvedCharcoal,
+                    fontWeight: FontWeight.w700,
+                  ),
+),
               ],
             ),
             const SizedBox(height: 12),
@@ -1787,7 +1894,7 @@ class _TransactionCard extends StatelessWidget {
                         assigneeName.isEmpty
                             ? '?'
                             : assigneeName.substring(0, 1).toUpperCase(),
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white,
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
@@ -1824,7 +1931,10 @@ class _TransactionCard extends StatelessWidget {
                       ),
                     ),
                     if (transaction.assignmentSource != 'default')
-                      Icon(Icons.verified_rounded, color: assigneeColor),
+                      Icon(
+                        Icons.verified_rounded,
+                        color: assigneeColor,
+                      ),
                     if (!updating) ...[
                       const SizedBox(width: 8),
                       Icon(
@@ -1864,8 +1974,15 @@ class _EventCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bg = switch (event.reconciliationStatus) {
+      'matched' => Colors.green.withAlpha(12),
+      'manual' => Colors.yellow.withAlpha(12),
+      'none' || null => Theme.of(context).cardTheme.color,
+      _ => Theme.of(context).cardTheme.color,
+    };
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
+      color: bg,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
@@ -1889,6 +2006,36 @@ class _EventCard extends StatelessWidget {
                         ? Theme.of(context).colorScheme.outline
                         : _personColor(event.personId!, people),
                   ),
+                  if (event.reconciliationStatus != null &&
+                      event.reconciliationStatus != 'none')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            switch (event.reconciliationStatus) {
+                              'matched' => Icons.check_circle,
+                              'manual' => Icons.warning,
+                              _ => Icons.info_outline,
+                            },
+                            size: 14,
+                            color: switch (event.reconciliationStatus) {
+                              'matched' => Colors.green,
+                              'manual' => Colors.orange,
+                              _ => null,
+                            },
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            event.reconciliationStatus! == 'matched'
+                                ? 'Matched'
+                                : event.reconciliationStatus! == 'manual'
+                                ? 'Manual'
+                                : '',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      )),
                   const SizedBox(height: 5),
                   Text(
                     '${_sourceLabel(event.source)} · '
@@ -1900,7 +2047,7 @@ class _EventCard extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              '${event.currency} ${_money(event.amount, absolute: true)}',
+              '${_currencySymbol(event.currency)} ${_money(event.amount, absolute: true)}',
               style: Theme.of(
                 context,
               ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
@@ -2691,9 +2838,11 @@ class _TransactionFilterBar extends StatelessWidget {
     required this.selectedAccountId,
     required this.selectedPersonId,
     required this.selectedDateRange,
+    required this.selectedStatus,
     required this.onAccountChanged,
     required this.onPersonChanged,
     required this.onDateRangeChanged,
+    required this.onStatusChanged,
     required this.onClearAll,
   });
 
@@ -2702,9 +2851,11 @@ class _TransactionFilterBar extends StatelessWidget {
   final String? selectedAccountId;
   final String? selectedPersonId;
   final DateTimeRange? selectedDateRange;
+  final String? selectedStatus;
   final ValueChanged<String?> onAccountChanged;
   final ValueChanged<String?> onPersonChanged;
   final ValueChanged<DateTimeRange?> onDateRangeChanged;
+  final ValueChanged<String?> onStatusChanged;
   final VoidCallback onClearAll;
 
   @override
@@ -2721,7 +2872,8 @@ class _TransactionFilterBar extends StatelessWidget {
 
     final hasFilters = selectedAccountId != null ||
         selectedPersonId != null ||
-        selectedDateRange != null;
+        selectedDateRange != null ||
+        selectedStatus != null;
 
     return Card(
       child: Padding(
@@ -2759,7 +2911,7 @@ class _TransactionFilterBar extends StatelessWidget {
                   label: 'Credit card',
                   selectedValue: selectedAccountId,
                   items: [
-                    const _FilterMenuItem(value: null, label: 'All cards'),
+                    const _FilterMenuItem(value: '__all__', label: 'All cards'),
                     ...accounts.map((a) => _FilterMenuItem(
                       value: a.accountId,
                       label: a.accountName,
@@ -2771,13 +2923,23 @@ class _TransactionFilterBar extends StatelessWidget {
                   label: 'Assigned to',
                   selectedValue: selectedPersonId,
                   items: [
-                    const _FilterMenuItem(value: null, label: 'Everyone'),
+                    const _FilterMenuItem(value: '__everyone__', label: 'Everyone'),
                     ...people.map((p) => _FilterMenuItem(
                       value: p.id,
                       label: p.displayName,
                     )),
                   ],
                   onChanged: onPersonChanged,
+                ),
+                _FilterMenuButton(
+                  label: 'Status',
+                  selectedValue: selectedStatus,
+                  items: const [
+                    _FilterMenuItem(value: '__all__', label: 'All'),
+                    _FilterMenuItem(value: 'pending', label: 'Pending'),
+                    _FilterMenuItem(value: 'approved', label: 'Approved'),
+                  ],
+                  onChanged: onStatusChanged,
                 ),
                 _DateRangeFilterButton(
                   label: 'Date range',
@@ -3083,7 +3245,7 @@ class _PayButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final text = '$currency ${amount.toStringAsFixed(2)}';
+    final text = '${_currencySymbol(currency)} ${amount.toStringAsFixed(2)}';
 
     return FilledButton.icon(
       onPressed: onTap,

@@ -22,12 +22,14 @@ From this directory:
 
 ```powershell
 flutter pub get
-flutter run --dart-define=CARD_EVENTS_API_URL=https://creditcards-beige.vercel.app
+flutter run --dart-define=CARD_EVENTS_API_URL=https://YOUR-PROJECT.supabase.co/functions/v1/api
 ```
 
-`CARD_EVENTS_API_URL` can point to a local or deployed instance of the existing
-API. The API's `/api/public-config` endpoint supplies the Supabase URL and
-publishable client key; no Supabase secret is bundled in the app.
+`CARD_EVENTS_API_URL` points to the Supabase Edge Function that serves the API.
+Simple CRUD operations (household members, card events, device tokens, credit card
+display names, Plaid connections) go directly through the Supabase client. Plaid
+operations, card-event creation (device-token auth), statement-cycle calculations,
+and reconciliation are handled by the edge function.
 
 The app uses the existing Google sign-in provider. Add this redirect URL to the
 Supabase project's Authentication URL allow list:
@@ -71,10 +73,13 @@ the provided Google Pay alert example; Google may change notification formats.
 Samsung Pay is not included.
 
 After adding the Android capture feature, apply the updated
-`card-events-api/card_events.sql` to Supabase so `device_tokens.platform` is
-available. Existing device keys default to `ios_shortcut`.
+`card_events.sql` to Supabase so `device_tokens.platform` is available.
+Existing device keys default to `ios_shortcut`.
 
-The Python API remains responsible for authentication, Plaid sync, event
-reconciliation, and statement calculations. Keep service credentials on the
-server; the mobile client only receives Supabase's public client key and the
-signed-in user's access token.
+Supabase Edge Functions replace the previously Vercel-deployed FastAPI app.
+Plaid Link, public-token exchange, scheduled sync, and card-event creation
+(device-token auth) run as edge functions with Plaid credentials stored as
+Supabase Function Secrets. The daily Plaid sync is scheduled via `pg_cron`
+calling the `cron/plaid-sync` route on the `api` edge function. The mobile app
+makes direct Supabase calls for simple CRUD where possible, falling back to
+the edge function for Plaid and statement-cycle operations.

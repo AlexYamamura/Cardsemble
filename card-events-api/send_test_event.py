@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_API_URL = (
-    "https://creditcards-beige.vercel.app/api/card-events"
+    "https://YOUR-PROJECT.supabase.co/functions/v1/api/api/card-events"
 )
 ENV_FILE = Path(__file__).with_name(".env.local")
 
@@ -79,10 +79,10 @@ def main() -> None:
     except (URLError, TimeoutError) as error:
         raise RuntimeError(f"Could not reach the API: {error}") from error
 
-    if "vercel.com/login" in final_url:
+    if "functions/v1" not in final_url and "api/card-events" not in final_url:
         raise RuntimeError(
-            "Vercel redirected to its login page. Disable deployment "
-            "protection for this test deployment, then try again."
+            "The request was not handled by a Supabase Edge Function. "
+            "Verify CARD_EVENTS_API_URL points to your edge function."
         )
     if "application/json" not in content_type.lower():
         raise RuntimeError(

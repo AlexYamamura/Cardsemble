@@ -1,6 +1,8 @@
 import 'dart:convert';
-
+import 'dart:math';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 abstract interface class LedgerApi {
   String get apiBaseUrl;
@@ -34,73 +36,279 @@ class DeviceCaptureCredentials {
   final String token;
 }
 
-class RestLedgerApi implements LedgerApi {
-  RestLedgerApi({
+class HybridLedgerApi implements LedgerApi {
+  HybridLedgerApi({
     required String baseUrl,
+    required this.supabase,
     required this.accessToken,
     http.Client? client,
-  }) : baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
-       _client = client ?? http.Client();
+  })  : _baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
+        _client = client ?? http.Client();
 
-  final String baseUrl;
+  final String _baseUrl;
+  final SupabaseClient supabase;
   final String? Function() accessToken;
   final http.Client _client;
 
   @override
-  String get apiBaseUrl => baseUrl;
+  String get apiBaseUrl => _baseUrl;
 
-  Future<Map<String, dynamic>> _get(String path) async {
-    final response = await _client.get(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers(),
-    );
-    return _decodeResponse(response);
+  String? _getAccessToken() {
+    final token = accessToken();
+    if (token == null || token.isEmpty) {
+      throw LedgerApiException('Your session has expired. Sign in again.');
+    }
+    return token;
   }
 
-  Future<void> _delete(String path) async {
-    final response = await _client.delete(
-      Uri.parse('$baseUrl$path'),
+  Map<String, String> _headers() {
+    final token = _getAccessToken();
+    return {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    };
+  }
+
+  Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl$path'),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    _decodeResponse(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  void _decodeResponse(http.Response response) {
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } on FormatException {
+      throw LedgerApiException(
+        'The card service returned an invalid response (HTTP ${response.statusCode}).',
+      );
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final detail = decoded is Map<String, dynamic>
+          ? decoded['detail']?.toString()
+          : null;
+      throw LedgerApiException(
+        detail ?? 'Request failed (HTTP ${response.statusCode}).',
+      );
+    }
+    if (decoded is! Map<String, dynamic>) {
+      throw LedgerApiException('The card service returned an unexpected response.');
+    }
+  }
+
+  String _currentUserId() {
+    final user = supabase.auth.currentSession?.user;
+    if (user == null) {
+      throw LedgerApiException('Your session has expired. Sign in again.');
+    }
+    return user.id;
+  }
+
+  @override
+  Future<List<HouseholdPerson>> loadPeople() async {
+    final userId = _currentUserId();
+    try {
+      final data = await supabase
+          .from('household_people')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', ascending: true)
+          .order('person_id', ascending: true);
+      return (data as List?)
+          ?.map((row) => HouseholdPerson.fromJson(row))
+          .toList(growable: false) ??
+          [];
+    } catch (error) {
+      throw LedgerApiException('Could not load household members: $error');
+    }
+  }
+
+  @override
+  Future<void> createPerson(String displayName) async {
+    final userId = _currentUserId();
+    try {
+      await supabase.from('household_people').insert({
+        'user_id': userId,
+        'display_name': displayName.trim(),
+        'is_default': false,
+      });
+    } catch (error) {
+      throw LedgerApiException('Could not add household member.');
+    }
+  }
+
+  @override
+  Future<DeviceCaptureCredentials> createGooglePayDeviceToken(String personId) async {
+    final session = supabase.auth.currentSession;
+    if (session == null || session.accessToken.isEmpty) {
+      throw LedgerApiException('Your session has expired. Sign in again.');
+    }
+
+    // Check if the JWT is expired and refresh if needed
+    final expiresAt = session.expiresAt;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    if (expiresAt != null && expiresAt < now) {
+      try {
+        final refreshed = await supabase.auth.refreshSession();
+        final refreshedSession = refreshed.session;
+        if (refreshedSession == null || refreshedSession.accessToken.isEmpty) {
+          throw LedgerApiException('Your session has expired. Sign in again.');
+        }
+      } catch (error) {
+        throw LedgerApiException('Could not refresh session: $error');
+      }
+    }
+
+    final userId = session.user.id;
+
+    try {
+      await supabase
+          .from('household_people')
+          .select('person_id')
+          .eq('user_id', userId)
+          .eq('person_id', personId)
+          .limit(1);
+    } catch (error) {
+      throw LedgerApiException('Could not verify household member: $error');
+    }
+
+    final deviceToken = _generateSecureToken();
+    final hash = crypto.sha256.convert(utf8.encode(deviceToken)).toString();
+
+    try {
+      final data = await supabase.from('device_tokens').insert({
+        'user_id': userId,
+        'person_id': personId,
+        'device_label': 'Android Google Pay',
+        'platform': 'android_google_pay',
+        'token_hash': hash,
+      }).select('id');
+      final dataRow = (data as List);
+      if (dataRow.isEmpty) {
+        throw LedgerApiException('Could not create device key.');
+      }
+      return DeviceCaptureCredentials(
+        id: dataRow[0]['id'] as String,
+        token: deviceToken,
+      );
+    } catch (error) {
+      throw LedgerApiException('Could not create device key: $error');
+    }
+  }
+
+  static String _generateSecureToken() {
+    const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
+    final random = Random.secure();
+    final buffer = StringBuffer();
+    for (var i = 0; i < 43; i++) {
+      buffer.write(chars[random.nextInt(chars.length)]);
+    }
+    return buffer.toString();
+  }
+
+  @override
+  Future<void> revokeDeviceToken(String deviceId) async {
+    final userId = _currentUserId();
+    try {
+      await supabase
+          .from('device_tokens')
+          .update({'revoked_at': DateTime.now().toUtc().toIso8601String()})
+          .eq('id', deviceId)
+          .eq('user_id', userId)
+          .isFilter('revoked_at', null);
+    } catch (error) {
+      throw LedgerApiException('Could not revoke device key.');
+    }
+  }
+
+  @override
+  Future<List<CardTransaction>> loadTransactions() async {
+    final payload = await _edgeGet('/api/plaid-transactions');
+    final transactions = _records(payload, 'transactions');
+    return transactions.map(CardTransaction.fromJson).toList(growable: false);
+  }
+
+  Future<Map<String, dynamic>> _edgeGet(String path) async {
+    final response = await _client.get(
+      Uri.parse('$_baseUrl$path'),
       headers: _headers(),
     );
     _decodeResponse(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> _post(
-    String path,
-    Map<String, dynamic> body,
-  ) async {
-    final response = await _client.post(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers(),
-      body: jsonEncode(body),
-    );
-    return _decodeResponse(response);
+  @override
+  Future<List<CardEventRecord>> loadCardEvents() async {
+    final userId = _currentUserId();
+    try {
+      final data = await supabase
+          .from('card_events')
+          .select(
+              'event_id,user_id,person_id,occurred_at,amount,currency,merchant,card_label,payment_label,source,received_at')
+          .eq('user_id', userId)
+          .order('received_at', ascending: false)
+          .order('event_id', ascending: true)
+          .limit(200);
+      final events = (data as List?)
+          ?.map((row) => CardEventRecord.fromJson(row))
+          .toList(growable: false) ??
+          [];
+
+      final reconData = await supabase
+          .from('card_event_reconciliations')
+          .select('event_id,status')
+          .eq('user_id', userId);
+      final reconByEvent = <String, String>{};
+      // ignore: unnecessary_type_check
+      if (reconData is List) {
+        for (final row in reconData) {
+          final eventId = row['event_id'] as String?;
+          final status = row['status'] as String?;
+          if (eventId != null && status != null) {
+            reconByEvent[eventId] = status;
+          }
+        }
+      }
+
+      return [
+        for (final event in events)
+          event.copyWith(reconciliationStatus: reconByEvent[event.id]),
+      ];
+    } catch (error) {
+      throw LedgerApiException('Could not load card events: $error');
+    }
   }
 
-  Future<Map<String, dynamic>> _patch(
-    String path,
-    Map<String, dynamic> body,
-  ) async {
-    final response = await _client.patch(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers(),
-      body: jsonEncode(body),
-    );
-    return _decodeResponse(response);
+  @override
+  Future<StatementCycleSummary> loadStatementCycles() async {
+    final payload = await _edgeGet('/api/owed/statement-cycles');
+    return StatementCycleSummary.fromJson(payload);
   }
 
   @override
   Future<List<PlaidConnection>> loadPlaidConnections() async {
-    final payload = await _get('/api/plaid/items');
-    return _records(
-      payload,
-      'items',
-    ).map(PlaidConnection.fromJson).toList(growable: false);
-  }
-
-  @override
-  Future<void> syncPlaidConnections() async {
-    await _post('/api/plaid/items/sync', const {});
+    final userId = _currentUserId();
+    try {
+      final data = await supabase
+          .from('plaid_items')
+          .select('item_id,institution_id,institution_name,status,created_at')
+          .eq('user_id', userId)
+          .neq('status', 'disconnected')
+          .order('created_at', ascending: true)
+          .order('item_id', ascending: true);
+      return (data as List?)
+          ?.map((row) => PlaidConnection.fromJson(row))
+          .toList(growable: false) ??
+          [];
+    } catch (error) {
+      throw LedgerApiException('Could not load bank connections: $error');
+    }
   }
 
   @override
@@ -111,11 +319,16 @@ class RestLedgerApi implements LedgerApi {
     );
     final token = payload['link_token'];
     if (token is! String || token.isEmpty) {
-      throw const LedgerApiException(
+      throw LedgerApiException(
         'The card service did not return a Plaid Link token.',
       );
     }
     return token;
+  }
+
+  @override
+  Future<void> syncPlaidConnections() async {
+    await _post('/api/plaid/items/sync', const {});
   }
 
   @override
@@ -133,133 +346,32 @@ class RestLedgerApi implements LedgerApi {
     });
   }
 
-  Map<String, String> _headers() {
-    final token = accessToken();
-    if (token == null || token.isEmpty) {
-      throw const LedgerApiException(
-        'Your session has expired. Sign in again.',
-      );
-    }
-    return {
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json',
-    };
-  }
-
-  Map<String, dynamic> _decodeResponse(http.Response response) {
-    dynamic decoded;
-    try {
-      decoded = jsonDecode(response.body);
-    } on FormatException {
-      throw LedgerApiException(
-        'The card service returned an invalid response '
-        '(HTTP ${response.statusCode}).',
-      );
-    }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final detail = decoded is Map<String, dynamic>
-          ? decoded['detail']?.toString()
-          : null;
-      throw LedgerApiException(
-        detail ?? 'Request failed (HTTP ${response.statusCode}).',
-      );
-    }
-    if (decoded is! Map<String, dynamic>) {
-      throw const LedgerApiException(
-        'The card service returned an unexpected response.',
-      );
-    }
-    return decoded;
-  }
-
-  @override
-  Future<List<HouseholdPerson>> loadPeople() async {
-    final payload = await _get('/api/household/people');
-    return _records(
-      payload,
-      'people',
-    ).map(HouseholdPerson.fromJson).toList(growable: false);
-  }
-
-  @override
-  Future<void> createPerson(String displayName) async {
-    await _post('/api/household/people', {'display_name': displayName});
-  }
-
-  @override
-  Future<DeviceCaptureCredentials> createGooglePayDeviceToken(
-    String personId,
-  ) async {
-    final payload = await _post('/api/device-tokens', {
-      'device_label': 'Android Google Pay',
-      'person_id': personId,
-      'platform': 'android_google_pay',
-    });
-    return DeviceCaptureCredentials(
-      id: payload['id'] as String,
-      token: payload['device_token'] as String,
-    );
-  }
-
-  @override
-  Future<void> revokeDeviceToken(String deviceId) async {
-    await _delete('/api/device-tokens/${Uri.encodeComponent(deviceId)}');
-  }
-
-  @override
-  Future<List<CardTransaction>> loadTransactions() async {
-    const pageSize = 500;
-    final transactions = <CardTransaction>[];
-    var offset = 0;
-    while (true) {
-      final payload = await _get(
-        '/api/plaid-transactions?limit=$pageSize&offset=$offset',
-      );
-      final page = _records(
-        payload,
-        'transactions',
-      ).map(CardTransaction.fromJson).toList(growable: false);
-      transactions.addAll(page);
-      if (page.length < pageSize) {
-        return transactions;
-      }
-      offset += page.length;
-    }
-  }
-
-  @override
-  Future<List<CardEventRecord>> loadCardEvents() async {
-    final payload = await _get('/api/card-events?limit=200');
-    return _records(
-      payload,
-      'events',
-    ).map(CardEventRecord.fromJson).toList(growable: false);
-  }
-
-  @override
-  Future<StatementCycleSummary> loadStatementCycles() async {
-    return StatementCycleSummary.fromJson(
-      await _get('/api/owed/statement-cycles'),
-    );
-  }
-
   @override
   Future<void> updateCreditCardDisplayName(
     String accountId,
     String? displayName,
   ) async {
-    final encodedId = Uri.encodeComponent(accountId);
-    await _patch('/api/plaid-credit-accounts/$encodedId/display-name', {
-      'display_name': displayName,
-    });
+    final userId = _currentUserId();
+    try {
+      await supabase
+          .from('plaid_credit_accounts')
+          .update({'display_name': displayName})
+          .eq('account_id', accountId)
+          .eq('user_id', userId);
+    } catch (error) {
+      throw LedgerApiException('Could not save the credit card name.');
+    }
   }
 
   @override
   Future<void> assignTransaction(String transactionId, String? personId) async {
-    final encodedId = Uri.encodeComponent(transactionId);
-    await _post('/api/plaid-transactions/$encodedId/assignment', {
-      'person_id': personId,
-    });
+    final payload = await _post(
+      '/api/plaid-transactions/$transactionId/assignment',
+      {'person_id': personId},
+    );
+    if (!payload['ok']) {
+      throw LedgerApiException('Could not assign transaction.');
+    }
   }
 }
 
@@ -379,6 +491,7 @@ class CardEventRecord {
     required this.paymentLabel,
     required this.source,
     required this.personId,
+    this.reconciliationStatus,
   });
 
   final String id;
@@ -390,6 +503,22 @@ class CardEventRecord {
   final String paymentLabel;
   final String source;
   final String? personId;
+  final String? reconciliationStatus;
+
+  CardEventRecord copyWith({String? reconciliationStatus}) {
+    return CardEventRecord(
+      id: id,
+      amount: amount,
+      currency: currency,
+      occurredAt: occurredAt,
+      merchant: merchant,
+      cardLabel: cardLabel,
+      paymentLabel: paymentLabel,
+      source: source,
+      personId: personId,
+      reconciliationStatus: reconciliationStatus ?? this.reconciliationStatus,
+    );
+  }
 
   factory CardEventRecord.fromJson(Map<String, dynamic> json) {
     return CardEventRecord(

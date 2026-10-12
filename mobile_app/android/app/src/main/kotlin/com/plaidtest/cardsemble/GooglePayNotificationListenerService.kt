@@ -38,7 +38,11 @@ class GooglePayNotificationListenerService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(statusBarNotification: StatusBarNotification) {
-        if (statusBarNotification.packageName != GOOGLE_WALLET_PACKAGE) return
+        val isTestNotification =
+            statusBarNotification.packageName == packageName &&
+            statusBarNotification.id == MainActivity.TEST_NOTIFICATION_ID
+        val isGoogleWallet = statusBarNotification.packageName == GOOGLE_WALLET_PACKAGE
+        if (!isTestNotification && !isGoogleWallet) return
         val credentials = try {
             CaptureCredentialStore.credentials(applicationContext)
         } catch (error: Exception) {

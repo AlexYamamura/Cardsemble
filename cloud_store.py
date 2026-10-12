@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 from dotenv import load_dotenv
 
 
-DEFAULT_API_URL = "https://creditcards-beige.vercel.app"
+DEFAULT_API_URL = "https://YOUR-PROJECT.supabase.co/functions/v1/api"
 PAGE_SIZE = 500
 
 

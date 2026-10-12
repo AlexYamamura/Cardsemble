@@ -1,8 +1,6 @@
-.vercel
+__pycache__/
+*.py[cod]
 .env
 .env.*
 !.env.example
-.vercel/
-__pycache__/
-*.py[cod]
 .env*

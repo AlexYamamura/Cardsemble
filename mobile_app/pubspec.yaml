@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   supabase_flutter: ^2.15.4
   http: ^1.6.0
+  crypto: ^3.0.6
   shared_preferences: ^2.5.3
   plaid_flutter: ^5.2.1
   android_intent_plus: ^5.2.0

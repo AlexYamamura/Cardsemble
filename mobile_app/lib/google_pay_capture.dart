@@ -36,4 +36,8 @@ class GooglePayCapture {
   Future<void> openNotificationAccessSettings() async {
     await _channel.invokeMethod<void>('openNotificationAccessSettings');
   }
+
+  Future<bool?> sendTestNotification() async {
+    return await _channel.invokeMethod<bool>('sendTestNotification');
+  }
 }

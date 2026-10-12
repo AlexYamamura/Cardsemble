@@ -9,7 +9,7 @@ import 'ledger_screen.dart';
 
 const _apiBaseUrl = String.fromEnvironment(
   'CARD_EVENTS_API_URL',
-  defaultValue: 'https://creditcards-beige.vercel.app',
+  defaultValue: 'https://ebawvkiabuhcyvyzegfn.supabase.co/functions/v1/api',
 );
 const _oauthRedirectUrl = 'com.plaidtest.cardsemble://login-callback/';
 
@@ -144,8 +144,9 @@ class _SessionGateState extends State<_SessionGate> {
     }
 
     return LedgerScreen(
-      api: RestLedgerApi(
+      api: HybridLedgerApi(
         baseUrl: widget.apiBaseUrl,
+        supabase: widget.client,
         accessToken: () => widget.client.auth.currentSession?.accessToken,
       ),
       onSignOut: _signOut,

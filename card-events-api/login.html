@@ -116,7 +116,7 @@
       <textarea id="device-token" rows="4" readonly></textarea>
       <button id="copy-device-token" type="button">Copy key</button>
       <p>Shortcut header: <code>Authorization: Bearer &lt;key&gt;</code></p>
-      <p>POST URL: <code>https://creditcards-beige.vercel.app/api/card-events</code></p>
+      <p>POST URL: <code>https://YOUR-PROJECT.supabase.co/functions/v1/api/api/card-events</code></p>
     </div>
     <h3>Registered devices</h3>
     <ul id="device-list"></ul>
@@ -146,6 +146,9 @@
     let authStorageKey;
     let householdPeople = [];
     let currentSession;
+    const apiBaseUrl = location.origin.includes("supabase.co")
+      ? location.origin + "/functions/v1/api"
+      : "https://YOUR-PROJECT.supabase.co/functions/v1/api";
 
     function showSignedIn(session) {
       currentSession = session;
@@ -159,7 +162,7 @@
     }
 
     try {
-      const configResponse = await fetch("/api/public-config");
+      const configResponse = await fetch(apiBaseUrl + "/api/public-config");
       if (!configResponse.ok) {
         throw new Error(`Could not load app configuration (HTTP ${configResponse.status}).`);
       }
@@ -222,7 +225,7 @@
       createDeviceToken.disabled = true;
       status.textContent = "Creating device key…";
       try {
-        const response = await fetch("/api/device-tokens", {
+        const response = await fetch(apiBaseUrl + "/api/device-tokens", {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${data.session.access_token}`,
@@ -260,7 +263,7 @@
 
     async function loadDeviceTokens(session) {
       try {
-        const response = await fetch("/api/device-tokens", {
+        const response = await fetch(apiBaseUrl + "/api/device-tokens", {
           headers: { "Authorization": `Bearer ${session.access_token}` },
         });
         const result = await response.json();
@@ -322,7 +325,7 @@
             revoke.addEventListener("click", async () => {
               revoke.disabled = true;
               try {
-                const revokeResponse = await fetch(`/api/device-tokens/${device.id}`, {
+                const revokeResponse = await fetch(apiBaseUrl + `/api/device-tokens/${device.id}`, {
                   method: "DELETE",
                   headers: { "Authorization": `Bearer ${session.access_token}` },
                 });
@@ -359,7 +362,7 @@
         ...(options.headers || {}),
         Authorization: `Bearer ${requestToken}`,
       };
-      const response = await fetch(path, {
+      const response = await fetch(apiBaseUrl + path, {
         ...options,
         headers: {
           "Authorization": `******}`,
@@ -740,7 +743,7 @@
       status.textContent = "Saving event…";
 
       try {
-        const response = await fetch("/api/card-events", {
+        const response = await fetch(apiBaseUrl + "/api/card-events", {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${data.session.access_token}`,
