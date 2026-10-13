@@ -718,13 +718,6 @@ onPopInvokedWithResult: (didPop, result) {
               ],
             ),
         ),
-      floatingActionButton: _selectedTab == 3
-          ? FloatingActionButton.extended(
-              onPressed: _addingPerson ? null : _addPerson,
-              icon: const Icon(Icons.person_add_alt_1),
-              label: const Text('Add person'),
-            )
-          : null,
       bottomNavigationBar: NavigationBar(
           height: 76,
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
@@ -842,7 +835,6 @@ onPopInvokedWithResult: (didPop, result) {
 
     final effectiveAccountId = _drilldownAccountId ?? _filterAccountId;
     final effectivePersonId = _drilldownPersonId ?? _filterPersonId;
-    final effectiveDateRange = _filterDateRange ?? _summaryRange;
     final effectiveStatus = _filterStatus;
 
     final drilldownTransactions = _transactions
@@ -861,8 +853,9 @@ onPopInvokedWithResult: (didPop, result) {
                   effectivePersonId;
           final dateMatches =
               day != null &&
-              day.compareTo(effectiveDateRange.start) >= 0 &&
-              day.compareTo(effectiveDateRange.end) <= 0 &&
+              (_filterDateRange == null ||
+                  (day.compareTo(_filterDateRange!.start) >= 0 &&
+                      day.compareTo(_filterDateRange!.end) <= 0)) &&
               (double.tryParse(transaction.amount) ?? 0) > 0 &&
               transaction.transactionCode?.toLowerCase() != 'payment';
           final statusMatches = effectiveStatus == null ||
@@ -908,7 +901,7 @@ onPopInvokedWithResult: (didPop, result) {
         people: _people,
         selectedAccountId: effectiveAccountId ?? '__all__',
         selectedPersonId: effectivePersonId ?? '__everyone__',
-        selectedDateRange: effectiveDateRange,
+        selectedDateRange: _filterDateRange,
         selectedStatus: effectiveStatus ?? '__all__',
         onAccountChanged: (id) => setState(() {
           _filterAccountId = id == '__all__' ? null : id;
@@ -1084,9 +1077,8 @@ onPopInvokedWithResult: (didPop, result) {
           (accountId == 'unknown-card' ? 'Card name unavailable' : 'Card');
     }
 
-    return [
+return [
       Card(
-        color: const Color(0xFF2E7D32),
         child: Padding(
           padding: const EdgeInsets.all(18),
           child: Column(
@@ -1094,18 +1086,18 @@ onPopInvokedWithResult: (didPop, result) {
             children: [
               Text(
                 'Household spending',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white),
+                style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 4),
               Text(
                 _rangeLabel(_summaryRange),
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 12),
               if (totalsByCurrency.isEmpty)
                 Text(
                   'No posted card charges in this date range.',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white70),
+                  style: Theme.of(context).textTheme.titleMedium,
                 )
               else
                 ...totalsByCurrency.entries.map(
@@ -1114,30 +1106,28 @@ onPopInvokedWithResult: (didPop, result) {
                     child: Text(
                       '${_currencySymbol(entry.key)} ${_money(entry.value.toStringAsFixed(2))}',
                       style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(fontWeight: FontWeight.w800, color: Colors.white),
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
                   ),
                 ),
-const SizedBox(height: 4),
+              const SizedBox(height: 4),
               Text(
                 '${included.length} posted charge${included.length == 1 ? '' : 's'}',
-                style: const TextStyle(color: Colors.white70),
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ),
         ),
       ),
       const SizedBox(height: 12),
-      FilledButton.icon(
+FilledButton.icon(
         onPressed: _loading ? null : _chooseSummaryRange,
         icon: const Icon(Icons.date_range),
         label: const Text('Choose date range'),
-style: FilledButton.styleFrom(
-            backgroundColor: _green,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-          ),
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+        ),
       ),
       const SizedBox(height: 4),
       SizedBox(
@@ -1154,13 +1144,13 @@ style: FilledButton.styleFrom(
               label: Text(_monthLabel(month)),
               selected: isSelected,
               onSelected: _loading ? null : (_) => _selectMonth(month),
-              selectedColor: _green,
+              selectedColor: Theme.of(context).colorScheme.primary,
               checkmarkColor: Colors.white,
               labelStyle: TextStyle(
-                color: isSelected ? Colors.white : _green,
+                color: isSelected ? Colors.white : Theme.of(context).colorScheme.primary,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
               ),
-              side: BorderSide(color: _green),
+              side: BorderSide(color: Theme.of(context).colorScheme.primary),
               backgroundColor: Colors.white,
             );
           },
@@ -1213,8 +1203,6 @@ Align(
               : const Icon(Icons.add, size: 18),
           label: const Text('Link a card'),
           style: FilledButton.styleFrom(
-            backgroundColor: _green,
-            foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
           ),
@@ -1535,8 +1523,8 @@ Align(
                           : const Icon(Icons.qr_code_scanner),
                       label: const Text('Scan QR to add'),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: _green,
-                        side: BorderSide(color: _green),
+                        foregroundColor: Theme.of(context).colorScheme.primary,
+                        side: BorderSide(color: Theme.of(context).colorScheme.primary),
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
@@ -1550,8 +1538,6 @@ Align(
                           : const Icon(Icons.person_add),
                       label: const Text('Add manually'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: _green,
-                        foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
@@ -1669,10 +1655,6 @@ Align(
                       onPressed: _startPlaidLink,
                       icon: const Icon(Icons.add_link),
                       label: const Text('Link another card'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _green,
-                        foregroundColor: Colors.white,
-                      ),
                     ),
                     if (_plaidConnections.isNotEmpty)
                       OutlinedButton.icon(
@@ -1909,17 +1891,16 @@ class _StatementSummaryCard extends StatelessWidget {
         : '${_currencySymbol(value!.currency ?? '')} ${_money(value.total!, absolute: true)}'
               .trim();
     return Card(
-      color: const Color(0xFF2E7D32),
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(headline, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white)),
+            Text(headline, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
             Text(
               amount ?? _statementStatus(value?.status),
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.white),
+              style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 4),
             Text(
@@ -1928,7 +1909,7 @@ class _StatementSummaryCard extends StatelessWidget {
                   : '${value.accountCount} card account'
                         '${value.accountCount == 1 ? '' : 's'} · '
                         'split by assigned person',
-              style: TextStyle(color: Colors.white70),
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
         ),
@@ -1938,7 +1919,6 @@ class _StatementSummaryCard extends StatelessWidget {
 }
 
 const _approvedCharcoal = Color(0xFF3F4540);
-const _green = Color(0xFF2E7D32);
 
 class _TransactionCard extends StatelessWidget {
   const _TransactionCard({
@@ -2150,7 +2130,7 @@ class _EventCard extends StatelessWidget {
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: _green,
+              backgroundColor: Theme.of(context).colorScheme.primary,
               child: const Icon(Icons.notifications_outlined, color: Colors.white),
             ),
             const SizedBox(width: 12),
@@ -2456,15 +2436,10 @@ class _AddPersonDialogState extends State<_AddPersonDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          style: TextButton.styleFrom(foregroundColor: _green),
           child: const Text('Cancel'),
         ),
         FilledButton(
           onPressed: _submit,
-          style: FilledButton.styleFrom(
-            backgroundColor: _green,
-            foregroundColor: Colors.white,
-          ),
           child: const Text('Add'),
         ),
       ],
@@ -3161,11 +3136,11 @@ class _FilterMenuButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: selectedValue != null
-                  ? _green
+                  ? theme.colorScheme.primary
                   : theme.colorScheme.outline,
             ),
             color: selectedValue != null
-                ? _green
+                ? theme.colorScheme.primary
                 : null,
           ),
           child: Row(
@@ -3344,12 +3319,12 @@ class _DateRangeFilterButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         side: BorderSide(
           color: selectedRange != null
-              ? const Color(0xFF1B5E20)
-              : const Color(0xFF2E7D32),
+              ? theme.colorScheme.primary
+              : theme.colorScheme.primary,
         ),
         backgroundColor: selectedRange != null
-            ? const Color(0xFF1B5E20)
-            : const Color(0xFFE8F5E9),
+            ? theme.colorScheme.primary
+            : theme.colorScheme.primaryContainer.withAlpha(50),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -3359,15 +3334,15 @@ class _DateRangeFilterButton extends StatelessWidget {
             style: theme.textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w600,
               color: selectedRange != null
-                  ? Colors.white
-                  : const Color(0xFF2E7D32),
+                  ? theme.colorScheme.onPrimary
+                  : theme.colorScheme.primary,
             ),
           ),
           const SizedBox(width: 4),
           Icon(
             Icons.arrow_drop_down,
             size: 18,
-            color: selectedRange != null ? Colors.white : const Color(0xFF2E7D32),
+            color: selectedRange != null ? theme.colorScheme.onPrimary : theme.colorScheme.primary,
           ),
         ],
       ),
@@ -3431,8 +3406,6 @@ class _PayButton extends StatelessWidget {
         ),
       ),
       style: FilledButton.styleFrom(
-        backgroundColor: _green,
-        foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         minimumSize: const Size.fromHeight(56),
       ),
