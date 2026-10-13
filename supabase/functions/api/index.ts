@@ -21,6 +21,10 @@ import {
   fetchUserRows,
   creditCardDisplayName,
 } from "../_shared/reconcile.ts";
+import {
+  generateCsvPreview,
+  confirmCsvImport,
+} from "../_shared/csv_import.ts";
 import { Decimal } from "https://esm.sh/decimal.js@10.4.3";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -593,6 +597,249 @@ Deno.serve(async (req) => {
       if (error) throw new ApiError(502, error.message);
       await calculateStatementSummaries(auth.userId);
       return jsonResponse({ ok: true, assignment: rows?.[0] });
+    }
+
+    // --- Household people DELETE ---
+    if (method === "DELETE" && path.startsWith("household/people/")) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const personId = path.split("/")[2];
+      if (!personId) {
+        throw new ApiError(400, "Invalid person ID");
+      }
+      const { data, error } = await supabase
+        .from("household_people")
+        .delete()
+        .eq("person_id", personId)
+        .eq("user_id", auth.userId)
+        .select();
+      if (error) throw new ApiError(502, error.message);
+      if (!data || data.length === 0) throw new ApiError(404, "Household person not found");
+      return jsonResponse({ ok: true, deleted: true, person_id: personId });
+    }
+
+    // --- Household members ---
+    if (method === "GET" && path === "household/members") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const { data, error } = await supabase
+        .from("household_members")
+        .select("user_id, role, joined_at, invite_code")
+        .eq("household_id", auth.userId);
+      if (error) throw new ApiError(502, error.message);
+      return jsonResponse({ members: data ?? [] });
+    }
+
+    if (method === "POST" && path === "household/members/join") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const body = await req.json().catch(() => ({}));
+      const inviteCode = body.invite_code ? String(body.invite_code).toUpperCase().trim() : null;
+      if (!inviteCode) {
+        throw new ApiError(400, "invite_code is required");
+      }
+
+      // Find the household owner by invite code
+      const { data: owner, error: ownerError } = await supabase
+        .from("household_members")
+        .select("household_id, user_id")
+        .eq("invite_code", inviteCode)
+        .eq("household_id", "user_id") // Only owners have household_id = user_id
+        .limit(1);
+      if (ownerError) throw new ApiError(502, ownerError.message);
+      if (!owner || owner.length === 0) {
+        throw new ApiError(404, "Invalid or expired invite code");
+      }
+
+      const householdId = owner[0].household_id;
+      if (householdId === auth.userId) {
+        throw new ApiError(400, "Cannot join your own household");
+      }
+
+      // Check if already a member
+      const { data: existing } = await supabase
+        .from("household_members")
+        .select("user_id")
+        .eq("household_id", householdId)
+        .eq("user_id", auth.userId)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        throw new ApiError(409, "Already a member of this household");
+      }
+
+      const { data, error } = await supabase
+        .from("household_members")
+        .insert({ household_id: householdId, user_id: auth.userId, role: "member" })
+        .select();
+      if (error) {
+        if (error.code === "23505") {
+          throw new ApiError(409, "Already a member of this household");
+        }
+        throw new ApiError(502, error.message);
+      }
+      return jsonResponse({ member: data?.[0], household_id: householdId });
+    }
+
+    if (method === "POST" && path === "household/members") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const body = await req.json().catch(() => ({}));
+      const userId = body.user_id ? String(body.user_id) : null;
+      if (!userId) {
+        throw new ApiError(400, "user_id is required");
+      }
+      if (userId === auth.userId) {
+        throw new ApiError(400, "Cannot add yourself as a household member");
+      }
+      const { data, error } = await supabase
+        .from("household_members")
+        .insert({ household_id: auth.userId, user_id: userId, role: "member" })
+        .select();
+      if (error) {
+        if (error.code === "23505") {
+          throw new ApiError(409, "User is already a member of this household");
+        }
+        throw new ApiError(502, error.message);
+      }
+      return jsonResponse({ member: data?.[0] });
+    }
+
+    if (method === "DELETE" && path.startsWith("household/members/")) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const targetUserId = path.split("/")[2];
+      if (!targetUserId) {
+        throw new ApiError(400, "Invalid member ID");
+      }
+      const { error } = await supabase
+        .from("household_members")
+        .delete()
+        .eq("household_id", auth.userId)
+        .eq("user_id", targetUserId);
+      if (error) throw new ApiError(502, error.message);
+      return jsonResponse({ ok: true, removed_user_id: targetUserId });
+    }
+
+    // --- Transaction household visibility ---
+    if (method === "PATCH" && path.match(/^plaid-transactions\/[^/]+\/household-visible$/)) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const transactionId = path.split("/")[1];
+      const body = await req.json().catch(() => ({}));
+      const visible = body.household_visible === true;
+
+      const { data: txRows, error: txError } = await supabase
+        .from("plaid_transactions")
+        .select("transaction_id")
+        .eq("transaction_id", transactionId)
+        .eq("user_id", auth.userId)
+        .eq("is_removed", false)
+        .limit(1);
+      if (txError) throw new ApiError(502, txError.message);
+      if (!txRows || txRows.length === 0) throw new ApiError(404, "Transaction not found");
+
+      await supabase
+        .from("plaid_transactions")
+        .update({ household_visible: visible })
+        .eq("transaction_id", transactionId)
+        .eq("user_id", auth.userId);
+
+      return jsonResponse({ ok: true, transaction_id: transactionId, household_visible: visible });
+    }
+
+    // --- Card event household visibility ---
+    if (method === "PATCH" && path.match(/^card-events\/[^/]+\/household-visible$/)) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const eventId = path.split("/")[1];
+      const body = await req.json().catch(() => ({}));
+      const visible = body.household_visible === true;
+
+      const { data: eventRows, error: eventError } = await supabase
+        .from("card_events")
+        .select("event_id")
+        .eq("event_id", eventId)
+        .eq("user_id", auth.userId)
+        .limit(1);
+      if (eventError) throw new ApiError(502, eventError.message);
+      if (!eventRows || eventRows.length === 0) throw new ApiError(404, "Card event not found");
+
+      await supabase
+        .from("card_events")
+        .update({ household_visible: visible })
+        .eq("event_id", eventId)
+        .eq("user_id", auth.userId);
+
+      return jsonResponse({ ok: true, event_id: eventId, household_visible: visible });
+    }
+
+    // --- CSV Import ---
+    if (method === "POST" && path === "csv-import/preview") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const body = await req.json().catch(() => ({}));
+      const accountId = body.account_id ? String(body.account_id) : null;
+      const csvText = body.csv_text ? String(body.csv_text) : null;
+
+      if (!accountId || !csvText) {
+        throw new ApiError(400, "account_id and csv_text are required");
+      }
+
+      const result = await generateCsvPreview(auth.userId, accountId, csvText);
+      return jsonResponse(result);
+    }
+
+    if (method === "POST" && path === "csv-import/confirm") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const body = await req.json().catch(() => ({}));
+      const accountId = body.account_id ? String(body.account_id) : null;
+      const rows = Array.isArray(body.rows) ? body.rows : [];
+      const filename = body.filename ? String(body.filename) : "import.csv";
+
+      if (!accountId || rows.length === 0) {
+        throw new ApiError(400, "account_id and rows are required");
+      }
+
+      const result = await confirmCsvImport(auth.userId, accountId, rows, filename);
+      return jsonResponse(result);
+    }
+
+    if (method === "GET" && path === "csv-import/history") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "50", 10), 100);
+      const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+
+      const { data, error, count } = await supabase
+        .from("csv_import_history")
+        .select("*", { count: "exact" })
+        .eq("user_id", auth.userId)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (error) throw new ApiError(502, error.message);
+      return jsonResponse({ imports: data ?? [], total: count ?? 0 });
     }
 
     // --- Credit card display name ---

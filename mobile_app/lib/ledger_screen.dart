@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:plaid_flutter/plaid_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -442,6 +443,53 @@ Future<void> _closeSettings() async {
     }
   }
 
+  bool _scanningQr = false;
+
+  Future<void> _scanQrToAddPerson() async {
+    setState(() => _scanningQr = true);
+    try {
+      final result = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) => _QrScannerSheet(onScan: (code) => Navigator.pop(context, code)),
+      );
+      if (result == null || !mounted) return;
+
+      // Parse the QR code - expected format: invite code directly or cardsemble://invite?code=xxx
+      String inviteCode = result.trim();
+      final uri = Uri.tryParse(result);
+      if (uri != null && uri.scheme == 'cardsemble' && uri.host == 'invite') {
+        inviteCode = uri.queryParameters['code'] ?? uri.queryParameters['token'] ?? '';
+      }
+
+      if (inviteCode.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid QR code. Please scan a Cardsemble invite code.')),
+        );
+        return;
+      }
+
+      setState(() => _addingPerson = true);
+      try {
+        await widget.api.joinHouseholdByInviteCode(inviteCode);
+        await _refresh();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Household member added successfully!')),
+        );
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add member: $error')),
+        );
+      } finally {
+        if (mounted) setState(() => _addingPerson = false);
+      }
+    } finally {
+      if (mounted) setState(() => _scanningQr = false);
+    }
+  }
+
   Future<void> _enableGooglePayCapture() async {
     final personId = _capturePersonId;
     if (personId == null) {
@@ -596,6 +644,8 @@ onPopInvokedWithResult: (didPop, result) {
       canPop: true,
       child: Scaffold(
       appBar: AppBar(
+        backgroundColor: const Color(0xFF5D4E37), // Dark brown
+        foregroundColor: Colors.white,
         title: AnimatedSwitcher(
           duration: const Duration(milliseconds: 200),
           transitionBuilder: (child, animation) => FadeTransition(
@@ -643,18 +693,30 @@ onPopInvokedWithResult: (didPop, result) {
           ),
         ],
       ),
-      body: PageView(
-          controller: _pageController,
-          physics: _SensitivePageScrollPhysics(),
-          onPageChanged: (index) {
-            setState(() => _selectedTab = index);
-          },
-          children: [
-            _buildTabContent(0),
-            _buildTabContent(1),
-            _buildTabContent(2),
-            _buildTabContent(3),
-          ],
+      body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                Color(0xFFDDD1BD), // Warm beige
+                Color(0xFFD5CFC2), // Mushroom
+              ],
+            ),
+          ),
+          child: PageView(
+              controller: _pageController,
+              physics: _SensitivePageScrollPhysics(),
+              onPageChanged: (index) {
+                setState(() => _selectedTab = index);
+              },
+              children: [
+                _buildTabContent(0),
+                _buildTabContent(1),
+                _buildTabContent(2),
+                _buildTabContent(3),
+              ],
+            ),
         ),
       floatingActionButton: _selectedTab == 3
           ? FloatingActionButton.extended(
@@ -1024,7 +1086,7 @@ onPopInvokedWithResult: (didPop, result) {
 
     return [
       Card(
-        color: Theme.of(context).colorScheme.primaryContainer,
+        color: const Color(0xFF2E7D32),
         child: Padding(
           padding: const EdgeInsets.all(18),
           child: Column(
@@ -1032,18 +1094,18 @@ onPopInvokedWithResult: (didPop, result) {
             children: [
               Text(
                 'Household spending',
-                style: Theme.of(context).textTheme.titleMedium,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white),
               ),
               const SizedBox(height: 4),
               Text(
                 _rangeLabel(_summaryRange),
-                style: Theme.of(context).textTheme.bodyMedium,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
               ),
               const SizedBox(height: 12),
               if (totalsByCurrency.isEmpty)
                 Text(
                   'No posted card charges in this date range.',
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white70),
                 )
               else
                 ...totalsByCurrency.entries.map(
@@ -1052,23 +1114,30 @@ onPopInvokedWithResult: (didPop, result) {
                     child: Text(
                       '${_currencySymbol(entry.key)} ${_money(entry.value.toStringAsFixed(2))}',
                       style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(fontWeight: FontWeight.w800),
+                          ?.copyWith(fontWeight: FontWeight.w800, color: Colors.white),
                     ),
                   ),
                 ),
-              const SizedBox(height: 4),
+const SizedBox(height: 4),
               Text(
                 '${included.length} posted charge${included.length == 1 ? '' : 's'}',
+                style: const TextStyle(color: Colors.white70),
               ),
             ],
           ),
         ),
       ),
       const SizedBox(height: 12),
-      OutlinedButton.icon(
+      FilledButton.icon(
         onPressed: _loading ? null : _chooseSummaryRange,
         icon: const Icon(Icons.date_range),
         label: const Text('Choose date range'),
+style: FilledButton.styleFrom(
+            backgroundColor: _green,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          ),
       ),
       const SizedBox(height: 4),
       SizedBox(
@@ -1079,11 +1148,20 @@ onPopInvokedWithResult: (didPop, result) {
           separatorBuilder: (context, index) => const SizedBox(width: 8),
           itemBuilder: (context, index) {
             final month = quickMonths[index];
+            final isSelected = _rangeIsMonth(month);
             return FilterChip(
               key: ValueKey('quick-month-${month.year}-${month.month}'),
               label: Text(_monthLabel(month)),
-              selected: _rangeIsMonth(month),
+              selected: isSelected,
               onSelected: _loading ? null : (_) => _selectMonth(month),
+              selectedColor: _green,
+              checkmarkColor: Colors.white,
+              labelStyle: TextStyle(
+                color: isSelected ? Colors.white : _green,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+              side: BorderSide(color: _green),
+              backgroundColor: Colors.white,
             );
           },
         ),
@@ -1122,18 +1200,24 @@ onPopInvokedWithResult: (didPop, result) {
         }).toList(),
       ),
       const SizedBox(height: 8),
-      Align(
+Align(
         alignment: Alignment.center,
-        child: TextButton.icon(
+        child: FilledButton.icon(
           onPressed: _linkingPlaid ? null : _startPlaidLink,
           icon: _linkingPlaid
               ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
               : const Icon(Icons.add, size: 18),
           label: const Text('Link a card'),
+          style: FilledButton.styleFrom(
+            backgroundColor: _green,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          ),
         ),
       ),
       const SizedBox(height: 12),
@@ -1426,34 +1510,97 @@ onPopInvokedWithResult: (didPop, result) {
           'The primary person receives any transaction left on the household default.',
         ),
       ),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Add household member',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Invite someone to share card transactions. They can scan the QR code below or you can add them manually.',
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _scanningQr ? null : _scanQrToAddPerson,
+                      icon: _scanningQr
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.qr_code_scanner),
+                      label: const Text('Scan QR to add'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _green,
+                        side: BorderSide(color: _green),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _addingPerson ? null : _addPerson,
+                      icon: _addingPerson
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.person_add),
+                      label: const Text('Add manually'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: 16),
       if (_people.isEmpty)
         _emptyCard('No household members are configured.')
       else
-        ..._people.map(
-          (person) => Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: _personColor(person.id, _people),
-                child: Text(
-                  person.displayName.isEmpty
-                      ? '?'
-                      : person.displayName.substring(0, 1).toUpperCase(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Current members',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            ..._people.map(
+              (person) => Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: _personColor(person.id, _people),
+                    child: Text(
+                      person.displayName.isEmpty
+                          ? '?'
+                          : person.displayName.substring(0, 1).toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
+                  title: Text(person.displayName),
+                  subtitle: person.isDefault
+                      ? const Text('Household default')
+                      : null,
+                  trailing: person.isDefault
+                      ? const Icon(Icons.star_outline)
+                      : null,
                 ),
               ),
-              title: Text(person.displayName),
-              subtitle: person.isDefault
-                  ? const Text('Household default')
-                  : null,
-              trailing: person.isDefault
-                  ? const Icon(Icons.star_outline)
-                  : null,
             ),
-          ),
+          ],
         ),
     ];
   }
@@ -1522,6 +1669,10 @@ onPopInvokedWithResult: (didPop, result) {
                       onPressed: _startPlaidLink,
                       icon: const Icon(Icons.add_link),
                       label: const Text('Link another card'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _green,
+                        foregroundColor: Colors.white,
+                      ),
                     ),
                     if (_plaidConnections.isNotEmpty)
                       OutlinedButton.icon(
@@ -1758,17 +1909,17 @@ class _StatementSummaryCard extends StatelessWidget {
         : '${_currencySymbol(value!.currency ?? '')} ${_money(value.total!, absolute: true)}'
               .trim();
     return Card(
-      color: Theme.of(context).colorScheme.primaryContainer,
+      color: const Color(0xFF2E7D32),
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(headline, style: Theme.of(context).textTheme.titleMedium),
+            Text(headline, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white)),
             const SizedBox(height: 6),
             Text(
               amount ?? _statementStatus(value?.status),
-              style: Theme.of(context).textTheme.headlineSmall,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.white),
             ),
             const SizedBox(height: 4),
             Text(
@@ -1777,6 +1928,7 @@ class _StatementSummaryCard extends StatelessWidget {
                   : '${value.accountCount} card account'
                         '${value.accountCount == 1 ? '' : 's'} · '
                         'split by assigned person',
+              style: TextStyle(color: Colors.white70),
             ),
           ],
         ),
@@ -1786,6 +1938,7 @@ class _StatementSummaryCard extends StatelessWidget {
 }
 
 const _approvedCharcoal = Color(0xFF3F4540);
+const _green = Color(0xFF2E7D32);
 
 class _TransactionCard extends StatelessWidget {
   const _TransactionCard({
@@ -1819,9 +1972,7 @@ class _TransactionCard extends StatelessWidget {
         : _personColor(assignedPerson.id, people);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      color: transaction.pending
-          ? const Color(0xFFFEF3C7)
-          : const Color(0xFFE4EADF),
+      color: Colors.white,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -1998,7 +2149,10 @@ class _EventCard extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         child: Row(
           children: [
-            const CircleAvatar(child: Icon(Icons.notifications_outlined)),
+            CircleAvatar(
+              backgroundColor: _green,
+              child: const Icon(Icons.notifications_outlined, color: Colors.white),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -2302,9 +2456,17 @@ class _AddPersonDialogState extends State<_AddPersonDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
+          style: TextButton.styleFrom(foregroundColor: _green),
           child: const Text('Cancel'),
         ),
-        FilledButton(onPressed: _submit, child: const Text('Add')),
+        FilledButton(
+          onPressed: _submit,
+          style: FilledButton.styleFrom(
+            backgroundColor: _green,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Add'),
+        ),
       ],
     );
   }
@@ -2999,11 +3161,11 @@ class _FilterMenuButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: selectedValue != null
-                  ? theme.colorScheme.primary
+                  ? _green
                   : theme.colorScheme.outline,
             ),
             color: selectedValue != null
-                ? theme.colorScheme.primaryContainer.withAlpha(50)
+                ? _green
                 : null,
           ),
           child: Row(
@@ -3014,7 +3176,7 @@ class _FilterMenuButton extends StatelessWidget {
                 style: theme.textTheme.labelLarge?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: selectedValue != null
-                      ? theme.colorScheme.primary
+                      ? Colors.white
                       : theme.colorScheme.onSurface,
                 ),
               ),
@@ -3182,12 +3344,12 @@ class _DateRangeFilterButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         side: BorderSide(
           color: selectedRange != null
-              ? theme.colorScheme.primary
-              : theme.colorScheme.outline,
+              ? const Color(0xFF1B5E20)
+              : const Color(0xFF2E7D32),
         ),
         backgroundColor: selectedRange != null
-            ? theme.colorScheme.primaryContainer.withAlpha(50)
-            : null,
+            ? const Color(0xFF1B5E20)
+            : const Color(0xFFE8F5E9),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -3197,15 +3359,15 @@ class _DateRangeFilterButton extends StatelessWidget {
             style: theme.textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w600,
               color: selectedRange != null
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.onSurface,
+                  ? Colors.white
+                  : const Color(0xFF2E7D32),
             ),
           ),
           const SizedBox(width: 4),
           Icon(
             Icons.arrow_drop_down,
             size: 18,
-            color: theme.colorScheme.onSurfaceVariant,
+            color: selectedRange != null ? Colors.white : const Color(0xFF2E7D32),
           ),
         ],
       ),
@@ -3255,7 +3417,6 @@ class _PayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final text = '${_currencySymbol(currency)} ${amount.toStringAsFixed(2)}';
 
     return FilledButton.icon(
@@ -3263,12 +3424,15 @@ class _PayButton extends StatelessWidget {
       icon: const Icon(Icons.payments_outlined),
       label: Text(
         'Pay $text',
-        style: theme.textTheme.titleMedium?.copyWith(
+        style: const TextStyle(
           fontWeight: FontWeight.w700,
-          color: theme.colorScheme.onPrimary,
+          color: Colors.white,
+          fontSize: 16,
         ),
       ),
       style: FilledButton.styleFrom(
+        backgroundColor: _green,
+        foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         minimumSize: const Size.fromHeight(56),
       ),
@@ -3377,6 +3541,113 @@ class _LogoWidget extends StatelessWidget {
 }
 
 enum _AppLogo { fidelity, chase, venmo, copy }
+
+class _QrScannerSheet extends StatefulWidget {
+  const _QrScannerSheet({required this.onScan});
+
+  final ValueChanged<String> onScan;
+
+  @override
+  State<_QrScannerSheet> createState() => _QrScannerSheetState();
+}
+
+class _QrScannerSheetState extends State<_QrScannerSheet> {
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+    facing: CameraFacing.back,
+    torchEnabled: false,
+  );
+
+  bool _scanned = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_scanned) return;
+    final List<Barcode> barcodes = capture.barcodes;
+    for (final barcode in barcodes) {
+      if (barcode.rawValue != null && barcode.rawValue!.isNotEmpty) {
+        _scanned = true;
+        widget.onScan(barcode.rawValue!);
+        Navigator.pop(context);
+        break;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      decoration: const BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            Container(
+              width: 40,
+              height: 5,
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(100),
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Row(
+                children: [
+                  Text('Scan invite QR code', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white)),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: Colors.white24),
+            Expanded(
+              child: Stack(
+                children: [
+                  MobileScanner(
+                    controller: _controller,
+                    onDetect: _onDetect,
+                  ),
+                  Center(
+                    child: Container(
+                      width: 200,
+                      height: 200,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white, width: 3),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 40,
+                    left: 0,
+                    right: 0,
+                    child: Text(
+                      'Position QR code within the frame',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white.withAlpha(200), fontSize: 14),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: MediaQuery.of(context).viewPadding.bottom + 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _SensitivePageScrollPhysics extends PageScrollPhysics {
   const _SensitivePageScrollPhysics({super.parent});

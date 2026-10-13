@@ -143,7 +143,7 @@ export function mappedPlaidCreditCardName(officialName: string | null, name: str
   return null;
 }
 
-function normalizeMerchant(value: string | null | undefined): string {
+export function normalizeMerchant(value: string | null | undefined): string {
   if (!value) return "";
   let v = String(value);
   v = v.normalize("NFKD").replace(/[^\x00-\x7F]/g, "");

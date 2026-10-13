@@ -6,12 +6,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 abstract interface class LedgerApi {
   String get apiBaseUrl;
+  SupabaseClient get supabase;
   Future<List<HouseholdMember>> loadHouseholdMembers();
   Future<List<HouseholdPerson>> loadHouseholdPeople();
   Future<void> createHouseholdPerson(String displayName, {bool isDefault = false});
   Future<void> updateHouseholdPerson(String personId, String displayName, {bool? isDefault});
   Future<void> deleteHouseholdPerson(String personId);
   Future<void> addHouseholdMember(String userId);
+  Future<JoinHouseholdResult> joinHouseholdByInviteCode(String inviteCode);
   Future<DeviceCaptureCredentials> createGooglePayDeviceToken(String personId);
   Future<void> revokeDeviceToken(String deviceId);
   Future<List<CardTransaction>> loadTransactions();
@@ -33,6 +35,9 @@ abstract interface class LedgerApi {
   Future<void> assignTransaction(String transactionId, String? personId);
   Future<void> setTransactionHouseholdVisible(String transactionId, bool visible);
   Future<void> setEventHouseholdVisible(String eventId, bool visible);
+  Future<CsvImportPreview> previewCsvImport(String accountId, String csvText);
+  Future<CsvImportResult> confirmCsvImport(String accountId, List<CsvImportRow> rows, String filename);
+  Future<List<CsvImportHistory>> loadCsvImportHistory();
 }
 
 class DeviceCaptureCredentials {
@@ -45,19 +50,23 @@ class DeviceCaptureCredentials {
 class HybridLedgerApi implements LedgerApi {
   HybridLedgerApi({
     required String baseUrl,
-    required this.supabase,
+    required SupabaseClient supabase,
     required this.accessToken,
     http.Client? client,
   })  : _baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
+        _supabase = supabase,
         _client = client ?? http.Client();
 
   final String _baseUrl;
-  final SupabaseClient supabase;
+  final SupabaseClient _supabase;
   final String? Function() accessToken;
   final http.Client _client;
 
   @override
   String get apiBaseUrl => _baseUrl;
+
+  @override
+  SupabaseClient get supabase => _supabase;
 
   String? _getAccessToken() {
     final token = accessToken();
@@ -196,6 +205,21 @@ class HybridLedgerApi implements LedgerApi {
     if (!payload['ok']) {
       throw LedgerApiException('Could not add household member.');
     }
+  }
+
+  @override
+  Future<JoinHouseholdResult> joinHouseholdByInviteCode(String inviteCode) async {
+    final payload = await _post(
+      '/api/household/members/join',
+      {'invite_code': inviteCode},
+    );
+    if (!payload['ok']) {
+      throw LedgerApiException('Could not join household: ${payload['detail'] ?? 'Unknown error'}');
+    }
+    return JoinHouseholdResult(
+      householdId: payload['household_id'] as String,
+      member: payload['member'] as Map<String, dynamic>?,
+    );
   }
 
   @override
@@ -442,6 +466,35 @@ class HybridLedgerApi implements LedgerApi {
       throw LedgerApiException('Could not update event visibility.');
     }
   }
+
+  @override
+  Future<CsvImportPreview> previewCsvImport(String accountId, String csvText) async {
+    final payload = await _post(
+      '/api/csv-import/preview',
+      {'account_id': accountId, 'csv_text': csvText},
+    );
+    return CsvImportPreview.fromJson(payload);
+  }
+
+  @override
+  Future<CsvImportResult> confirmCsvImport(String accountId, List<CsvImportRow> rows, String filename) async {
+    final payload = await _post(
+      '/api/csv-import/confirm',
+      {
+        'account_id': accountId,
+        'rows': rows.map((r) => r.toJson()).toList(growable: false),
+        'filename': filename,
+      },
+    );
+    return CsvImportResult.fromJson(payload);
+  }
+
+  @override
+  Future<List<CsvImportHistory>> loadCsvImportHistory() async {
+    final payload = await _edgeGet('/api/csv-import/history');
+    final imports = _records(payload, 'imports');
+    return imports.map(CsvImportHistory.fromJson).toList(growable: false);
+  }
 }
 
 List<Map<String, dynamic>> _records(Map<String, dynamic> payload, String key) {
@@ -493,19 +546,27 @@ class HouseholdPerson {
 class HouseholdMember {
   const HouseholdMember({
     required this.userId,
+    required this.householdId,
     required this.role,
     required this.joinedAt,
+    this.inviteCode,
   });
 
   final String userId;
+  final String householdId;
   final String role;
   final String joinedAt;
+  final String? inviteCode;
+
+  bool get isOwner => householdId == userId;
 
   factory HouseholdMember.fromJson(Map<String, dynamic> json) {
     return HouseholdMember(
       userId: json['user_id'] as String,
+      householdId: json['household_id'] as String? ?? json['user_id'] as String,
       role: json['role'] as String,
       joinedAt: json['joined_at'] as String,
+      inviteCode: json['invite_code'] as String?,
     );
   }
 }
@@ -718,6 +779,201 @@ class StatementAccount {
       subtype: json['subtype'] as String?,
       itemId: json['item_id'] as String?,
       institutionName: json['institution_name'] as String?,
+    );
+  }
+}
+
+class JoinHouseholdResult {
+  const JoinHouseholdResult({
+    required this.householdId,
+    this.member,
+  });
+
+  final String householdId;
+  final Map<String, dynamic>? member;
+}
+
+class CsvImportPreview {
+  const CsvImportPreview({
+    required this.preview,
+    required this.summary,
+    this.accountValidation,
+  });
+
+  final List<CsvImportPreviewRow> preview;
+  final CsvImportSummary summary;
+  final CsvAccountValidation? accountValidation;
+
+  factory CsvImportPreview.fromJson(Map<String, dynamic> json) {
+    return CsvImportPreview(
+      preview: (json['preview'] as List)
+          .map((e) => CsvImportPreviewRow.fromJson(e))
+          .toList(growable: false),
+      summary: CsvImportSummary.fromJson(json['summary']),
+      accountValidation: json['accountValidation'] != null
+          ? CsvAccountValidation.fromJson(json['accountValidation'])
+          : null,
+    );
+  }
+}
+
+class CsvImportPreviewRow {
+  const CsvImportPreviewRow({
+    required this.row,
+    required this.status,
+    this.match,
+    this.matchScore,
+    this.error,
+  });
+
+  final CsvImportRow row;
+  final String status; // 'new' | 'duplicate' | 'error'
+  final Map<String, dynamic>? match;
+  final double? matchScore;
+  final String? error;
+
+  factory CsvImportPreviewRow.fromJson(Map<String, dynamic> json) {
+    return CsvImportPreviewRow(
+      row: CsvImportRow.fromJson(json['row']),
+      status: json['status'] as String,
+      match: json['match'] as Map<String, dynamic>?,
+      matchScore: (json['matchScore'] as num?)?.toDouble(),
+      error: json['error'] as String?,
+    );
+  }
+}
+
+class CsvImportRow {
+  const CsvImportRow({
+    required this.transactionDate,
+    required this.postDate,
+    required this.description,
+    required this.category,
+    required this.type,
+    required this.amount,
+    required this.memo,
+    this.currency = 'USD',
+  });
+
+  final String transactionDate;
+  final String postDate;
+  final String description;
+  final String category;
+  final String type;
+  final double amount;
+  final String memo;
+  final String currency;
+
+  factory CsvImportRow.fromJson(Map<String, dynamic> json) {
+    return CsvImportRow(
+      transactionDate: json['transactionDate'] as String,
+      postDate: json['postDate'] as String,
+      description: json['description'] as String,
+      category: json['category'] as String,
+      type: json['type'] as String,
+      amount: (json['amount'] as num).toDouble(),
+      memo: json['memo'] as String,
+      currency: json['currency'] as String? ?? 'USD',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'transactionDate': transactionDate,
+        'postDate': postDate,
+        'description': description,
+        'category': category,
+        'type': type,
+        'amount': amount,
+        'memo': memo,
+        'currency': currency,
+      };
+}
+
+class CsvImportSummary {
+  const CsvImportSummary({
+    required this.newCount,
+    required this.duplicateCount,
+    required this.errorCount,
+  });
+
+  final int newCount;
+  final int duplicateCount;
+  final int errorCount;
+
+  factory CsvImportSummary.fromJson(Map<String, dynamic> json) {
+    return CsvImportSummary(
+      newCount: json['new'] as int,
+      duplicateCount: json['duplicate'] as int,
+      errorCount: json['error'] as int,
+    );
+  }
+}
+
+class CsvAccountValidation {
+  const CsvAccountValidation({
+    required this.matched,
+    this.warning,
+  });
+
+  final bool matched;
+  final String? warning;
+
+  factory CsvAccountValidation.fromJson(Map<String, dynamic> json) {
+    return CsvAccountValidation(
+      matched: json['matched'] as bool,
+      warning: json['warning'] as String?,
+    );
+  }
+}
+
+class CsvImportResult {
+  const CsvImportResult({
+    required this.inserted,
+    required this.errors,
+  });
+
+  final int inserted;
+  final List<String> errors;
+
+  factory CsvImportResult.fromJson(Map<String, dynamic> json) {
+    return CsvImportResult(
+      inserted: json['inserted'] as int,
+      errors: (json['errors'] as List).map((e) => e.toString()).toList(growable: false),
+    );
+  }
+}
+
+class CsvImportHistory {
+  const CsvImportHistory({
+    required this.id,
+    required this.accountId,
+    required this.filename,
+    required this.totalRows,
+    required this.newCount,
+    required this.duplicateCount,
+    required this.errorCount,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String accountId;
+  final String filename;
+  final int totalRows;
+  final int newCount;
+  final int duplicateCount;
+  final int errorCount;
+  final String createdAt;
+
+  factory CsvImportHistory.fromJson(Map<String, dynamic> json) {
+    return CsvImportHistory(
+      id: json['id'] as String,
+      accountId: json['account_id'] as String,
+      filename: json['filename'] as String,
+      totalRows: json['total_rows'] as int,
+      newCount: json['new_count'] as int,
+      duplicateCount: json['duplicate_count'] as int,
+      errorCount: json['error_count'] as int,
+      createdAt: json['created_at'] as String,
     );
   }
 }
