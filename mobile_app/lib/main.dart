@@ -57,8 +57,8 @@ class _CardsembleAppState extends State<CardsembleApp> {
       title: 'Cardsemble',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF23685B),
-          surface: const Color(0xFFF8F8F5),
+          seedColor: const Color(0xFF244A3A),
+          surface: const Color(0xFFF3EFE6),
         ),
         useMaterial3: true,
       ),

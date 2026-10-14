@@ -644,7 +644,7 @@ onPopInvokedWithResult: (didPop, result) {
       canPop: true,
       child: Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF5D4E37), // Dark brown
+        backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
         title: AnimatedSwitcher(
           duration: const Duration(milliseconds: 200),
@@ -718,18 +718,19 @@ onPopInvokedWithResult: (didPop, result) {
               ],
             ),
         ),
-      bottomNavigationBar: NavigationBar(
-          height: 76,
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          selectedIndex: _selectedTab,
-          onDestinationSelected: (index) {
-            _pageController.animateToPage(
-              index,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOutCubic,
-            );
-          },
-          destinations: const [
+       bottomNavigationBar: NavigationBar(
+           height: 76,
+           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+           selectedIndex: _selectedTab,
+           onDestinationSelected: (index) {
+             _pageController.animateToPage(
+               index,
+               duration: const Duration(milliseconds: 300),
+               curve: Curves.easeOutCubic,
+             );
+           },
+           indicatorColor: Theme.of(context).colorScheme.primary,
+           destinations: const [
             NavigationDestination(
               icon: Icon(Icons.insights_outlined),
               selectedIcon: Icon(Icons.insights),
@@ -1086,7 +1087,9 @@ return [
             children: [
               Text(
                 'Household spending',
-                style: Theme.of(context).textTheme.titleMedium,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
@@ -1890,13 +1893,15 @@ class _StatementSummaryCard extends StatelessWidget {
         ? null
         : '${_currencySymbol(value!.currency ?? '')} ${_money(value.total!, absolute: true)}'
               .trim();
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(headline, style: Theme.of(context).textTheme.titleMedium),
+     return Card(
+       child: Padding(
+         padding: const EdgeInsets.all(18),
+         child: Column(
+           crossAxisAlignment: CrossAxisAlignment.start,
+           children: [
+             Text(headline, style: Theme.of(context).textTheme.titleMedium?.copyWith(
+               color: Theme.of(context).colorScheme.primary,
+             )),
             const SizedBox(height: 6),
             Text(
               amount ?? _statementStatus(value?.status),
@@ -2032,16 +2037,25 @@ class _TransactionCard extends StatelessWidget {
                     CircleAvatar(
                       radius: 22,
                       backgroundColor: assigneeColor,
-                      child: Text(
-                        assigneeName.isEmpty
-                            ? '?'
-                            : assigneeName.substring(0, 1).toUpperCase(),
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                       child: transaction.hasSplits
+                           ? const Text(
+                               'SPLIT',
+                               style: TextStyle(
+                                 color: Colors.white,
+                                 fontSize: 16,
+                                 fontWeight: FontWeight.w700,
+                               ),
+                             )
+                           : Text(
+                               assigneeName.isEmpty
+                                   ? '?'
+                                   : assigneeName.substring(0, 1).toUpperCase(),
+                               style: TextStyle(
+                                 color: Colors.white,
+                                 fontSize: 17,
+                                 fontWeight: FontWeight.w700,
+                               ),
+                             ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -2058,17 +2072,19 @@ class _TransactionCard extends StatelessWidget {
                                 ),
                           ),
                           const SizedBox(height: 2),
-                          Text(
-                            assigneeName,
-                            key: ValueKey('assignee-name-${transaction.id}'),
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(
-                                  color: assigneeColor,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                           Text(
+                             transaction.hasSplits ? 'SPLIT' : assigneeName,
+                             key: ValueKey('assignee-name-${transaction.id}'),
+                             style: Theme.of(context).textTheme.titleLarge
+                                 ?.copyWith(
+                                   color: transaction.hasSplits
+                                       ? Theme.of(context).colorScheme.primary
+                                       : assigneeColor,
+                                   fontWeight: FontWeight.w800,
+                                 ),
+                             maxLines: 1,
+                             overflow: TextOverflow.ellipsis,
+                           ),
                         ],
                       ),
                     ),

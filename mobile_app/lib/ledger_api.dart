@@ -33,6 +33,8 @@ abstract interface class LedgerApi {
     String? displayName,
   );
   Future<void> assignTransaction(String transactionId, String? personId);
+  Future<void> assignTransactionSplit(String transactionId, List<TransactionSplit> splits);
+  Future<List<TransactionSplit>> fetchTransactionSplits(String transactionId);
   Future<void> setTransactionHouseholdVisible(String transactionId, bool visible);
   Future<void> setEventHouseholdVisible(String eventId, bool visible);
   Future<CsvImportPreview> previewCsvImport(String accountId, String csvText);
@@ -446,6 +448,29 @@ class HybridLedgerApi implements LedgerApi {
   }
 
   @override
+  Future<void> assignTransactionSplit(String transactionId, List<TransactionSplit> splits) async {
+    final payload = await _post(
+      '/api/plaid-transactions/$transactionId/assignment-split',
+      {'splits': splits.map((s) => s.toJson()).toList()},
+    );
+    if (!payload['ok']) {
+      throw LedgerApiException('Could not assign transaction split.');
+    }
+  }
+
+  @override
+  Future<List<TransactionSplit>> fetchTransactionSplits(String transactionId) async {
+    final payload = await _edgeGet('/api/plaid-transactions/$transactionId/splits');
+    final splits = payload['splits'] as List? ?? [];
+    return splits
+        .map((s) => TransactionSplit(
+            personId: s['person_id'] as String,
+            amount: (s['amount'] as num).toDouble(),
+          ))
+        .toList();
+  }
+
+  @override
   Future<void> setTransactionHouseholdVisible(String transactionId, bool visible) async {
     final payload = await _patch(
       '/api/plaid-transactions/$transactionId/household-visible',
@@ -589,6 +614,7 @@ class CardTransaction {
     required this.transactionCode,
     required this.assignedPersonId,
     required this.assignmentSource,
+    this.hasSplits = false,
   });
 
   final String id;
@@ -607,6 +633,7 @@ class CardTransaction {
   final String? transactionCode;
   final String? assignedPersonId;
   final String assignmentSource;
+  final bool hasSplits;
 
   factory CardTransaction.fromJson(Map<String, dynamic> json) {
     return CardTransaction(
@@ -626,6 +653,7 @@ class CardTransaction {
       transactionCode: json['transaction_code'] as String?,
       assignedPersonId: json['assigned_person_id'] as String?,
       assignmentSource: json['assignment_source'] as String? ?? 'default',
+      hasSplits: json['has_splits'] as bool? ?? false,
     );
   }
 }
@@ -940,6 +968,23 @@ class CsvImportResult {
       inserted: json['inserted'] as int,
       errors: (json['errors'] as List).map((e) => e.toString()).toList(growable: false),
     );
+  }
+}
+
+class TransactionSplit {
+  const TransactionSplit({
+    required this.personId,
+    required this.amount,
+  });
+
+  final String personId;
+  final double amount;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'person_id': personId,
+      'amount': amount,
+    };
   }
 }
 

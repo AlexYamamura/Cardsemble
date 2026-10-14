@@ -522,6 +522,10 @@ Deno.serve(async (req) => {
       const creditAccountById = new Map(creditAccounts.map((a) => [a.account_id, a]));
       const assignments = await fetchUserRows("transaction_assignments", auth.userId, { orderBy: "transaction_id.asc" });
       const assignmentById = new Map(assignments.map((a) => [a.transaction_id, a]));
+      const splitCounts = new Map<string, number>();
+      for (const assignment of assignments) {
+        splitCounts.set(assignment.transaction_id, (splitCounts.get(assignment.transaction_id) ?? 0) + 1);
+      }
       const primary = await ensureDefaultPerson(auth.userId);
 
       const result = (transactions ?? []).map((tx: any) => ({
@@ -537,9 +541,30 @@ Deno.serve(async (req) => {
         assignment_source: assignmentById.has(tx.transaction_id)
           ? assignmentById.get(tx.transaction_id)!.assignment_source
           : "default",
+        has_splits: (splitCounts.get(tx.transaction_id) ?? 0) > 1,
       }));
 
       return jsonResponse({ transactions: result });
+    }
+
+    if (method === "GET" && path.match(/^plaid-transactions\/[^/]+\/splits$/)) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const transactionId = path.split("/")[1];
+      const { data: splits, error } = await supabase
+        .from("transaction_assignments")
+        .select("person_id, amount")
+        .eq("transaction_id", transactionId)
+        .eq("user_id", auth.userId);
+      if (error) throw new ApiError(502, error.message);
+      return jsonResponse({
+        splits: (splits ?? []).map((s: any) => ({
+          person_id: s.person_id,
+          amount: s.amount,
+        })),
+      });
     }
 
     if (method === "POST" && path.match(/^plaid-transactions\/[^/]+\/assignment$/)) {
@@ -597,6 +622,75 @@ Deno.serve(async (req) => {
       if (error) throw new ApiError(502, error.message);
       await calculateStatementSummaries(auth.userId);
       return jsonResponse({ ok: true, assignment: rows?.[0] });
+    }
+
+    // --- Transaction split assignment ---
+    if (method === "POST" && path.match(/^plaid-transactions\/[^/]+\/assignment-split$/)) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const transactionId = path.split("/")[1];
+      const body = await req.json().catch(() => ({}));
+      const splits = Array.isArray(body.splits) ? body.splits : [];
+
+      if (splits.length === 0) {
+        throw new ApiError(400, "At least one split is required");
+      }
+
+      // Validate splits
+      let totalAmount = 0;
+      for (const split of splits) {
+        if (!split.person_id || typeof split.amount !== 'number' || split.amount <= 0) {
+          throw new ApiError(400, "Each split must have person_id and positive amount");
+        }
+        const person = await getHouseholdPerson(auth.userId, split.person_id);
+        if (!person) throw new ApiError(404, `Household member not found: ${split.person_id}`);
+        totalAmount += split.amount;
+      }
+
+      const { data: txRows, error: txError } = await supabase
+        .from("plaid_transactions")
+        .select("transaction_id, amount")
+        .eq("transaction_id", transactionId)
+        .eq("user_id", auth.userId)
+        .eq("is_removed", false)
+        .limit(1);
+      if (txError) throw new ApiError(502, txError.message);
+      if (!txRows || txRows.length === 0) throw new ApiError(404, "Transaction not found");
+
+      const txAmount = Math.abs(Number(txRows[0].amount));
+      const splitTotal = Math.round(totalAmount * 100);
+      const txTotal = Math.round(txAmount * 100);
+      if (splitTotal !== txTotal) {
+        throw new ApiError(400, `Split amounts must sum to transaction amount (${txAmount})`);
+      }
+
+      // Delete existing assignments for this transaction
+      await supabase
+        .from("transaction_assignments")
+        .delete()
+        .eq("transaction_id", transactionId)
+        .eq("user_id", auth.userId);
+
+      // Insert new split assignments
+      const assignmentRows = splits.map((split) => ({
+        transaction_id: transactionId,
+        user_id: auth.userId,
+        person_id: split.person_id,
+        amount: split.amount,
+        assignment_source: "manual",
+        event_id: null,
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { error } = await supabase
+        .from("transaction_assignments")
+        .insert(assignmentRows);
+      if (error) throw new ApiError(502, error.message);
+
+      await calculateStatementSummaries(auth.userId);
+      return jsonResponse({ ok: true, splits: assignmentRows });
     }
 
     // --- Household people DELETE ---
@@ -840,6 +934,43 @@ Deno.serve(async (req) => {
 
       if (error) throw new ApiError(502, error.message);
       return jsonResponse({ imports: data ?? [], total: count ?? 0 });
+    }
+
+    // --- Create manual credit card ---
+    if (method === "POST" && path === "plaid-credit-accounts/manual") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const body = await req.json().catch(() => ({}));
+      const name = body.name?.trim();
+      if (!name || name.length > 100) {
+        throw new ApiError(400, "Invalid card name");
+      }
+
+      const { data, error } = await supabase
+        .from("plaid_credit_accounts")
+        .insert({
+          user_id: auth.userId,
+          account_id: `manual_${crypto.randomUUID()}`,
+          name,
+          official_name: name,
+          mask: "0000",
+          type: "credit",
+          subtype: "credit_card",
+          iso_currency_code: "USD",
+          institution_name: "Manual Entry",
+          item_id: null,
+        })
+        .select()
+        .single();
+
+      if (error) throw new ApiError(502, error.message);
+
+      return jsonResponse({
+        account_id: data.account_id,
+        account_name: data.name,
+      });
     }
 
     // --- Credit card display name ---

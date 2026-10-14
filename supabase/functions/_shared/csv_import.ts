@@ -191,18 +191,11 @@ export async function generateCsvPreview(
 
   console.log(`[CSV Import] Found ${existingTxns?.length ?? 0} existing Plaid transactions for account ${accountId}`);
   
-  const existingByKey = new Map<string, Record<string, unknown>>();
-  for (const tx of existingTxns ?? []) {
-    const key = `${tx.account_id}|${tx.date}|${Math.round(Number(tx.amount) * 100)}|${normalizeMerchant(tx.merchant_name) || normalizeMerchant(tx.name)}`;
-    existingByKey.set(key, tx);
-  }
-  
-  console.log(`[CSV Import] Built ${existingByKey.size} unique keys from existing transactions`);
-  // Log first few keys for debugging
+  // Log first few existing transactions for debugging
   let count = 0;
-  for (const [key, tx] of existingByKey.entries()) {
+  for (const tx of existingTxns ?? []) {
     if (count < 5) {
-      console.log(`[CSV Import] Existing key: ${key} | merchant: ${tx.merchant_name || tx.name} | amount: ${tx.amount} | date: ${tx.date}`);
+      console.log(`[CSV Import] Existing: ${tx.account_id}|${tx.date}|${Math.round(Math.abs(Number(tx.amount)) * 100)}|${normalizeMerchant(tx.merchant_name) || normalizeMerchant(tx.name)} | merchant: ${tx.merchant_name || tx.name} | amount: ${tx.amount} | date: ${tx.date} | auth_date: ${tx.authorized_date}`);
       count++;
     }
   }
@@ -213,45 +206,68 @@ export async function generateCsvPreview(
     const amountCents = Math.round(Math.abs(plaidAmount) * 100);
     const normMerchant = normalizeMerchant(row.description);
     const normPostDate = normalizeDate(row.postDate);
-    const key = `${accountId}|${normPostDate}|${amountCents}|${normMerchant}`;
+    const normTransDate = normalizeDate(row.transactionDate);
     
-    console.log(`[CSV Import] CSV row key: ${key} | merchant: ${row.description} | amount: ${row.amount} | postDate: ${row.postDate} -> norm: ${normPostDate}`);
+    // Try exact match on date + amount (merchant fuzzy)
+    // First try posted date
+    let match = findBestMatchForDateAmount(existingTxns ?? [], normPostDate, amountCents, normMerchant, 'posted');
+    let matchDateType = 'posted';
+    
+    // If no match, try transaction date
+    if (!match && normTransDate) {
+      match = findBestMatchForDateAmount(existingTxns ?? [], normTransDate, amountCents, normMerchant, 'authorized');
+      matchDateType = 'authorized';
+    }
+    
+    console.log(`[CSV Import] CSV row key (posted): ${accountId}|${normPostDate}|${amountCents}|${normMerchant} | merchant: ${row.description} | amount: ${row.amount} | postDate: ${row.postDate} -> norm: ${normPostDate}`);
+    if (normTransDate) {
+      console.log(`[CSV Import] CSV row key (trans):  ${accountId}|${normTransDate}|${amountCents}|${normMerchant} | transDate: ${row.transactionDate} -> norm: ${normTransDate}`);
+    }
 
-    const match = existingByKey.get(key);
     if (match) {
-      preview.push({ row, status: "duplicate", match, matchScore: 1.0 });
-      console.log(`[CSV Import] EXACT MATCH found for key: ${key}`);
+      preview.push({ row, status: "duplicate", match, matchScore: match.matchScore! });
+      console.log(`[CSV Import] MATCH (${matchDateType} date) score=${match.matchScore} | CSV merchant: ${normMerchant} | Plaid merchant: ${normalizeMerchant((match.match.merchant_name as string) || (match.match.name as string) || "")}`);
       continue;
     }
 
-    let bestMatch: Record<string, unknown> | null = null;
-    let bestScore = 0;
+    // No match found on either date
+    preview.push({ row, status: "new" });
+    console.log(`[CSV Import] NO MATCH for posted key: ${accountId}|${normPostDate}|${amountCents}|${normMerchant}${normTransDate ? ` or trans key: ${accountId}|${normTransDate}|${amountCents}|${normMerchant}` : ''}`);
+  }
+}
 
-    for (const tx of existingTxns ?? []) {
-      const txDate = tx.date;
-      if (txDate !== normPostDate) continue;
+function findBestMatchForDateAmount(
+  existingTxns: Record<string, unknown>[],
+  targetDate: string,
+  targetAmountCents: number,
+  targetMerchant: string,
+  dateType: 'posted' | 'authorized'
+): { match: Record<string, unknown>; matchScore: number } | null {
+  let bestMatch: Record<string, unknown> | null = null;
+  let bestScore = 0;
 
-      const txAmountCents = Math.round(Math.abs(Number(tx.amount)) * 100);
-      if (txAmountCents !== amountCents) continue;
+  for (const tx of existingTxns) {
+    const txDate = dateType === 'posted' ? (tx.date as string) : (tx.authorized_date as string);
+    if (txDate !== targetDate) continue;
 
-      const txMerchant = normalizeMerchant((tx.merchant_name as string) || (tx.name as string) || "");
-      if (!txMerchant || !normMerchant) continue;
+    const txAmountCents = Math.round(Math.abs(Number(tx.amount)) * 100);
+    if (txAmountCents !== targetAmountCents) continue;
 
-      const score = sequenceMatcherRatio(normMerchant, txMerchant);
-      if (score > bestScore && score >= 0.8) {
-        bestScore = score;
-        bestMatch = tx;
-      }
-    }
+    const txMerchant = normalizeMerchant((tx.merchant_name as string) || (tx.name as string) || "");
+    if (!txMerchant || !targetMerchant) continue;
 
-    if (bestMatch) {
-      preview.push({ row, status: "duplicate", match: bestMatch, matchScore: bestScore });
-      console.log(`[CSV Import] FUZZY MATCH score=${bestScore} for key: ${key} | CSV merchant: ${normMerchant} | Plaid merchant: ${normalizeMerchant((bestMatch.merchant_name as string) || (bestMatch.name as string) || "")}`);
-    } else {
-      preview.push({ row, status: "new" });
-      console.log(`[CSV Import] NO MATCH for key: ${key}`);
+    const score = sequenceMatcherRatio(targetMerchant, txMerchant);
+    // Lower threshold for fuzzy matching after exact date+amount match
+    if (score > bestScore && score >= 0.6) {
+      bestScore = score;
+      bestMatch = tx;
     }
   }
+
+  if (bestMatch) {
+    return { match: bestMatch, matchScore: bestScore };
+  }
+  return null;
 
   const summary = preview.reduce(
     (acc, p) => {

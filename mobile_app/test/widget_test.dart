@@ -198,6 +198,7 @@ class _FakeLedgerApi implements LedgerApi {
   String? lastAssignedPersonId;
   String? savedCardDisplayName;
   String assignmentSource = 'default';
+  final Map<String, List<TransactionSplit>> savedSplits = {};
   final List<HouseholdPerson> people = [
     const HouseholdPerson(id: 'alex-id', displayName: 'Alex', isDefault: true),
     const HouseholdPerson(id: 'sam-id', displayName: 'Sam', isDefault: false),
@@ -208,6 +209,16 @@ class _FakeLedgerApi implements LedgerApi {
     lastAssignedTransactionId = transactionId;
     lastAssignedPersonId = personId;
     assignmentSource = personId == null ? 'default' : 'manual';
+  }
+
+  @override
+  Future<void> assignTransactionSplit(String transactionId, List<TransactionSplit> splits) async {
+    savedSplits[transactionId] = List.from(splits);
+  }
+
+  @override
+  Future<List<TransactionSplit>> fetchTransactionSplits(String transactionId) async {
+    return savedSplits[transactionId] ?? [];
   }
 
   @override
