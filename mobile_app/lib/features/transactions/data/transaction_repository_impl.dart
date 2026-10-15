@@ -1,0 +1,137 @@
+import 'package:cardsemble/core/core.dart';
+import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
+import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
+
+class TransactionRepositoryImpl implements TransactionRepository {
+  TransactionRepositoryImpl({
+    required ApiClient apiClient,
+  }) : _apiClient = apiClient;
+
+  final ApiClient _apiClient;
+  static const _pageSize = 500;
+
+  @override
+  Future<Result<List<CardTransaction>>> loadTransactions() async {
+    final transactions = <CardTransaction>[];
+    var offset = 0;
+    while (true) {
+      final result = await _apiClient.safeGet('/api/plaid-transactions?limit=$_pageSize&offset=$offset');
+      final pageResult = result.map(
+        (payload) => extractRecords(payload, 'transactions')
+            .map(CardTransaction.fromJson)
+            .toList(growable: false),
+      );
+      final page = pageResult.fold(
+        (value) => value,
+        (failure) => <CardTransaction>[],
+      );
+      transactions.addAll(page);
+      if (page.length < _pageSize) {
+        return Success(transactions);
+      }
+      offset += page.length;
+    }
+  }
+
+  @override
+  Future<Result<List<StatementAccount>>> loadAccounts() async {
+    final result = await _apiClient.safeGet('/api/owed/statement-cycles');
+    return result.map(
+      (payload) {
+        final accounts = payload['credit_accounts'] ?? payload['accounts'];
+        if (accounts is! List) return <StatementAccount>[];
+        return accounts
+            .whereType<Map<String, dynamic>>()
+            .map(StatementAccount.fromJson)
+            .toList(growable: false);
+      },
+    );
+  }
+
+  @override
+  Future<Result<void>> assignTransaction(String transactionId, String? personId) async {
+    final result = await _apiClient.safePost(
+      '/api/plaid-transactions/$transactionId/assignment',
+      {'person_id': personId},
+    );
+    return result.map((payload) {
+      if (payload['ok'] != true) {
+        throw const NetworkException('Could not assign transaction.');
+      }
+    });
+  }
+
+  @override
+  Future<Result<void>> assignTransactionSplit(String transactionId, List<TransactionSplit> splits) async {
+    final result = await _apiClient.safePost(
+      '/api/plaid-transactions/$transactionId/assignment-split',
+      {'splits': splits.map((s) => s.toJson()).toList()},
+    );
+    return result.map((payload) {
+      if (payload['ok'] != true) {
+        throw const NetworkException('Could not assign transaction split.');
+      }
+    });
+  }
+
+  @override
+  Future<Result<List<TransactionSplit>>> fetchTransactionSplits(String transactionId) async {
+    final result = await _apiClient.safeGet('/api/plaid-transactions/$transactionId/splits');
+    return result.map(
+      (payload) {
+        final splits = payload['splits'] as List? ?? [];
+        return splits
+            .map((s) => TransactionSplit(
+                  personId: s['person_id'] as String,
+                  amount: (s['amount'] as num).toDouble(),
+                ))
+            .toList();
+      },
+    );
+  }
+
+  @override
+  Future<Result<void>> setHouseholdVisible(String transactionId, bool visible) async {
+    final result = await _apiClient.safePatch(
+      '/api/plaid-transactions/$transactionId/household-visible',
+      {'household_visible': visible},
+    );
+    return result.map((payload) {
+      if (payload['ok'] != true) {
+        throw const NetworkException('Could not update transaction visibility.');
+      }
+    });
+  }
+
+  @override
+  Future<Result<CsvImportPreview>> previewCsvImport(String accountId, String csvText) async {
+    final result = await _apiClient.safePost(
+      '/api/csv-import/preview',
+      {'account_id': accountId, 'csv_text': csvText},
+    );
+    return result.map(CsvImportPreview.fromJson);
+  }
+
+  @override
+  Future<Result<CsvImportResult>> confirmCsvImport(String accountId, List<CsvImportRow> rows, String filename) async {
+    final result = await _apiClient.safePost(
+      '/api/csv-import/confirm',
+      {
+        'account_id': accountId,
+        'rows': rows.map((r) => r.toJson()).toList(growable: false),
+        'filename': filename,
+      },
+    );
+    return result.map(CsvImportResult.fromJson);
+  }
+
+  @override
+  Future<Result<List<CsvImportHistory>>> loadCsvImportHistory() async {
+    final result = await _apiClient.safeGet('/api/csv-import/history');
+    return result.map(
+      (payload) => extractRecords(payload, 'imports')
+          .map(CsvImportHistory.fromJson)
+          .toList(growable: false),
+    );
+  }
+}
