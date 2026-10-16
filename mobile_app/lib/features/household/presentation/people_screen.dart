@@ -14,8 +14,6 @@ class PeopleScreen extends StatefulWidget {
 
 class _PeopleScreenState extends State<PeopleScreen>
     with AutomaticKeepAliveClientMixin {
-  final TextEditingController _nameController = TextEditingController();
-
   @override
   bool get wantKeepAlive => true;
 
@@ -29,7 +27,6 @@ class _PeopleScreenState extends State<PeopleScreen>
 
   @override
   void dispose() {
-    _nameController.dispose();
     super.dispose();
   }
 
@@ -67,8 +64,7 @@ class _PeopleScreenState extends State<PeopleScreen>
 
           return Column(
             children: [
-
-              _buildPersonFilterBar(context, notifier),
+              _buildQrPlaceholder(),
               Flexible(
                 child: ListView(
                   shrinkWrap: true,
@@ -85,20 +81,9 @@ class _PeopleScreenState extends State<PeopleScreen>
                         const Text(
                             'Use the buttons below to add household people'),
                       ]
-                    else if (notifier.filteredPeople.isEmpty)
-                      // People exist but none match the active filters.
-                      ...[
-                        const Icon(Icons.people_outline,
-                            size: 64, color: Colors.grey),
-                        const SizedBox(height: 16),
-                        const Text('No people match these filters'),
-                        const SizedBox(height: 8),
-                        const Text(
-                            'Try adjusting your search or filter criteria'),
-                      ]
                     else
                       ...[
-                        for (final person in notifier.filteredPeople)
+                        for (final person in notifier.people)
                           Card(
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ListTile(
@@ -183,64 +168,47 @@ class _PeopleScreenState extends State<PeopleScreen>
     );
   }
 
-
-  /// Compact single-row filter bar: the search field, the "Default status"
-  /// dropdown, and "Clear all" all share one box so the bar stays short.
-  Widget _buildPersonFilterBar(
-      BuildContext context, HouseholdNotifier notifier) {
-    return Card(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            SizedBox(
-              width: 190,
-              child: TextField(
-                controller: _nameController,
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: 'Search by name',
-                  prefixIcon: const Icon(Icons.search, size: 18),
-                  suffixIcon: notifier.nameQuery.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear, size: 16),
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () {
-                            _nameController.clear();
-                            notifier.setNameQuery('');
-                          },
-                        )
-                      : null,
-                  border: const OutlineInputBorder(),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                ),
-                onChanged: notifier.setNameQuery,
-              ),
-            ),
-            _PersonDefaultFilterButton(
-              value: notifier.defaultFilter,
-              onChanged: notifier.setDefaultFilter,
-            ),
-            if (notifier.hasActiveFilters)
-              TextButton.icon(
-                onPressed: () {
-                  _nameController.clear();
-                  notifier.clearAllFilters();
-                },
-                icon: const Icon(Icons.clear_all, size: 16),
-                label: const Text('Clear all'),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-              ),
-          ],
+  Widget _buildQrPlaceholder() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: Colors.grey.shade300,
+          width: 2,
         ),
+        borderRadius: BorderRadius.circular(8),
+        color: Colors.grey.shade50,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.qr_code, size: 32, color: Colors.grey.shade600),
+              const SizedBox(width: 8),
+              Text(
+                'QR Code Placeholder',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Scan QR code to add household members',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
@@ -424,47 +392,60 @@ class _PeopleScreenState extends State<PeopleScreen>
   }
 
   Future<void> _scanQrCode(BuildContext context) async {
-    await showModalBottomSheet(
+    return showDialog(
       context: context,
-      isScrollControlled: true,
-      enableDrag: false,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SizedBox(
-        height: MediaQuery.of(context).size.height * 0.8,
-        child: Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text(
-                'Scan QR Code to Add Person',
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Scan to Add Household Member',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),
-            ),
-            Expanded(
-              child: MobileScanner(
-                onDetect: (capture) {
-                  final List<Barcode> barcodes = capture.barcodes;
-                  if (barcodes.isNotEmpty) {
-                    final String code = barcodes.first.rawValue ?? '';
-                    if (code.isNotEmpty) {
-                      // Process the scanned code
-                      _processScannedCode(context, code.trim());
-                    }
-                  }
-                },
+              const SizedBox(height: 16),
+              Container(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Colors.grey.shade400,
+                    width: 3,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(9),
+                  child: SizedBox(
+                    width: 300,
+                    height: 400,
+                    child: MobileScanner(
+                      onDetect: (capture) {
+                        final List<Barcode> barcodes = capture.barcodes;
+                        if (barcodes.isNotEmpty) {
+                          final String code = barcodes.first.rawValue ?? '';
+                          if (code.isNotEmpty) {
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                              _processScannedCode(context, code.trim());
+                            }
+                          }
+                        }
+                      },
+                    ),
+                  ),
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: FilledButton(
-                onPressed: () => Navigator.of(context).pop(),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Cancel'),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -497,77 +478,5 @@ class _PeopleScreenState extends State<PeopleScreen>
         }
       }
     }
-  }
-}
-
-/// Compact chip-style dropdown used by the People filter bar. Mirrors the
-/// transactions `_FilterMenuButton` so the two screens look consistent, while
-/// keeping "Clear all" inline in the same box.
-class _PersonDefaultFilterButton extends StatelessWidget {
-  const _PersonDefaultFilterButton({
-    required this.value,
-    required this.onChanged,
-  });
-
-  /// null = all, true = default only, false = others.
-  final bool? value;
-  final ValueChanged<bool?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final selected = value != null;
-    final label = switch (value) {
-      null => 'Default status',
-      true => 'Default only',
-      false => 'Others',
-    };
-
-    return PopupMenuButton<bool?>(
-      initialValue: value,
-      onSelected: onChanged,
-      itemBuilder: (context) => const [
-        PopupMenuItem<bool?>(value: null, child: Text('All')),
-        PopupMenuItem<bool?>(value: true, child: Text('Default only')),
-        PopupMenuItem<bool?>(value: false, child: Text('Others')),
-      ],
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: selected
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.outline,
-            ),
-            color: selected
-                ? theme.colorScheme.primaryContainer.withValues(alpha: 50)
-                : null,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: selected
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(
-                Icons.arrow_drop_down,
-                size: 18,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
