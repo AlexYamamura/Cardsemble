@@ -6,3 +6,4 @@ export 'utils/currency.dart';
 export 'utils/date_utils.dart';
 export 'utils/color_palette.dart';
 export 'di/service_locator.dart';
+export 'services/external_app_launcher.dart';

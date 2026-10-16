@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cardsemble/core/utils/currency.dart';
+import 'package:cardsemble/core/core.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_screen.dart';
 import 'package:cardsemble/features/auth/presentation/auth_notifier.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
+import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 class SummaryScreen extends StatefulWidget {
   const SummaryScreen({
@@ -22,7 +28,8 @@ class SummaryScreen extends StatefulWidget {
 }
 
 class _SummaryScreenState extends State<SummaryScreen> {
-  late DateTimeRange _summaryRange;
+   late DateTimeRange _summaryRange;
+   bool _isImporting = false;
 
   @override
   void initState() {
@@ -156,13 +163,194 @@ class _SummaryScreenState extends State<SummaryScreen> {
     }
   }
 
-  void _openAccounts() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const AccountsScreen()),
-    );
-  }
+   void _openAccounts() {
+     Navigator.of(context).push(
+       MaterialPageRoute<void>(builder: (_) => const AccountsScreen()),
+     );
+   }
 
-  @override
+   Future<void> _importCsv() async {
+     final accountsNotifier = context.read<AccountsNotifier>();
+     final statementSummary = accountsNotifier.statementSummary;
+     if (statementSummary == null || statementSummary.accounts.isEmpty) {
+       if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(
+           const SnackBar(content: Text('No accounts available. Please link a card first.')),
+         );
+       }
+       return;
+     }
+
+     // Use the first account for simplicity; could be improved to let user choose.
+     final accountId = statementSummary.accounts.first.accountId;
+
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+      );
+
+      if (result == null) return;
+
+      final file = result.files.first;
+      Uint8List? csvBytes = file.bytes;
+      if (csvBytes == null) {
+        // Fallback to reading from path if available
+        if (file.path != null && file.path!.isNotEmpty) {
+          try {
+            csvBytes = await File(file.path!).readAsBytes();
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Error reading file: $e')),
+              );
+            }
+            return;
+          }
+        }
+      }
+
+      if (csvBytes == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not read file.')),
+          );
+        }
+        return;
+      }
+      final csvText = utf8.decode(csvBytes);
+
+      if (!mounted) return;
+
+      setState(() {
+        _isImporting = true;
+      });
+
+      final previewResult = await context
+          .read<TransactionsNotifier>()
+          .previewCsvImport(accountId, csvText);
+
+     if (!mounted) {
+       setState(() {
+         _isImporting = false;
+       });
+       return;
+     }
+
+      previewResult.fold(
+        (preview) {
+          setState(() {
+            _isImporting = false;
+          });
+          _showImportPreviewDialog(preview, accountId, file.name);
+        },
+        (failure) {
+          setState(() {
+            _isImporting = false;
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Preview failed: ${failure.message}')),
+            );
+          }
+        },
+      );
+   }
+
+   void _showImportPreviewDialog(CsvImportPreview preview, String accountId, String fileName) {
+     showDialog(
+       context: context,
+       builder: (context) => AlertDialog(
+         title: const Text('CSV Import Preview'),
+         content: SingleChildScrollView(
+           child: Column(
+             mainAxisSize: MainAxisSize.min,
+             children: [
+               Text(
+                   'New: ${preview.summary.newCount}, Duplicates: ${preview.summary.duplicateCount}, Errors: ${preview.summary.errorCount}'),
+               const SizedBox(height: 10),
+               if (preview.preview.isEmpty)
+                 const Text('No rows to import.')
+               else
+                 DataTable(
+                   columns: const [
+                     DataColumn(label: Text('Date')),
+                     DataColumn(label: Text('Description')),
+                     DataColumn(label: Text('Amount')),
+                     DataColumn(label: Text('Status')),
+                   ],
+                   rows: preview.preview.map((row) => DataRow(cells: [
+                         DataCell(Text(row.row.transactionDate)),
+                         DataCell(Text(row.row.description.length > 20
+                             ? '${row.row.description.substring(0, 20)}...'
+                             : row.row.description)),
+                         DataCell(Text('${row.row.amount} ${row.row.currency}')),
+                         DataCell(Text(row.status)),
+                       ])).toList()),
+             ],
+           ),
+         ),
+         actions: [
+           TextButton(
+             onPressed: () => Navigator.pop(context),
+             child: const Text('Cancel'),
+           ),
+           ElevatedButton(
+             onPressed: preview.summary.newCount > 0
+                 ? () async {
+                     Navigator.pop(context);
+                     setState(() {
+                       _isImporting = true;
+                     });
+                     final newRows = preview.preview
+                         .where((r) => r.status == 'new')
+                         .map((r) => r.row)
+                         .toList();
+                     final confirmResult = await context
+                         .read<TransactionsNotifier>()
+                         .confirmCsvImport(accountId, newRows, fileName);
+                     if (!mounted) {
+                       setState(() {
+                         _isImporting = false;
+                       });
+                       return;
+                     }
+                     confirmResult.fold(
+                       (result) {
+                         setState(() {
+                           _isImporting = false;
+                         });
+                         if (mounted) {
+                           ScaffoldMessenger.of(context).showSnackBar(
+                             SnackBar(
+                                 content: Text(
+                                     'Imported ${result.inserted} transactions, ${result.errors.length} errors.')),
+                           );
+                         }
+                         // Refresh transactions
+                         context.read<TransactionsNotifier>().refresh();
+                       },
+                       (failure) {
+                         setState(() {
+                           _isImporting = false;
+                         });
+                         if (mounted) {
+                           ScaffoldMessenger.of(context).showSnackBar(
+                             SnackBar(
+                                 content: Text('Import failed: ${failure.message}')),
+                           );
+                         }
+                       },
+                     );
+                   }
+                 : null,
+             child: const Text('Import'),
+           ),
+         ],
+       ),
+     );
+   }
+
+   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
@@ -194,15 +382,17 @@ class _SummaryScreenState extends State<SummaryScreen> {
           ),
         ],
       ),
-      body: Consumer<TransactionsNotifier>(
-        builder: (context, notifier, _) {
-          if (notifier.isSummaryLoading &&
-              notifier.summaryTransactions.isEmpty &&
-              notifier.people.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
-          }
+       body: Consumer<TransactionsNotifier>(
+         builder: (context, notifier, _) {
+           if (notifier.isSummaryLoading &&
+               notifier.summaryTransactions.isEmpty &&
+               notifier.people.isEmpty) {
+             return const Center(child: CircularProgressIndicator());
+           }
 
-          return RefreshIndicator(
+
+
+           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -386,19 +576,32 @@ class _SummaryScreenState extends State<SummaryScreen> {
         }).toList(),
       ),
       const SizedBox(height: 8),
-      Align(
-        alignment: Alignment.center,
-        child: FilledButton.icon(
-          onPressed: _openAccounts,
-          icon: const Icon(Icons.add, size: 18),
-          label: const Text('Link a card'),
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            textStyle:
-                const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-          ),
-        ),
-      ),
+       Row(
+         mainAxisAlignment: MainAxisAlignment.center,
+         children: [
+           FilledButton.icon(
+             onPressed: _openAccounts,
+             icon: const Icon(Icons.add, size: 18),
+             label: const Text('Link a card'),
+             style: FilledButton.styleFrom(
+               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+               textStyle:
+                   const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+             ),
+           ),
+           const SizedBox(width: 12),
+           FilledButton.icon(
+             onPressed: _isImporting ? null : _importCsv,
+             icon: const Icon(Icons.upload_file, size: 18),
+             label: Text(_isImporting ? 'Importing...' : 'Import CSV'),
+             style: FilledButton.styleFrom(
+               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+               textStyle:
+                   const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+             ),
+           ),
+         ],
+       ),
       const SizedBox(height: 12),
       _BreakdownCard(
         title: 'By household member',

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
+import 'package:cardsemble/features/transactions/presentation/widgets/pay_action_sheet.dart';
 import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
 import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
@@ -105,13 +106,15 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                     onRemovePerson: () => notifier.setPersonFilter(null),
                     onRemoveDateRange: notifier.clearDateRange,
                   ),
-                if (notifier.error != null)
-                  _ErrorBanner(
-                    message: notifier.error!,
-                    onRetry: () => _refresh(context),
-                    onDismiss: notifier.clearError,
-                  ),
-                Expanded(
+                 if (notifier.error != null)
+                   _ErrorBanner(
+                     message: notifier.error!,
+                     onRetry: () => _refresh(context),
+                     onDismiss: notifier.clearError,
+                   ),
+                 if (notifier.filteredTotal > 0)
+                   PayButton(),
+                 Expanded(
                   child: _buildList(
                     context,
                     notifier,
@@ -123,11 +126,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showCsvImportDialog(context),
-        icon: const Icon(Icons.upload_file),
-        label: const Text('Import CSV'),
-      ),
+
     );
   }
 
@@ -228,39 +227,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     await context.read<TransactionsNotifier>().loadAll();
   }
 
-  void _showCsvImportDialog(BuildContext context) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Import CSV'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Paste CSV content',
-                hintText: 'Date,Description,Amount,...',
-              ),
-              maxLines: 10,
-            ),
-            const SizedBox(height: 16),
-            const Text('Select account and paste CSV to preview import'),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-            },
-            child: const Text('Preview'),
-          ),
-        ],
-      ),
-    );
-  }
+
 }
 
 class _ErrorBanner extends StatelessWidget {
@@ -526,9 +493,9 @@ class _TransactionFilterBar extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+       child: Padding(
+         padding: const EdgeInsets.all(8),
+         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -548,10 +515,10 @@ class _TransactionFilterBar extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
+             Wrap(
+               spacing: 6,
+               runSpacing: 6,
+               children: [
                 _FilterMenuButton(
                   label: 'Credit card',
                   selectedValue: selectedAccountId,
@@ -737,20 +704,21 @@ class _FilterChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InputChip(
-      label: Text(label),
-      deleteIcon: const Icon(Icons.close, size: 18),
-      onDeleted: onRemove,
-      deleteButtonTooltipMessage: 'Clear filter',
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      side: BorderSide(color: theme.colorScheme.outline.withAlpha(100)),
-      backgroundColor: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
-      labelStyle: theme.textTheme.labelLarge?.copyWith(
-        fontWeight: FontWeight.w500,
-      ),
-      deleteIconColor: theme.colorScheme.onSurfaceVariant,
-    );
+     return InputChip(
+       label: Text(label),
+       deleteIcon: const Icon(Icons.close, size: 16),
+       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+       onDeleted: onRemove,
+       deleteButtonTooltipMessage: 'Clear filter',
+       visualDensity: VisualDensity.compact,
+       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+       side: BorderSide(color: theme.colorScheme.outline.withAlpha(100)),
+       backgroundColor: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
+       labelStyle: theme.textTheme.labelMedium?.copyWith(
+         fontWeight: FontWeight.w500,
+       ),
+       deleteIconColor: theme.colorScheme.onSurfaceVariant,
+     );
   }
 }
 
@@ -979,8 +947,8 @@ class _TransactionTile extends StatelessWidget {
                              ),
                            ),
                          ),
-                         const SizedBox(width: 12),
-                         Expanded(
+                          const SizedBox(width: 12),
+                          Expanded(
                            child: Column(
                              crossAxisAlignment: CrossAxisAlignment.start,
                              children: [

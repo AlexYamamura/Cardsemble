@@ -8,6 +8,7 @@ import 'package:cardsemble/features/household/domain/household_domain.dart';
 import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 
+
 CardTransaction _tx(String id, {String? assignedPersonId}) {
   return CardTransaction(
     id: id,

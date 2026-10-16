@@ -3,6 +3,7 @@ import 'package:cardsemble/features/transactions/domain/transactions_domain.dart
 import 'package:cardsemble/features/transactions/data/transaction_cache.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
 import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
+import 'package:cardsemble/core/error/failure.dart';
 
 class SummaryRow {
   const SummaryRow({
@@ -88,10 +89,20 @@ class TransactionsNotifier extends ChangeNotifier {
   CsvImportPreview? get csvPreview => _csvPreview;
   bool get isPreviewing => _isPreviewing;
   DateTimeRange? get dateRange => _dateRange;
-  String? get selectedAccountId => _selectedAccountId;
+
+  DateTimeRange get _currentMonthRange {
+     final now = DateTime.now();
+     final start = DateTime(now.year, now.month, 1);
+     final end = DateTime(now.year, now.month + 1, 0);
+     return DateTimeRange(start: start, end: end);
+   }
+
+   DateTimeRange get effectiveDateRange => _dateRange ?? _currentMonthRange;
+   String? get selectedAccountId => _selectedAccountId;
   String? get selectedPersonId => _selectedPersonId;
 
   List<CardTransaction> get filteredTransactions {
+    final effectiveDateRange = _dateRange ?? _currentMonthRange;
     return _transactions.where((tx) {
       // Only show charges that are due / not paid. Card payments to the card
       // itself (isPayment) are not spending, so they are excluded here and the
@@ -99,16 +110,52 @@ class TransactionsNotifier extends ChangeNotifier {
       if (tx.isPayment) return false;
       if (_selectedAccountId != null && tx.accountId != _selectedAccountId) return false;
       if (_selectedPersonId != null && tx.assignedPersonId != _selectedPersonId) return false;
-      if (_dateRange != null) {
-        if (tx.date == null) return false;
-        final txDate = tx.parsedDate!;
-        if (txDate.isBefore(_dateRange!.start.subtract(const Duration(days: 1))) ||
-            txDate.isAfter(_dateRange!.end.add(const Duration(days: 1)))) {
-          return false;
-        }
-      }
+         if (tx.date == null) return false;
+         final txDate = tx.parsedDate!;
+         if (txDate.isBefore(effectiveDateRange.start.subtract(const Duration(days: 1))) ||
+             txDate.isAfter(effectiveDateRange.end.add(const Duration(days: 1)))) {
+           return false;
+         }
       return true;
     }).toList();
+  }
+
+  /// Map of currency code to total amount for positive (charge) transactions
+  /// matching the current filters. Excludes pending and payment transactions.
+  Map<String, double> get filteredTotalsByCurrency {
+    final Map<String, double> totalsByCurrency = {};
+    for (final tx in filteredTransactions) {
+      // Only count positive charges (not pending, not payments)
+      if (!tx.pending && tx.isPositive && !tx.isPayment) {
+        final currency = tx.currency;
+        totalsByCurrency[currency] = (totalsByCurrency[currency] ?? 0) + tx.amountValue;
+      }
+    }
+    return totalsByCurrency;
+  }
+
+  /// Convenience getter for the total amount in the primary currency.
+  /// Returns the total for the currency with the highest amount, or USD if no transactions.
+  double get filteredTotal {
+    if (filteredTotalsByCurrency.isEmpty) return 0.0;
+    // Return the currency with the highest total amount
+    return filteredTotalsByCurrency.values.reduce((a, b) => a > b ? a : b);
+  }
+
+  /// Convenience getter for the currency of the filtered total.
+  /// Returns the currency with the highest amount, or USD if no transactions.
+  String get filteredCurrency {
+    if (filteredTotalsByCurrency.isEmpty) return 'USD';
+    // Find the currency with the highest total
+    String? maxCurrency;
+    double maxAmount = 0.0;
+    for (final entry in filteredTotalsByCurrency.entries) {
+      if (entry.value > maxAmount) {
+        maxAmount = entry.value;
+        maxCurrency = entry.key;
+      }
+    }
+    return maxCurrency ?? 'USD';
   }
 
   void setDateRange(DateTimeRange? range, {bool reloadList = true}) {
@@ -145,15 +192,16 @@ class TransactionsNotifier extends ChangeNotifier {
 
   bool get hasActiveFilters => _selectedAccountId != null || _selectedPersonId != null || _dateRange != null;
 
-  TransactionQuery _queryFor({required int offset}) {
-    return TransactionQuery(
-      limit: _pageSize,
-      offset: offset,
-      accountId: _selectedAccountId,
-      dateFrom: _dateRange?.start,
-      dateTo: _dateRange?.end,
-    );
-  }
+   TransactionQuery _queryFor({required int offset}) {
+     final effectiveDateRange = _dateRange ?? _currentMonthRange;
+     return TransactionQuery(
+       limit: _pageSize,
+       offset: offset,
+        accountId: _selectedAccountId,
+        dateFrom: effectiveDateRange.start,
+        dateTo: effectiveDateRange.end,
+      );
+   }
 
   List<SummaryRow> get spendingByAccount {
     final Map<String, Map<String, dynamic>> grouped = {};
@@ -244,7 +292,7 @@ class TransactionsNotifier extends ChangeNotifier {
     if (!reset && (_isLoading || _isLoadingMore)) return;
 
     final generation = ++_transactionsGeneration;
-    final loadAllPages = _selectedPersonId != null;
+
 
     if (reset) {
       _isLoading = true;
@@ -271,15 +319,11 @@ class TransactionsNotifier extends ChangeNotifier {
         }
         final page = result.value;
         collected.addAll(page.items);
-        offset += page.items.length;
-        if (!page.hasMore || page.items.isEmpty) {
-          hasMore = false;
-          break;
-        }
-        if (!loadAllPages) {
-          hasMore = true;
-          break;
-        }
+         offset += page.items.length;
+         if (!page.hasMore || page.items.isEmpty) {
+           hasMore = false;
+           break;
+         }
       }
 
       if (generation != _transactionsGeneration) return;
@@ -507,56 +551,56 @@ class TransactionsNotifier extends ChangeNotifier {
     }
   }
 
-  Future<bool> previewCsvImport(String accountId, String csvText) async {
-    _isPreviewing = true;
-    _csvPreview = null;
-    _error = null;
-    notifyListeners();
+   Future<Result<CsvImportPreview>> previewCsvImport(String accountId, String csvText) async {
+     _isPreviewing = true;
+     _csvPreview = null;
+     _error = null;
+     notifyListeners();
 
-    try {
-      final result = await _transactionRepository.previewCsvImport(accountId, csvText);
-      return result.fold(
-        (preview) {
-          _csvPreview = preview;
-          _isPreviewing = false;
-          notifyListeners();
-          return true;
-        },
-        (failure) {
-          _error = failure.message;
-          _isPreviewing = false;
-          notifyListeners();
-          return false;
-        },
-      );
-    } catch (e) {
-      _error = e.toString();
-      _isPreviewing = false;
-      notifyListeners();
-      return false;
-    }
-  }
+     try {
+       final result = await _transactionRepository.previewCsvImport(accountId, csvText);
+       return result.fold(
+         (preview) {
+           _csvPreview = preview;
+           _isPreviewing = false;
+           notifyListeners();
+           return Success(preview);
+         },
+         (failure) {
+           _error = failure.message;
+           _isPreviewing = false;
+           notifyListeners();
+           return FailureResult(failure);
+         },
+       );
+     } catch (e) {
+       _error = e.toString();
+       _isPreviewing = false;
+       notifyListeners();
+       return FailureResult(UnknownFailure(e.toString()));
+     }
+   }
 
-  Future<bool> confirmCsvImport(String accountId, List<CsvImportRow> rows, String filename) async {
-    _error = null;
-    notifyListeners();
+   Future<Result<CsvImportResult>> confirmCsvImport(String accountId, List<CsvImportRow> rows, String filename) async {
+     _error = null;
+     notifyListeners();
 
-    try {
-      final result = await _transactionRepository.confirmCsvImport(accountId, rows, filename);
-      if (result.isFailure) {
-        _error = result.failure.message;
-        notifyListeners();
-        return false;
-      }
-      await loadTransactions(reset: true);
-      await _reloadSummary();
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-      return false;
-    }
-  }
+     try {
+       final result = await _transactionRepository.confirmCsvImport(accountId, rows, filename);
+       if (result.isFailure) {
+         _error = result.failure.message;
+         notifyListeners();
+         return FailureResult(result.failure);
+       }
+       await loadTransactions(reset: true);
+       await _reloadSummary();
+       return Success(result.value);
+     } catch (e) {
+       _error = e.toString();
+       notifyListeners();
+       return FailureResult(UnknownFailure(e.toString()));
+     }
+   }
 
   Future<void> loadCsvHistory() async {
     try {
