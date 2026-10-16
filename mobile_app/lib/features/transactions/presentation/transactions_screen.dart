@@ -31,7 +31,8 @@ class TransactionsScreen extends StatefulWidget {
   State<TransactionsScreen> createState() => _TransactionsScreenState();
 }
 
-class _TransactionsScreenState extends State<TransactionsScreen> with AutomaticKeepAliveClientMixin {
+class _TransactionsScreenState extends State<TransactionsScreen>
+    with AutomaticKeepAliveClientMixin {
   final ScrollController _scrollController = ScrollController();
 
   @override
@@ -84,42 +85,41 @@ class _TransactionsScreenState extends State<TransactionsScreen> with AutomaticK
             onRefresh: () => _refresh(context),
             child: Column(
               children: [
-                _TransactionFilterBar(
-                  accounts: notifier.accounts,
-                  people: notifier.people,
-                  selectedAccountId: notifier.selectedAccountId,
-                  selectedPersonId: notifier.selectedPersonId,
-                  selectedDateRange: notifier.dateRange,
-                  onAccountChanged: notifier.setAccountFilter,
-                  onPersonChanged: notifier.setPersonFilter,
-                  onDateRangeChanged: notifier.setDateRange,
-                  onClearAll: notifier.clearAllFilters,
-                  hasActiveFilters: notifier.hasActiveFilters,
-                  onRemoveAccount: () => notifier.setAccountFilter(null),
-                  onRemovePerson: () => notifier.setPersonFilter(null),
-                  onRemoveDateRange: notifier.clearDateRange,
-                ),
-                if (notifier.hasActiveFilters)
-                  _ActiveFilterChipsCard(
-                    selectedAccountId: notifier.selectedAccountId,
-                    selectedPersonId: notifier.selectedPersonId,
-                    selectedDateRange: notifier.dateRange,
-                    accounts: notifier.accounts,
-                    people: notifier.people,
-                    onRemoveAccount: () => notifier.setAccountFilter(null),
-                    onRemovePerson: () => notifier.setPersonFilter(null),
-                    onRemoveDateRange: notifier.clearDateRange,
+                if (notifier.filteredTotal > 0 || notifier.hasActiveFilters)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: Row(
+                      children: [
+                        if (notifier.filteredTotal > 0)
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 260),
+                            child: PayButton(),
+                          ),
+                        if (notifier.hasActiveFilters) ...[
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: notifier.clearAllFilters,
+                            icon: const Icon(Icons.clear_all, size: 16),
+                            label: const Text('Clear all'),
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                 if (notifier.error != null)
-                   _ErrorBanner(
-                     message: notifier.error!,
-                     onRetry: () => _refresh(context),
-                     onDismiss: notifier.clearError,
-                   ),
-                  if (notifier.filteredTotal > 0)
-                    PayButton(),
-                 Expanded(
-                  child: _buildList(
+                if (notifier.error != null)
+                  _ErrorBanner(
+                    message: notifier.error!,
+                    onRetry: () => _refresh(context),
+                    onDismiss: notifier.clearError,
+                  ),
+                Expanded(
+                  child: _buildScrollableList(
                     context,
                     notifier,
                     displayTransactions,
@@ -130,52 +130,92 @@ class _TransactionsScreenState extends State<TransactionsScreen> with AutomaticK
           );
         },
       ),
-
     );
   }
 
-  Widget _buildList(
+  Widget _buildScrollableList(
     BuildContext context,
     TransactionsNotifier notifier,
     List<CardTransaction> displayTransactions,
   ) {
+    final filterHeader = SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: _TransactionFilterBar(
+          accounts: notifier.accounts,
+          people: notifier.people,
+          selectedAccountId: notifier.selectedAccountId,
+          selectedPersonId: notifier.selectedPersonId,
+          selectedDateRange: notifier.dateRange,
+          onAccountChanged: notifier.setAccountFilter,
+          onPersonChanged: notifier.setPersonFilter,
+          onDateRangeChanged: notifier.setDateRange,
+          onClearAll: notifier.clearAllFilters,
+          hasActiveFilters: notifier.hasActiveFilters,
+          onRemoveAccount: () => notifier.setAccountFilter(null),
+          onRemovePerson: () => notifier.setPersonFilter(null),
+          onRemoveDateRange: notifier.clearDateRange,
+        ),
+      ),
+    );
+
     if (displayTransactions.isEmpty) {
-      return ListView(
+      return CustomScrollView(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          const SizedBox(height: 72),
-          _EmptyState(
-            hasFilters: notifier.hasActiveFilters,
-            hasAnyTransactions: notifier.transactions.isNotEmpty,
+        slivers: [
+          filterHeader,
+          if (notifier.hasActiveFilters)
+            const SliverToBoxAdapter(child: SizedBox(height: 12)),
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 72),
+                _EmptyState(
+                  hasFilters: notifier.hasActiveFilters,
+                  hasAnyTransactions: notifier.transactions.isNotEmpty,
+                ),
+              ],
+            ),
           ),
         ],
       );
     }
 
     final itemCount = displayTransactions.length + (notifier.hasMore ? 1 : 0);
-    return ListView.builder(
+    return CustomScrollView(
       controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      itemCount: itemCount,
-      itemBuilder: (context, index) {
-        if (index >= displayTransactions.length) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-        final tx = displayTransactions[index];
-        return _TransactionTile(
-          transaction: tx,
-          people: notifier.people,
-          onAssign: (personId) => _runAssignment(context, notifier, tx, personId),
-          onSplit: (splits) => _runSplit(context, notifier, tx, splits),
-          onToggleHouseholdVisible: (visible) =>
-              _runVisibility(context, notifier, tx, visible),
-        );
-      },
+      slivers: [
+        filterHeader,
+        if (notifier.hasActiveFilters)
+          const SliverToBoxAdapter(child: SizedBox(height: 12)),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate((context, index) {
+              if (index >= displayTransactions.length) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              final tx = displayTransactions[index];
+              return _TransactionTile(
+                transaction: tx,
+                people: notifier.people,
+                onAssign: (personId) =>
+                    _runAssignment(context, notifier, tx, personId),
+                onSplit: (splits) => _runSplit(context, notifier, tx, splits),
+                onToggleHouseholdVisible: (visible) =>
+                    _runVisibility(context, notifier, tx, visible),
+              );
+            }, childCount: itemCount),
+          ),
+        ),
+      ],
     );
   }
 
@@ -189,7 +229,9 @@ class _TransactionsScreenState extends State<TransactionsScreen> with AutomaticK
     final ok = await notifier.assignTransaction(tx.id, personId);
     if (!ok) {
       messenger.showSnackBar(
-        SnackBar(content: Text(notifier.error ?? 'Could not update assignment')),
+        SnackBar(
+          content: Text(notifier.error ?? 'Could not update assignment'),
+        ),
       );
     }
     return ok;
@@ -221,7 +263,9 @@ class _TransactionsScreenState extends State<TransactionsScreen> with AutomaticK
     final ok = await notifier.setHouseholdVisible(tx.id, visible);
     if (!ok) {
       messenger.showSnackBar(
-        SnackBar(content: Text(notifier.error ?? 'Could not update visibility')),
+        SnackBar(
+          content: Text(notifier.error ?? 'Could not update visibility'),
+        ),
       );
     }
     return ok;
@@ -230,8 +274,6 @@ class _TransactionsScreenState extends State<TransactionsScreen> with AutomaticK
   Future<void> _refresh(BuildContext context) async {
     await context.read<TransactionsNotifier>().loadAll();
   }
-
-
 }
 
 class _ErrorBanner extends StatelessWidget {
@@ -254,7 +296,10 @@ class _ErrorBanner extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
         child: Row(
           children: [
-            Icon(Icons.error_outline, color: theme.colorScheme.onErrorContainer),
+            Icon(
+              Icons.error_outline,
+              color: theme.colorScheme.onErrorContainer,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -290,16 +335,18 @@ class _EmptyState extends StatelessWidget {
     final icon = hasFilters
         ? Icons.filter_alt_off_outlined
         : (hasAnyTransactions
-            ? Icons.receipt_long_outlined
-            : Icons.credit_card_outlined);
+              ? Icons.receipt_long_outlined
+              : Icons.credit_card_outlined);
     final title = hasFilters
         ? 'No transactions match these filters'
-        : (hasAnyTransactions ? 'No transactions to show' : 'No transactions yet');
+        : (hasAnyTransactions
+              ? 'No transactions to show'
+              : 'No transactions yet');
     final message = hasFilters
         ? 'Try clearing a filter or widening the date range.'
         : (hasAnyTransactions
-            ? 'Pull down to refresh.'
-            : 'Sync a card or import a CSV to see transactions here.');
+              ? 'Pull down to refresh.'
+              : 'Sync a card or import a CSV to see transactions here.');
 
     return Center(
       child: Padding(
@@ -367,7 +414,20 @@ class _TransactionFilterBar extends StatelessWidget {
   }
 
   String _monthLabel(DateTime value) {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return "${months[value.month - 1]} '${value.year.toString().substring(2)}";
   }
 
@@ -382,7 +442,9 @@ class _TransactionFilterBar extends StatelessWidget {
           color: theme.colorScheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewPadding.bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewPadding.bottom,
+        ),
         child: SafeArea(
           top: false,
           child: Column(
@@ -401,9 +463,17 @@ class _TransactionFilterBar extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                 child: Row(
                   children: [
-                    Text('Date range', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+                    Text(
+                      'Date range',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const Spacer(),
-                    IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                    ),
                   ],
                 ),
               ),
@@ -419,10 +489,15 @@ class _TransactionFilterBar extends StatelessWidget {
                       spacing: 8,
                       runSpacing: 8,
                       children: _quickMonths.map((month) {
-                        final isSelected = selectedDateRange != null &&
+                        final isSelected =
+                            selectedDateRange != null &&
                             selectedDateRange!.start.year == month.year &&
                             selectedDateRange!.start.month == month.month;
-                        final monthEnd = DateTime(month.year, month.month + 1, 0);
+                        final monthEnd = DateTime(
+                          month.year,
+                          month.month + 1,
+                          0,
+                        );
                         final today = DateUtils.dateOnly(DateTime.now());
                         final range = DateTimeRange(
                           start: month,
@@ -442,13 +517,13 @@ class _TransactionFilterBar extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                           child: OutlinedButton(
-                             onPressed: () {
-                               onDateRangeChanged(null);
-                               Navigator.pop(context);
-                             },
-                             child: const Text('All time'),
-                           ),
+                          child: OutlinedButton(
+                            onPressed: () {
+                              onDateRangeChanged(null);
+                              Navigator.pop(context);
+                            },
+                            child: const Text('All time'),
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -462,18 +537,19 @@ class _TransactionFilterBar extends StatelessWidget {
                                 initialDateRange: selectedDateRange,
                                 builder: (context, child) => Theme(
                                   data: Theme.of(context).copyWith(
-                                    colorScheme: Theme.of(context).colorScheme.copyWith(
-                                      primary: AppColors.primary,
-                                    ),
+                                    colorScheme: Theme.of(context).colorScheme
+                                        .copyWith(primary: AppColors.primary),
                                   ),
                                   child: child!,
                                 ),
                               );
                               if (picked != null) {
-                                navigator.pop(DateTimeRange(
-                                  start: DateUtils.dateOnly(picked.start),
-                                  end: DateUtils.dateOnly(picked.end),
-                                ));
+                                navigator.pop(
+                                  DateTimeRange(
+                                    start: DateUtils.dateOnly(picked.start),
+                                    end: DateUtils.dateOnly(picked.end),
+                                  ),
+                                );
                               }
                             },
                             child: const Text('Custom range'),
@@ -494,76 +570,65 @@ class _TransactionFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-          child: Column(
-           crossAxisAlignment: CrossAxisAlignment.start,
-           children: [
-            Row(
-              children: [
-                Text('Filters', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                const Spacer(),
-                if (hasActiveFilters)
-                  TextButton.icon(
-                    onPressed: onClearAll,
-                    icon: const Icon(Icons.clear_all, size: 16),
-                    label: const Text('Clear all'),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                    ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _FilterMenuButton(
+              label: 'Credit card',
+              selectedValue: selectedAccountId,
+              items: [
+                const _FilterMenuItem(value: null, label: 'All cards'),
+                ...accounts.map(
+                  (a) => _FilterMenuItem(
+                    value: a.accountId,
+                    label: a.displayName ?? a.accountName,
                   ),
+                ),
               ],
+              onChanged: onAccountChanged,
             ),
-            const SizedBox(height: 12),
-             Wrap(
-               spacing: 6,
-               runSpacing: 6,
-               children: [
-                _FilterMenuButton(
-                  label: 'Credit card',
-                  selectedValue: selectedAccountId,
-                  items: [
-                    const _FilterMenuItem(value: null, label: 'All cards'),
-                    ...accounts.map((a) => _FilterMenuItem(
-                      value: a.accountId,
-                      label: a.displayName ?? a.accountName,
-                    )),
-                  ],
-                  onChanged: onAccountChanged,
-                ),
-                _FilterMenuButton(
-                  label: 'Assigned to',
-                  selectedValue: selectedPersonId,
-                  items: [
-                    const _FilterMenuItem(value: null, label: 'Everyone'),
-                    ...people.map((p) => _FilterMenuItem(
-                      value: p.id,
-                      label: p.displayName,
-                    )),
-                  ],
-                  onChanged: onPersonChanged,
-                ),
-                _DateRangeFilterButton(
-                  label: 'Date range',
-                  selectedRange: selectedDateRange,
-                  onChanged: onDateRangeChanged,
-                  onPressed: () => _showDateRangeMenu(context),
+            _FilterMenuButton(
+              label: 'Assigned to',
+              selectedValue: selectedPersonId,
+              items: [
+                const _FilterMenuItem(value: null, label: 'Everyone'),
+                ...people.map(
+                  (p) => _FilterMenuItem(value: p.id, label: p.displayName),
                 ),
               ],
+              onChanged: onPersonChanged,
+            ),
+            _DateRangeFilterButton(
+              label: 'Date range',
+              selectedRange: selectedDateRange,
+              onChanged: onDateRangeChanged,
+              onPressed: () => _showDateRangeMenu(context),
             ),
           ],
         ),
-      ),
+        if (hasActiveFilters)
+          _ActiveFilterChipsCard(
+            selectedAccountId: selectedAccountId,
+            selectedPersonId: selectedPersonId,
+            selectedDateRange: selectedDateRange,
+            accounts: accounts,
+            people: people,
+            onRemoveAccount: onRemoveAccount ?? () {},
+            onRemovePerson: onRemovePerson ?? () {},
+            onRemoveDateRange: onRemoveDateRange ?? () {},
+          ),
+      ],
     );
   }
 }
 
-/// Active filter chips rendered in their own card underneath the filter panel,
-/// rather than crammed inside the same container as the filter menu buttons.
+/// Active filter chips rendered underneath the filter bubbles,
+/// showing each currently selected filter with a remove affordance.
 class _ActiveFilterChipsCard extends StatelessWidget {
   const _ActiveFilterChipsCard({
     required this.selectedAccountId,
@@ -587,28 +652,43 @@ class _ActiveFilterChipsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selectedAccount = accounts.where((a) => a.accountId == selectedAccountId).firstOrNull;
-    final selectedPerson = people.where((p) => p.id == selectedPersonId).firstOrNull;
+    final selectedAccount = accounts
+        .where((a) => a.accountId == selectedAccountId)
+        .firstOrNull;
+    final selectedPerson = people
+        .where((p) => p.id == selectedPersonId)
+        .firstOrNull;
 
     final chips = <Widget>[];
     if (selectedAccountId != null) {
-      chips.add(_FilterChip(label: selectedAccount?.accountName ?? 'Card', onRemove: onRemoveAccount));
+      chips.add(
+        _FilterChip(
+          label: selectedAccount?.accountName ?? 'Card',
+          onRemove: onRemoveAccount,
+        ),
+      );
     }
     if (selectedPersonId != null) {
-      chips.add(_FilterChip(label: selectedPerson?.displayName ?? 'Person', onRemove: onRemovePerson));
+      chips.add(
+        _FilterChip(
+          label: selectedPerson?.displayName ?? 'Person',
+          onRemove: onRemovePerson,
+        ),
+      );
     }
     if (selectedDateRange != null) {
-      chips.add(_FilterChip(label: _rangeLabel(selectedDateRange!), onRemove: onRemoveDateRange));
+      chips.add(
+        _FilterChip(
+          label: _rangeLabel(selectedDateRange!),
+          onRemove: onRemoveDateRange,
+        ),
+      );
     }
 
     if (chips.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: chips,
-      ),
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
+      child: Wrap(spacing: 8, runSpacing: 8, children: chips),
     );
   }
 }
@@ -619,11 +699,65 @@ String _rangeLabel(DateTimeRange range) {
 
 String _shortDate(DateTime value) {
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
 }
+
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({required this.label, required this.onRemove});
+
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final maxChipWidth = MediaQuery.of(context).size.width * 0.3;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxChipWidth),
+      child: InputChip(
+        label: Text(
+          label,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelMedium?.copyWith(
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        deleteIcon: const Icon(Icons.close, size: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        onDeleted: onRemove,
+        deleteButtonTooltipMessage: 'Clear filter',
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        side: BorderSide(color: theme.colorScheme.outline.withAlpha(100)),
+        backgroundColor: theme.colorScheme.surfaceContainerHighest.withAlpha(
+          50,
+        ),
+        deleteIconColor: theme.colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+}
+
+/// Sentinel value used by filter menu buttons so the "All" / "Everyone" /
+/// reset option is a real, non-null `PopupMenuItem` value. `null` is treated
+/// as a menu cancel by `PopupMenuButton.showButtonMenu` and never reaches
+/// `onSelected`, so a non-null improbable constant is used instead.
+const String _kAllFilter = '__cardsemble_all__';
 
 class _FilterMenuButton extends StatelessWidget {
   const _FilterMenuButton({
@@ -642,13 +776,17 @@ class _FilterMenuButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return PopupMenuButton<String?>(
-      initialValue: selectedValue,
-      onSelected: onChanged,
-      itemBuilder: (context) => items.map((item) => PopupMenuItem<String?>(
-        value: item.value,
-        child: Text(item.label),
-      )).toList(),
+    return PopupMenuButton<String>(
+      initialValue: selectedValue ?? _kAllFilter,
+      onSelected: (value) => onChanged(value == _kAllFilter ? null : value),
+      itemBuilder: (context) => items
+          .map(
+            (item) => PopupMenuItem<String>(
+              value: item.value ?? _kAllFilter,
+              child: Text(item.label),
+            ),
+          )
+          .toList(),
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
         child: Container(
@@ -660,9 +798,7 @@ class _FilterMenuButton extends StatelessWidget {
                   ? theme.colorScheme.primary
                   : theme.colorScheme.outline,
             ),
-            color: selectedValue != null
-                ? theme.colorScheme.primaryContainer.withValues(alpha: 50)
-                : null,
+            color: Colors.white,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -696,36 +832,6 @@ class _FilterMenuItem {
   final String label;
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.onRemove,
-  });
-
-  final String label;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-     return InputChip(
-       label: Text(label),
-       deleteIcon: const Icon(Icons.close, size: 16),
-       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-       onDeleted: onRemove,
-       deleteButtonTooltipMessage: 'Clear filter',
-       visualDensity: VisualDensity.compact,
-       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-       side: BorderSide(color: theme.colorScheme.outline.withAlpha(100)),
-       backgroundColor: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
-       labelStyle: theme.textTheme.labelMedium?.copyWith(
-         fontWeight: FontWeight.w500,
-       ),
-       deleteIconColor: theme.colorScheme.onSurfaceVariant,
-     );
-  }
-}
-
 class _DateRangeFilterButton extends StatelessWidget {
   const _DateRangeFilterButton({
     required this.label,
@@ -753,9 +859,7 @@ class _DateRangeFilterButton extends StatelessWidget {
               ? theme.colorScheme.primary
               : theme.colorScheme.outline,
         ),
-        backgroundColor: selectedRange != null
-            ? theme.colorScheme.primaryContainer.withValues(alpha: 50)
-            : null,
+        backgroundColor: Colors.white,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -801,15 +905,20 @@ class _TransactionTile extends StatelessWidget {
     final theme = Theme.of(context);
     final assignedPerson = people.firstWhere(
       (p) => p.id == transaction.assignedPersonId,
-      orElse: () => HouseholdPerson(id: '', displayName: 'Unassigned', isDefault: false),
+      orElse: () =>
+          HouseholdPerson(id: '', displayName: 'Unassigned', isDefault: false),
     );
 
     final assigneeColor = transaction.assignedPersonId == null
         ? theme.colorScheme.primary
         : _personColor(transaction.assignedPersonId!, people);
 
-     final personName = assignedPerson.displayName.isEmpty ? 'Unassigned' : assignedPerson.displayName;
-     final statusColor = transaction.pending ? AppColors.pendingBg : AppColors.sageGreen;
+    final personName = assignedPerson.displayName.isEmpty
+        ? 'Unassigned'
+        : assignedPerson.displayName;
+    final statusColor = transaction.pending
+        ? AppColors.pendingBg
+        : AppColors.sageGreen;
 
     void openPersonSelector() {
       showModalBottomSheet(
@@ -828,187 +937,202 @@ class _TransactionTile extends StatelessWidget {
     return Card(
       color: Colors.white,
       margin: const EdgeInsets.only(bottom: 8),
-        child: ExpansionTile(
-            leading: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: statusColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      transaction.parsedDate != null
-                          ? DateFormat('MMM').format(transaction.parsedDate!)
-                          : '??',
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      transaction.parsedDate != null
-                          ? DateFormat('d').format(transaction.parsedDate!)
-                          : '',
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+      child: ExpansionTile(
+        leading: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: statusColor.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  transaction.parsedDate != null
+                      ? DateFormat('MMM').format(transaction.parsedDate!)
+                      : '??',
+                  style: TextStyle(
+                    color: Colors.black87,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 2),
+                Text(
+                  transaction.parsedDate != null
+                      ? DateFormat('d').format(transaction.parsedDate!)
+                      : '',
+                  style: TextStyle(
+                    color: Colors.black87,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
-           title: transaction.merchant != null
-               ? Text(
-                   transaction.merchant!,
-                   style: theme.textTheme.titleLarge?.copyWith(
-                     fontWeight: FontWeight.w700,
-                     fontSize: 22,
-                   ),
-                   overflow: TextOverflow.ellipsis,
-                   maxLines: 2,
-                 )
-               : Text(
-                   personName,
-                   style: theme.textTheme.titleLarge?.copyWith(
-                     color: assigneeColor,
-                     fontWeight: FontWeight.w700,
-                     fontSize: 22,
-                   ),
-                   overflow: TextOverflow.ellipsis,
-                   maxLines: 2,
-                 ),
-           subtitle: transaction.merchant != null
-               ? Text(
-                   personName,
-                   style: theme.textTheme.bodySmall?.copyWith(
-                     fontSize: 16,
-                     color: assigneeColor,
-                   ),
-                   maxLines: 1,
-                   overflow: TextOverflow.ellipsis,
-                 )
-               : null,
-         trailing: Row(
-           mainAxisSize: MainAxisSize.min,
-           crossAxisAlignment: CrossAxisAlignment.center,
-           children: [
-             _TransactionAmountChip(
-               amount: formatCurrency(transaction.amountValue, transaction.currency),
-               pending: transaction.pending,
-             ),
-           ],
-         ),
-         children: [
-           Padding(
-             padding: const EdgeInsets.all(16),
-             child: Column(
-               crossAxisAlignment: CrossAxisAlignment.stretch,
-               children: [
-                 Text(
-                   transaction.name,
-                   style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-                   maxLines: 2,
-                   overflow: TextOverflow.ellipsis,
-                 ),
-                 const SizedBox(height: 12),
-                 InkWell(
-                   onTap: openPersonSelector,
-                   borderRadius: BorderRadius.circular(16),
-                   child: AnimatedContainer(
-                     duration: const Duration(milliseconds: 150),
-                     curve: Curves.easeOutCubic,
-                     width: double.infinity,
-                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                     decoration: BoxDecoration(
-                       color: assigneeColor.withValues(alpha: 24),
-                       borderRadius: BorderRadius.circular(16),
-                       border: Border.all(
-                         color: assigneeColor.withValues(alpha: 150),
-                         width: 2,
-                       ),
-                     ),
-                     child: Row(
-                       children: [
-                         CircleAvatar(
-                           radius: 22,
-                           backgroundColor: assigneeColor,
-                           child: Text(
-                             assignedPerson.displayName.isEmpty
-                                 ? '?'
-                                 : assignedPerson.displayName.substring(0, 1).toUpperCase(),
-                             style: const TextStyle(
-                               color: Colors.white,
-                               fontSize: 17,
-                               fontWeight: FontWeight.w700,
-                             ),
-                           ),
-                         ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                           child: Column(
-                             crossAxisAlignment: CrossAxisAlignment.start,
-                             children: [
-                               Text(
-                                 'ASSIGNED TO',
-                                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                   color: assigneeColor,
-                                   fontWeight: FontWeight.w800,
-                                   letterSpacing: 1.1,
-                                 ),
-                               ),
-                               const SizedBox(height: 2),
-                               Text(
-                                 assignedPerson.displayName,
-                                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                   color: assigneeColor,
-                                   fontWeight: FontWeight.w800,
-                                 ),
-                                 maxLines: 1,
-                                 overflow: TextOverflow.ellipsis,
-                               ),
-                             ],
-                           ),
-                         ),
-                         const SizedBox(width: 8),
-                         Icon(
-                           Icons.chevron_right_rounded,
-                           color: assigneeColor.withValues(alpha: 180),
-                         ),
-                       ],
-                     ),
-                   ),
-                 ),
-                 const SizedBox(height: 8),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: transaction.householdVisible,
-                    onChanged: (value) => onToggleHouseholdVisible(value),
-                    title: const Text('Visible to household'),
-                    subtitle: const Text('Shared with other household members'),
+          ),
+        ),
+        title: transaction.merchant != null
+            ? Text(
+                transaction.merchant!,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 22,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+              )
+            : Text(
+                personName,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: assigneeColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 22,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+              ),
+        subtitle: transaction.merchant != null
+            ? Text(
+                personName,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontSize: 16,
+                  color: assigneeColor,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              )
+            : null,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            _TransactionAmountChip(
+              amount: formatCurrency(
+                transaction.amountValue,
+                transaction.currency,
+              ),
+              pending: transaction.pending,
+            ),
+          ],
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  transaction.name,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 12),
+                InkWell(
+                  onTap: openPersonSelector,
+                  borderRadius: BorderRadius.circular(16),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    curve: Curves.easeOutCubic,
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: assigneeColor.withValues(alpha: 24),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: assigneeColor.withValues(alpha: 150),
+                        width: 2,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: assigneeColor,
+                          child: Text(
+                            assignedPerson.displayName.isEmpty
+                                ? '?'
+                                : assignedPerson.displayName
+                                      .substring(0, 1)
+                                      .toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'ASSIGNED TO',
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      color: assigneeColor,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 1.1,
+                                    ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                assignedPerson.displayName,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      color: assigneeColor,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: assigneeColor.withValues(alpha: 180),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: transaction.householdVisible,
+                  onChanged: (value) => onToggleHouseholdVisible(value),
+                  title: const Text('Visible to household'),
+                  subtitle: const Text('Shared with other household members'),
+                ),
+                const SizedBox(height: 8),
+                if (people.length > 1) ...[
+                  const Text(
+                    'Split:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  if (people.length > 1) ...[
-                    const Text('Split:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    _SplitBuilder(
-                      transaction: transaction,
-                      people: people,
-                      onSplit: onSplit,
-                   ),
-                 ],
-               ],
-             ),
-           ),
-         ],
-       ),
+                  _SplitBuilder(
+                    transaction: transaction,
+                    people: people,
+                    onSplit: onSplit,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1016,17 +1140,14 @@ class _TransactionTile extends StatelessWidget {
 /// Slightly rounded rectangle chip showing the transaction amount in the
 /// tile's trailing area. Color matches the pending/approved state of the box.
 class _TransactionAmountChip extends StatelessWidget {
-  const _TransactionAmountChip({
-    required this.amount,
-    required this.pending,
-  });
+  const _TransactionAmountChip({required this.amount, required this.pending});
 
   final String amount;
   final bool pending;
 
   @override
   Widget build(BuildContext context) {
-      final color = pending ? Colors.orange.shade300 : AppColors.sageGreen;
+    final color = pending ? Colors.orange.shade300 : AppColors.sageGreen;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
@@ -1110,9 +1231,12 @@ class _SplitBuilderState extends State<_SplitBuilder> {
           onPressed: () async {
             final splitList = <TransactionSplit>[];
             for (final person in widget.people) {
-              final amt = double.tryParse(_controllers[person.id]?.text ?? '') ?? 0;
+              final amt =
+                  double.tryParse(_controllers[person.id]?.text ?? '') ?? 0;
               if (amt > 0) {
-                splitList.add(TransactionSplit(personId: person.id, amount: amt));
+                splitList.add(
+                  TransactionSplit(personId: person.id, amount: amt),
+                );
               }
             }
             if (splitList.isNotEmpty) {
@@ -1160,13 +1284,13 @@ class _PersonSelectorSheetState extends State<_PersonSelectorSheet>
       parent: _animationController,
       curve: Curves.easeOutCubic,
     );
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOutCubic,
-    ));
+    _slideAnimation =
+        Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: _animationController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
     _animationController.forward();
   }
 
@@ -1330,11 +1454,7 @@ class _PersonSelectorTileItem extends StatelessWidget {
               ),
             ),
             if (isSelected)
-              Icon(
-                Icons.check_circle_rounded,
-                color: color,
-                size: 24,
-              ),
+              Icon(Icons.check_circle_rounded, color: color, size: 24),
           ],
         ),
       ),

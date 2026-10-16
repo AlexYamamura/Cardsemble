@@ -19,10 +19,10 @@ class PayButton extends StatelessWidget {
     return FilledButton.icon(
       onPressed: () => _showPayActionSheet(context, amount, currency),
       icon: const Icon(Icons.payments_outlined),
-      label: Text('Pay $text'),
+      label: Text('Pay $text', overflow: TextOverflow.ellipsis, softWrap: false),
       style: FilledButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        minimumSize: const Size.fromHeight(56),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        minimumSize: const Size(0, 44),
       ),
     );
   }
