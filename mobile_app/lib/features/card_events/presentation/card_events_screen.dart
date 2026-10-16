@@ -153,14 +153,22 @@ class _EventTile extends StatelessWidget {
                   Text(
                     event.merchant,
                     style: Theme.of(context).textTheme.titleMedium,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
                   ),
                   const SizedBox(height: 4),
-                  Text('${event.cardLabel}  •  ${event.paymentLabel}'),
+                  Text(
+                    '${event.cardLabel}  •  ${event.paymentLabel}',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
                   const SizedBox(height: 8),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
                       _SourceBadge(source: event.source),
-                      const SizedBox(width: 8),
                       _ReconciliationBadge(
                         status: statusText,
                         color: statusColor,
@@ -172,6 +180,8 @@ class _EventTile extends StatelessWidget {
                   Text(
                     '${_dateLabel(event.occurredAt)}  •  ${formatCurrency(event.amountValue, event.currency)}',
                     style: Theme.of(context).textTheme.bodySmall,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                 ],
               ),

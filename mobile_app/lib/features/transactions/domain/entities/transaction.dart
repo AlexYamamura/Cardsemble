@@ -1,3 +1,7 @@
+/// Sentinel used so [CardTransaction.copyWith] can distinguish "leave the
+/// nullable field unchanged" from "explicitly set it to null".
+const Object _unset = Object();
+
 class CardTransaction {
   const CardTransaction({
     required this.id,
@@ -17,6 +21,7 @@ class CardTransaction {
     this.assignedPersonId,
     required this.assignmentSource,
     this.hasSplits = false,
+    this.householdVisible = true,
   });
 
   final String id;
@@ -36,6 +41,50 @@ class CardTransaction {
   final String? assignedPersonId;
   final String assignmentSource;
   final bool hasSplits;
+  final bool householdVisible;
+
+  CardTransaction copyWith({
+    String? accountId,
+    String? accountName,
+    String? displayName,
+    String? plaidName,
+    String? officialName,
+    String? accountMask,
+    String? amount,
+    String? currency,
+    String? date,
+    String? name,
+    String? merchant,
+    bool? pending,
+    String? transactionCode,
+    Object? assignedPersonId = _unset,
+    String? assignmentSource,
+    bool? hasSplits,
+    bool? householdVisible,
+  }) {
+    return CardTransaction(
+      id: id,
+      accountId: accountId ?? this.accountId,
+      accountName: accountName ?? this.accountName,
+      displayName: displayName ?? this.displayName,
+      plaidName: plaidName ?? this.plaidName,
+      officialName: officialName ?? this.officialName,
+      accountMask: accountMask ?? this.accountMask,
+      amount: amount ?? this.amount,
+      currency: currency ?? this.currency,
+      date: date ?? this.date,
+      name: name ?? this.name,
+      merchant: merchant ?? this.merchant,
+      pending: pending ?? this.pending,
+      transactionCode: transactionCode ?? this.transactionCode,
+      assignedPersonId: identical(assignedPersonId, _unset)
+          ? this.assignedPersonId
+          : assignedPersonId as String?,
+      assignmentSource: assignmentSource ?? this.assignmentSource,
+      hasSplits: hasSplits ?? this.hasSplits,
+      householdVisible: householdVisible ?? this.householdVisible,
+    );
+  }
 
   factory CardTransaction.fromJson(Map<String, dynamic> json) {
     return CardTransaction(
@@ -56,6 +105,7 @@ class CardTransaction {
       assignedPersonId: json['assigned_person_id'] as String?,
       assignmentSource: json['assignment_source'] as String? ?? 'default',
       hasSplits: json['has_splits'] as bool? ?? false,
+      householdVisible: json['household_visible'] as bool? ?? true,
     );
   }
 
@@ -78,6 +128,7 @@ class CardTransaction {
       'assigned_person_id': assignedPersonId,
       'assignment_source': assignmentSource,
       'has_splits': hasSplits,
+      'household_visible': householdVisible,
     };
   }
 
@@ -85,6 +136,93 @@ class CardTransaction {
   bool get isPositive => amountValue > 0;
   bool get isPayment => transactionCode?.toLowerCase() == 'payment';
   DateTime? get parsedDate => date != null ? DateTime.tryParse(date!) : null;
+}
+
+/// Server-confirmed assignment for a transaction. The server resolves an
+/// unassigned transaction back to the household default person, so the
+/// effective [personId] is never the source of truth for "unassigned".
+class TransactionAssignment {
+  const TransactionAssignment({
+    required this.personId,
+    required this.assignmentSource,
+  });
+
+  final String? personId;
+  final String assignmentSource;
+
+  factory TransactionAssignment.fromJson(Map<String, dynamic> json) {
+    return TransactionAssignment(
+      personId: json['person_id'] as String?,
+      assignmentSource: json['assignment_source'] as String? ?? 'default',
+    );
+  }
+}
+
+/// Query parameters for a transactions page. Date bounds are inclusive and sent
+/// to the server so the client never has to download the whole ledger.
+class TransactionQuery {
+  const TransactionQuery({
+    this.limit = 100,
+    this.offset = 0,
+    this.accountId,
+    this.dateFrom,
+    this.dateTo,
+    this.householdVisible,
+  });
+
+  final int limit;
+  final int offset;
+  final String? accountId;
+  final DateTime? dateFrom;
+  final DateTime? dateTo;
+  final bool? householdVisible;
+
+  TransactionQuery copyWith({
+    int? limit,
+    int? offset,
+    String? accountId,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    bool? householdVisible,
+  }) {
+    return TransactionQuery(
+      limit: limit ?? this.limit,
+      offset: offset ?? this.offset,
+      accountId: accountId ?? this.accountId,
+      dateFrom: dateFrom ?? this.dateFrom,
+      dateTo: dateTo ?? this.dateTo,
+      householdVisible: householdVisible ?? this.householdVisible,
+    );
+  }
+
+  Map<String, String> toQueryParameters() {
+    return {
+      'limit': '$limit',
+      'offset': '$offset',
+      if (accountId != null) 'account_id': accountId!,
+      if (dateFrom != null) 'date_from': _formatDate(dateFrom!),
+      if (dateTo != null) 'date_to': _formatDate(dateTo!),
+      if (householdVisible != null)
+        'household_visible': householdVisible! ? 'true' : 'false',
+    };
+  }
+
+  static String _formatDate(DateTime value) {
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+}
+
+class TransactionPage {
+  const TransactionPage({
+    required this.items,
+    required this.hasMore,
+  });
+
+  final List<CardTransaction> items;
+  final bool hasMore;
 }
 
 class TransactionSplit {

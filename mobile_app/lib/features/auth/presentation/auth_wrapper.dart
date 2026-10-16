@@ -22,9 +22,13 @@ class _AuthWrapperState extends State<AuthWrapper> {
   void initState() {
     super.initState();
     _authNotifier = context.read<AuthNotifier>();
-    _authNotifier.initialize();
-
     _authNotifier.addListener(_onAuthStateChanged);
+    // Initialize after the current frame to avoid calling notifyListeners during build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _authNotifier.initialize();
+      }
+    });
   }
 
   @override

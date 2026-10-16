@@ -57,6 +57,20 @@ class StatementAccount {
       institutionName: json['institution_name'] as String?,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'account_id': accountId,
+      'account_name': accountName,
+      'display_name': displayName,
+      'plaid_name': plaidName,
+      'official_name': officialName,
+      'mask': mask,
+      'subtype': subtype,
+      'item_id': itemId,
+      'institution_name': institutionName,
+    };
+  }
 }
 
 class StatementCycleSummary {

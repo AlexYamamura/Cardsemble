@@ -499,37 +499,69 @@ Deno.serve(async (req) => {
       }
       const limit = Math.min(parseInt(url.searchParams.get("limit") || "500", 10), 500);
       const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+      const accountIdFilter = url.searchParams.get("account_id");
+      const dateFrom = url.searchParams.get("date_from");
+      const dateTo = url.searchParams.get("date_to");
+      const householdVisibleParam = url.searchParams.get("household_visible");
 
       const creditAccounts = await fetchUserRows("plaid_credit_accounts", auth.userId, { orderBy: "account_id.asc" });
       const creditAccountIds = creditAccounts.filter((a) => a.account_id).map((a) => a.account_id);
       if (creditAccountIds.length === 0) {
-        return jsonResponse({ transactions: [] });
+        return jsonResponse({ transactions: [], has_more: false });
+      }
+      // An explicit account filter that the user does not own must never widen the query.
+      if (accountIdFilter && !creditAccountIds.includes(accountIdFilter)) {
+        return jsonResponse({ transactions: [], has_more: false });
       }
 
-      const accountQuery = `eq.\`${creditAccountIds.join(",")}\``;
-      const { data: transactions, error: txError } = await supabase
+      // Only project the columns the client consumes; avoid the large JSON columns
+      // (location, counterparties, payment_meta, category icon, ...) that were
+      // previously pulled with select("*").
+      let pageQuery = supabase
         .from("plaid_transactions")
-        .select("*")
+        .select("transaction_id,account_id,amount,iso_currency_code,date,name,merchant_name,pending,transaction_code,household_visible")
         .eq("user_id", auth.userId)
         .eq("is_removed", false)
-        .in("account_id", creditAccountIds)
+        .in("account_id", accountIdFilter ? [accountIdFilter] : creditAccountIds);
+
+      if (dateFrom) pageQuery = pageQuery.gte("date", dateFrom);
+      if (dateTo) pageQuery = pageQuery.lte("date", dateTo);
+      if (householdVisibleParam === "true" || householdVisibleParam === "false") {
+        pageQuery = pageQuery.eq("household_visible", householdVisibleParam === "true");
+      }
+
+      const { data: transactions, error: txError } = await pageQuery
         .order("date", { ascending: false })
         .order("transaction_id", { ascending: true })
         .range(offset, offset + limit - 1);
-
       if (txError) throw new ApiError(502, txError.message);
 
-      const creditAccountById = new Map(creditAccounts.map((a) => [a.account_id, a]));
-      const assignments = await fetchUserRows("transaction_assignments", auth.userId, { orderBy: "transaction_id.asc" });
-      const assignmentById = new Map(assignments.map((a) => [a.transaction_id, a]));
+      const pageRows = transactions ?? [];
+      const pageIds = pageRows.map((tx: any) => tx.transaction_id).filter(Boolean);
+
+      // Scope assignment lookups to the current page instead of refetching the
+      // entire assignment table on every 500-row page.
+      const assignmentById = new Map<string, any>();
       const splitCounts = new Map<string, number>();
-      for (const assignment of assignments) {
-        splitCounts.set(assignment.transaction_id, (splitCounts.get(assignment.transaction_id) ?? 0) + 1);
+      if (pageIds.length > 0) {
+        const { data: assignments, error: assignmentError } = await supabase
+          .from("transaction_assignments")
+          .select("transaction_id,person_id,assignment_source,amount")
+          .eq("user_id", auth.userId)
+          .in("transaction_id", pageIds);
+        if (assignmentError) throw new ApiError(502, assignmentError.message);
+        for (const assignment of assignments ?? []) {
+          assignmentById.set(assignment.transaction_id, assignment);
+          splitCounts.set(assignment.transaction_id, (splitCounts.get(assignment.transaction_id) ?? 0) + 1);
+        }
       }
+
+      const creditAccountById = new Map(creditAccounts.map((a) => [a.account_id, a]));
       const primary = await ensureDefaultPerson(auth.userId);
 
-      const result = (transactions ?? []).map((tx: any) => ({
+      const result = pageRows.map((tx: any) => ({
         ...tx,
+        household_visible: tx.household_visible !== false,
         account_name: creditCardDisplayName(creditAccountById.get(tx.account_id) ?? {}),
         display_name: creditAccountById.get(tx.account_id)?.display_name ?? null,
         plaid_name: creditAccountById.get(tx.account_id)?.name ?? null,
@@ -544,7 +576,7 @@ Deno.serve(async (req) => {
         has_splits: (splitCounts.get(tx.transaction_id) ?? 0) > 1,
       }));
 
-      return jsonResponse({ transactions: result });
+      return jsonResponse({ transactions: result, has_more: pageRows.length === limit });
     }
 
     if (method === "GET" && path.match(/^plaid-transactions\/[^/]+\/splits$/)) {

@@ -31,12 +31,27 @@ class TransactionsScreen extends StatefulWidget {
 }
 
 class _TransactionsScreenState extends State<TransactionsScreen> {
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<TransactionsNotifier>().loadAll();
-    });
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 400) {
+      context.read<TransactionsNotifier>().loadMoreTransactions();
+    }
   }
 
   @override
@@ -75,20 +90,32 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                   onDateRangeChanged: notifier.setDateRange,
                   onClearAll: notifier.clearAllFilters,
                   hasActiveFilters: notifier.hasActiveFilters,
+                  onRemoveAccount: () => notifier.setAccountFilter(null),
+                  onRemovePerson: () => notifier.setPersonFilter(null),
+                  onRemoveDateRange: notifier.clearDateRange,
                 ),
+                if (notifier.hasActiveFilters)
+                  _ActiveFilterChipsCard(
+                    selectedAccountId: notifier.selectedAccountId,
+                    selectedPersonId: notifier.selectedPersonId,
+                    selectedDateRange: notifier.dateRange,
+                    accounts: notifier.accounts,
+                    people: notifier.people,
+                    onRemoveAccount: () => notifier.setAccountFilter(null),
+                    onRemovePerson: () => notifier.setPersonFilter(null),
+                    onRemoveDateRange: notifier.clearDateRange,
+                  ),
+                if (notifier.error != null)
+                  _ErrorBanner(
+                    message: notifier.error!,
+                    onRetry: () => _refresh(context),
+                    onDismiss: notifier.clearError,
+                  ),
                 Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: displayTransactions.length,
-                    itemBuilder: (context, index) {
-                      final tx = displayTransactions[index];
-                      return _TransactionTile(
-                        transaction: tx,
-                        people: notifier.people,
-                        onAssign: (personId) => notifier.assignTransaction(tx.id, personId),
-                        onSplit: (splits) => notifier.assignTransactionSplit(tx.id, splits),
-                      );
-                    },
+                  child: _buildList(
+                    context,
+                    notifier,
+                    displayTransactions,
                   ),
                 ),
               ],
@@ -102,6 +129,99 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         label: const Text('Import CSV'),
       ),
     );
+  }
+
+  Widget _buildList(
+    BuildContext context,
+    TransactionsNotifier notifier,
+    List<CardTransaction> displayTransactions,
+  ) {
+    if (displayTransactions.isEmpty) {
+      return ListView(
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          const SizedBox(height: 72),
+          _EmptyState(
+            hasFilters: notifier.hasActiveFilters,
+            hasAnyTransactions: notifier.transactions.isNotEmpty,
+          ),
+        ],
+      );
+    }
+
+    final itemCount = displayTransactions.length + (notifier.hasMore ? 1 : 0);
+    return ListView.builder(
+      controller: _scrollController,
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      itemCount: itemCount,
+      itemBuilder: (context, index) {
+        if (index >= displayTransactions.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final tx = displayTransactions[index];
+        return _TransactionTile(
+          transaction: tx,
+          people: notifier.people,
+          onAssign: (personId) => _runAssignment(context, notifier, tx, personId),
+          onSplit: (splits) => _runSplit(context, notifier, tx, splits),
+          onToggleHouseholdVisible: (visible) =>
+              _runVisibility(context, notifier, tx, visible),
+        );
+      },
+    );
+  }
+
+  Future<bool> _runAssignment(
+    BuildContext context,
+    TransactionsNotifier notifier,
+    CardTransaction tx,
+    String? personId,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await notifier.assignTransaction(tx.id, personId);
+    if (!ok) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(notifier.error ?? 'Could not update assignment')),
+      );
+    }
+    return ok;
+  }
+
+  Future<bool> _runSplit(
+    BuildContext context,
+    TransactionsNotifier notifier,
+    CardTransaction tx,
+    List<TransactionSplit> splits,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await notifier.assignTransactionSplit(tx.id, splits);
+    if (!ok) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(notifier.error ?? 'Could not save the split')),
+      );
+    }
+    return ok;
+  }
+
+  Future<bool> _runVisibility(
+    BuildContext context,
+    TransactionsNotifier notifier,
+    CardTransaction tx,
+    bool visible,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await notifier.setHouseholdVisible(tx.id, visible);
+    if (!ok) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(notifier.error ?? 'Could not update visibility')),
+      );
+    }
+    return ok;
   }
 
   Future<void> _refresh(BuildContext context) async {
@@ -143,6 +263,99 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
 }
 
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({
+    required this.message,
+    required this.onRetry,
+    required this.onDismiss,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline, color: theme.colorScheme.onErrorContainer),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: theme.colorScheme.onErrorContainer),
+              ),
+            ),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+            IconButton(
+              tooltip: 'Dismiss',
+              onPressed: onDismiss,
+              icon: const Icon(Icons.close, size: 18),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({
+    required this.hasFilters,
+    required this.hasAnyTransactions,
+  });
+
+  final bool hasFilters;
+  final bool hasAnyTransactions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final icon = hasFilters
+        ? Icons.filter_alt_off_outlined
+        : (hasAnyTransactions
+            ? Icons.receipt_long_outlined
+            : Icons.credit_card_outlined);
+    final title = hasFilters
+        ? 'No transactions match these filters'
+        : (hasAnyTransactions ? 'No transactions to show' : 'No transactions yet');
+    final message = hasFilters
+        ? 'Try clearing a filter or widening the date range.'
+        : (hasAnyTransactions
+            ? 'Pull down to refresh.'
+            : 'Sync a card or import a CSV to see transactions here.');
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 44, color: theme.colorScheme.outline),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: theme.textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              style: theme.textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _TransactionFilterBar extends StatelessWidget {
   const _TransactionFilterBar({
     required this.accounts,
@@ -155,6 +368,9 @@ class _TransactionFilterBar extends StatelessWidget {
     required this.onDateRangeChanged,
     required this.onClearAll,
     required this.hasActiveFilters,
+    this.onRemoveAccount,
+    this.onRemovePerson,
+    this.onRemoveDateRange,
   });
 
   final List<StatementAccount> accounts;
@@ -167,6 +383,9 @@ class _TransactionFilterBar extends StatelessWidget {
   final ValueChanged<DateTimeRange?> onDateRangeChanged;
   final VoidCallback onClearAll;
   final bool hasActiveFilters;
+  final VoidCallback? onRemoveAccount;
+  final VoidCallback? onRemovePerson;
+  final VoidCallback? onRemoveDateRange;
 
   List<DateTime> get _quickMonths {
     final today = DateTime.now();
@@ -369,6 +588,69 @@ class _TransactionFilterBar extends StatelessWidget {
   }
 }
 
+/// Active filter chips rendered in their own card underneath the filter panel,
+/// rather than crammed inside the same container as the filter menu buttons.
+class _ActiveFilterChipsCard extends StatelessWidget {
+  const _ActiveFilterChipsCard({
+    required this.selectedAccountId,
+    required this.selectedPersonId,
+    required this.selectedDateRange,
+    required this.accounts,
+    required this.people,
+    required this.onRemoveAccount,
+    required this.onRemovePerson,
+    required this.onRemoveDateRange,
+  });
+
+  final String? selectedAccountId;
+  final String? selectedPersonId;
+  final DateTimeRange? selectedDateRange;
+  final List<StatementAccount> accounts;
+  final List<HouseholdPerson> people;
+  final VoidCallback onRemoveAccount;
+  final VoidCallback onRemovePerson;
+  final VoidCallback onRemoveDateRange;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedAccount = accounts.where((a) => a.accountId == selectedAccountId).firstOrNull;
+    final selectedPerson = people.where((p) => p.id == selectedPersonId).firstOrNull;
+
+    final chips = <Widget>[];
+    if (selectedAccountId != null) {
+      chips.add(_FilterChip(label: selectedAccount?.accountName ?? 'Card', onRemove: onRemoveAccount));
+    }
+    if (selectedPersonId != null) {
+      chips.add(_FilterChip(label: selectedPerson?.displayName ?? 'Person', onRemove: onRemovePerson));
+    }
+    if (selectedDateRange != null) {
+      chips.add(_FilterChip(label: _rangeLabel(selectedDateRange!), onRemove: onRemoveDateRange));
+    }
+
+    if (chips.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: chips,
+      ),
+    );
+  }
+}
+
+String _rangeLabel(DateTimeRange range) {
+  return '${_shortDate(range.start)} – ${_shortDate(range.end)}';
+}
+
+String _shortDate(DateTime value) {
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  return '${months[value.month - 1]} ${value.day}, ${value.year}';
+}
+
 class _FilterMenuButton extends StatelessWidget {
   const _FilterMenuButton({
     required this.label,
@@ -440,6 +722,35 @@ class _FilterMenuItem {
   final String label;
 }
 
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({
+    required this.label,
+    required this.onRemove,
+  });
+
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InputChip(
+      label: Text(label),
+      deleteIcon: const Icon(Icons.close, size: 18),
+      onDeleted: onRemove,
+      deleteButtonTooltipMessage: 'Clear filter',
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      side: BorderSide(color: theme.colorScheme.outline.withAlpha(100)),
+      backgroundColor: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
+      labelStyle: theme.textTheme.labelLarge?.copyWith(
+        fontWeight: FontWeight.w500,
+      ),
+      deleteIconColor: theme.colorScheme.onSurfaceVariant,
+    );
+  }
+}
+
 class _DateRangeFilterButton extends StatelessWidget {
   const _DateRangeFilterButton({
     required this.label,
@@ -501,23 +812,32 @@ class _TransactionTile extends StatelessWidget {
     required this.people,
     required this.onAssign,
     required this.onSplit,
+    required this.onToggleHouseholdVisible,
   });
 
   final CardTransaction transaction;
   final List<HouseholdPerson> people;
   final Future<bool> Function(String?) onAssign;
   final Future<bool> Function(List<TransactionSplit>) onSplit;
+  final Future<bool> Function(bool) onToggleHouseholdVisible;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final assignedPerson = people.firstWhere(
       (p) => p.id == transaction.assignedPersonId,
       orElse: () => HouseholdPerson(id: '', displayName: 'Unassigned', isDefault: false),
     );
 
     final assigneeColor = transaction.assignedPersonId == null
-        ? Theme.of(context).colorScheme.primary
+        ? theme.colorScheme.primary
         : _personColor(transaction.assignedPersonId!, people);
+
+    // Color code the tile box itself: slight orange when still pending,
+    // slight sage green when approved.
+    final boxFillColor = transaction.pending
+        ? AppColors.pendingBg.withValues(alpha: 0.5)
+        : AppColors.sageGreen.withValues(alpha: 0.35);
 
     void openPersonSelector() {
       showModalBottomSheet(
@@ -534,41 +854,72 @@ class _TransactionTile extends StatelessWidget {
     }
 
     return Card(
+      color: boxFillColor,
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         leading: CircleAvatar(
-          backgroundColor: transaction.isPositive ? Colors.red.shade50 : Colors.green.shade50,
-          child: Icon(
-            transaction.isPositive ? Icons.arrow_upward : Icons.arrow_downward,
-            color: transaction.isPositive ? Colors.red : Colors.green,
+          backgroundColor: assigneeColor.withValues(alpha: 0.12),
+          child: Text(
+            assignedPerson.displayName.isEmpty
+                ? '?'
+                : assignedPerson.displayName.substring(0, 1).toUpperCase(),
+            style: TextStyle(
+              color: assigneeColor,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
-        title: Text(transaction.name, style: const TextStyle(fontWeight: FontWeight.w500)),
+        title: Text(
+          transaction.name,
+          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 2,
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             if (transaction.merchant != null)
-              Text(transaction.merchant!, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            Text(
-              '${transaction.date != null ? DateFormat('MMM d').format(transaction.parsedDate!) : 'No date'}  •  ${formatCurrency(transaction.amountValue, transaction.currency)}',
-              style: TextStyle(
-                fontSize: 12,
-                color: transaction.isPositive ? Colors.red.shade700 : Colors.green.shade700,
+              Text(
+                transaction.merchant!,
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
+            const SizedBox(height: 2),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  transaction.date != null
+                      ? DateFormat('MMM d').format(transaction.parsedDate!)
+                      : 'No date',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              assignedPerson.displayName.isEmpty
+                  ? 'Unassigned'
+                  : assignedPerson.displayName,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
           ],
         ),
-        trailing: Column(
+        trailing: Row(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            if (transaction.pending)
-              const Chip(label: Text('Pending'), backgroundColor: Colors.orange, labelStyle: TextStyle(color: Colors.white)),
-            if (transaction.hasSplits)
-              const Chip(label: Text('Split'), backgroundColor: Colors.blue, labelStyle: TextStyle(color: Colors.white)),
-            const SizedBox(height: 4),
-            Text(
-              transaction.assignedPersonId == null ? 'Unassigned' : assignedPerson.displayName,
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            _TransactionAmountChip(
+              amount: formatCurrency(transaction.amountValue, transaction.currency),
+              pending: transaction.pending,
             ),
           ],
         ),
@@ -645,7 +996,15 @@ class _TransactionTile extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: transaction.householdVisible,
+                  onChanged: (value) => onToggleHouseholdVisible(value),
+                  title: const Text('Visible to household'),
+                  subtitle: const Text('Shared with other household members'),
+                ),
+                const SizedBox(height: 8),
                 if (people.length > 1) ...[
                   const Text('Split:', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
@@ -659,6 +1018,41 @@ class _TransactionTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Slightly rounded rectangle chip showing the transaction amount in the
+/// tile's trailing area. Color matches the pending/approved state of the box.
+class _TransactionAmountChip extends StatelessWidget {
+  const _TransactionAmountChip({
+    required this.amount,
+    required this.pending,
+  });
+
+  final String amount;
+  final bool pending;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = pending ? Colors.orange : AppColors.primary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        amount,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+          fontSize: 11,
+        ),
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

@@ -3,9 +3,9 @@ import 'package:cardsemble/features/transactions/domain/transactions_domain.dart
 import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
 
 abstract class TransactionRepository {
-  Future<Result<List<CardTransaction>>> loadTransactions();
+  Future<Result<TransactionPage>> loadTransactions(TransactionQuery query);
   Future<Result<List<StatementAccount>>> loadAccounts();
-  Future<Result<void>> assignTransaction(String transactionId, String? personId);
+  Future<Result<TransactionAssignment>> assignTransaction(String transactionId, String? personId);
   Future<Result<void>> assignTransactionSplit(String transactionId, List<TransactionSplit> splits);
   Future<Result<List<TransactionSplit>>> fetchTransactionSplits(String transactionId);
   Future<Result<void>> setHouseholdVisible(String transactionId, bool visible);

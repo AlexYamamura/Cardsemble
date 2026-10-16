@@ -5,6 +5,7 @@ import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/device_capture/presentation/device_capture_notifier.dart';
 import 'package:cardsemble/features/device_capture/presentation/settings_step.dart';
 import 'package:cardsemble/features/summary/presentation/summary_screen.dart';
+import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_screen.dart';
 import 'package:cardsemble/features/card_events/presentation/card_events_screen.dart';
 import 'package:cardsemble/features/household/presentation/people_screen.dart';
@@ -28,15 +29,15 @@ class MainTabs extends StatefulWidget {
   State<MainTabs> createState() => _MainTabsState();
 }
 
-class _MainTabsState extends State<MainTabs> with SingleTickerProviderStateMixin {
+class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
   late final TabController _tabController;
+  late final PageController _pageController;
   late final AnimationController _settingsAnimationController;
   late final Animation<double> _settingsFadeAnimation;
   late final Animation<Offset> _settingsSlideAnimation;
   bool _showSettings = false;
   bool _firstRunSettingsPending = true;
   static const _settingsReviewedKey = 'capture_settings_reviewed';
-
   static const List<_TabInfo> _tabs = [
     _TabInfo(
       icon: Icons.insights_outlined,
@@ -64,7 +65,9 @@ class _MainTabsState extends State<MainTabs> with SingleTickerProviderStateMixin
   void initState() {
     super.initState();
     _tabController = TabController(length: _tabs.length, vsync: this);
+    _pageController = PageController(initialPage: _tabController.index);
     _tabController.addListener(_onTabChanged);
+    _pageController.addListener(_onPageScrolled);
     _settingsAnimationController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
@@ -85,6 +88,9 @@ class _MainTabsState extends State<MainTabs> with SingleTickerProviderStateMixin
       final capture = context.read<DeviceCaptureNotifier>();
       capture.loadPeople();
       capture.checkStatus();
+      // Single entry point for the shared transaction data so both tabs do not
+      // fire duplicate multi-page fetches on startup.
+      context.read<TransactionsNotifier>().loadAll();
     });
     _showFirstRunSettings();
   }
@@ -93,6 +99,7 @@ class _MainTabsState extends State<MainTabs> with SingleTickerProviderStateMixin
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _pageController.dispose();
     _settingsAnimationController.dispose();
     super.dispose();
   }
@@ -101,8 +108,20 @@ class _MainTabsState extends State<MainTabs> with SingleTickerProviderStateMixin
     if (mounted) setState(() {});
   }
 
+  /// Keeps the NavigationBar's highlighted icon in sync while the user swipes
+  /// between pages, since the TabController index only settles after the swipe.
+  void _onPageScrolled() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   void _showTransactionsTab() {
     _tabController.animateTo(1);
+    _pageController.animateToPage(
+      1,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Future<void> _showFirstRunSettings() async {
@@ -204,9 +223,9 @@ class _MainTabsState extends State<MainTabs> with SingleTickerProviderStateMixin
             ],
           ),
         ),
-        child: TabBarView(
-          controller: _tabController,
-          physics: const BouncingScrollPhysics(),
+        child: PageView(
+          controller: _pageController,
+          physics: const _SensitiveTabPhysics(),
           children: [
             SummaryScreen(
               onShowTransactions: _showTransactionsTab,
@@ -218,27 +237,20 @@ class _MainTabsState extends State<MainTabs> with SingleTickerProviderStateMixin
           ],
         ),
       ),
-      bottomNavigationBar: ColoredBox(
-        color: Theme.of(context).colorScheme.surface,
-        child: SafeArea(
-          top: false,
-          child: NavigationBar(
-            height: 76,
-            selectedIndex: _tabController.index,
-            onDestinationSelected: (index) => _tabController.animateTo(index),
-            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-            indicatorColor: AppColors.primary,
-            destinations: _tabs
-                .map(
-                  (tab) => NavigationDestination(
-                    icon: Icon(tab.icon),
-                    selectedIcon: Icon(tab.selectedIcon),
-                    label: tab.label,
-                  ),
-                )
-                .toList(),
-          ),
-        ),
+      bottomNavigationBar: _AnimatedTabBar(
+        tabs: _tabs,
+        selectedIndex: (_pageController.hasClients ? (_pageController.page ?? 0.0) : _tabController.index.toDouble()),
+        fractionalIndex: _pageController.hasClients
+            ? (_pageController.page ?? _tabController.index.toDouble())
+            : _tabController.index.toDouble(),
+        onSelected: (index) {
+          _tabController.animateTo(index);
+          _pageController.animateToPage(
+            index,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+          );
+        },
       ),
     );
   }
@@ -468,6 +480,179 @@ class _MainTabsState extends State<MainTabs> with SingleTickerProviderStateMixin
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SensitiveTabPhysics extends PageScrollPhysics {
+  const _SensitiveTabPhysics({super.parent});
+
+  @override
+  _SensitiveTabPhysics applyTo(ScrollPhysics? ancestor) {
+    return _SensitiveTabPhysics(parent: buildParent(ancestor));
+  }
+
+  @override
+  double get dragStartDistanceMotionThreshold => 6.0;
+
+  @override
+  double get minFlingVelocity => 300.0;
+
+  @override
+  SpringDescription get spring => const SpringDescription(
+    mass: 1.0,
+    stiffness: 300.0,
+    damping: 35.0,
+  );
+}
+
+// Shared metrics for the custom bottom navigation bar. The bar reserves a
+// fixed-height region at the top for the icon and the sliding selection pill;
+// the label sits below it.
+const double _kNavBarHeight = 80.0;
+const double _kNavIndicatorWidth = 64.0;
+const double _kNavIndicatorHeight = 32.0;
+const double _kNavIndicatorTop = 14.0;
+
+/// A bottom navigation bar whose highlight pill tracks the actual tab the user
+/// is on — including mid-swipe, where the fractional page position is used so
+/// the highlight slides with the finger instead of snapping to the nearest
+/// destination.
+class _AnimatedTabBar extends StatefulWidget {
+  const _AnimatedTabBar({
+    required this.tabs,
+    required this.selectedIndex,
+    required this.fractionalIndex,
+    required this.onSelected,
+  });
+
+  final List<_TabInfo> tabs;
+  final double selectedIndex;
+  final double fractionalIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  State<_AnimatedTabBar> createState() => _AnimatedTabBarState();
+}
+
+class _AnimatedTabBarState extends State<_AnimatedTabBar> {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final n = widget.tabs.length;
+
+    return ColoredBox(
+      color: theme.colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          // A bounded height is essential: a Scaffold bottomNavigationBar is
+          // laid out with an unbounded/loose height, so an unconstrained
+          // Stack would expand to the full screen and hide the body.
+          height: _kNavBarHeight,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final itemWidth = constraints.maxWidth / n;
+              // Drive the pill from the fractional page position so the
+              // highlight follows the finger during a swipe and tracks a
+              // programmatic tab animation.
+              final left = widget.fractionalIndex * itemWidth +
+                  (itemWidth - _kNavIndicatorWidth) / 2;
+
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  Positioned(
+                    top: _kNavIndicatorTop,
+                    left: left,
+                    width: _kNavIndicatorWidth,
+                    height: _kNavIndicatorHeight,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (int i = 0; i < n; i++)
+                        Expanded(
+                          child: _Destination(
+                            tab: widget.tabs[i],
+                            selected: (i - widget.selectedIndex).abs() < 0.5,
+                            onTap: () => widget.onSelected(i),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Destination extends StatelessWidget {
+  const _Destination({
+    required this.tab,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _TabInfo tab;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // The icon sits on top of the (primary-coloured) selection pill when
+    // selected, so it uses the on-primary colour. The label sits below the
+    // pill on the surface, so it uses the primary colour instead — otherwise
+    // it would be invisible (light on light).
+    final iconColor =
+        selected ? AppColors.onPrimary : theme.colorScheme.onSurfaceVariant;
+    final labelColor =
+        selected ? AppColors.primary : theme.colorScheme.onSurfaceVariant;
+
+    return InkResponse(
+      onTap: onTap,
+      radius: 32,
+      child: Padding(
+        // Reserve the same top region the selection pill occupies so the icon
+        // sits centred inside the pill and the label falls below it.
+        padding: const EdgeInsets.only(top: _kNavIndicatorTop),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: _kNavIndicatorHeight,
+              child: Center(
+                child: Icon(
+                  selected ? tab.selectedIcon : tab.icon,
+                  color: iconColor,
+                  size: 24,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              tab.label,
+              style: TextStyle(
+                color: labelColor,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       ),
     );

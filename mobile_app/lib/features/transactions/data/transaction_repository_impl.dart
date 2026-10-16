@@ -8,29 +8,27 @@ class TransactionRepositoryImpl implements TransactionRepository {
   }) : _apiClient = apiClient;
 
   final ApiClient _apiClient;
-  static const _pageSize = 500;
 
   @override
-  Future<Result<List<CardTransaction>>> loadTransactions() async {
-    final transactions = <CardTransaction>[];
-    var offset = 0;
-    while (true) {
-      final result = await _apiClient.safeGet('/api/plaid-transactions?limit=$_pageSize&offset=$offset');
-      final pageResult = result.map(
-        (payload) => extractRecords(payload, 'transactions')
+  Future<Result<TransactionPage>> loadTransactions(TransactionQuery query) async {
+    final queryString = Uri(queryParameters: query.toQueryParameters()).query;
+    final result = await _apiClient.safeGet('/api/plaid-transactions?$queryString');
+    return result.flatMap((payload) {
+      try {
+        final items = extractRecords(payload, 'transactions')
             .map(CardTransaction.fromJson)
-            .toList(growable: false),
-      );
-      final page = pageResult.fold(
-        (value) => value,
-        (failure) => <CardTransaction>[],
-      );
-      transactions.addAll(page);
-      if (page.length < _pageSize) {
-        return Success(transactions);
+            .toList(growable: false);
+        return Success(
+          TransactionPage(items: items, hasMore: payload['has_more'] == true),
+        );
+      } catch (e) {
+        // A failed parse must surface as a failure instead of throwing out of
+        // the repository and being treated as an empty page.
+        return FailureResult(
+          UnknownFailure('Could not read transactions: $e'),
+        );
       }
-      offset += page.length;
-    }
+    });
   }
 
   @override
@@ -49,15 +47,33 @@ class TransactionRepositoryImpl implements TransactionRepository {
   }
 
   @override
-  Future<Result<void>> assignTransaction(String transactionId, String? personId) async {
+  Future<Result<TransactionAssignment>> assignTransaction(String transactionId, String? personId) async {
     final result = await _apiClient.safePost(
       '/api/plaid-transactions/$transactionId/assignment',
       {'person_id': personId},
     );
-    return result.map((payload) {
+    return result.flatMap((payload) {
       if (payload['ok'] != true) {
-        throw const NetworkException('Could not assign transaction.');
+        return const FailureResult<TransactionAssignment>(
+          NetworkFailure('Could not assign transaction.'),
+        );
       }
+      // Unassigning returns the household default person at the top level;
+      // assigning returns the created assignment row under "assignment".
+      final assignment = payload['assignment'];
+      final resolvedPersonId = payload['person_id'] ??
+          (assignment is Map<String, dynamic> ? assignment['person_id'] : null);
+      final source = (assignment is Map<String, dynamic>
+              ? assignment['assignment_source']
+              : null) ??
+          payload['assignment_source'] as String? ??
+          (personId != null ? 'manual' : 'default');
+      return Success(
+        TransactionAssignment(
+          personId: resolvedPersonId as String?,
+          assignmentSource: source,
+        ),
+      );
     });
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
+import 'package:cardsemble/features/transactions/data/transaction_cache.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
 import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
 
@@ -33,28 +34,57 @@ class TransactionsNotifier extends ChangeNotifier {
   TransactionsNotifier({
     required TransactionRepository transactionRepository,
     required HouseholdRepository householdRepository,
+    TransactionCache? cache,
   }) : _transactionRepository = transactionRepository,
-       _householdRepository = householdRepository;
+       _householdRepository = householdRepository,
+       _cache = cache;
 
   final TransactionRepository _transactionRepository;
   final HouseholdRepository _householdRepository;
+  final TransactionCache? _cache;
 
+  /// Page size for the transactions list. The server caps this at 500.
+  static const int _pageSize = 100;
+
+  // Transactions tab (paged, server-filtered).
   List<CardTransaction> _transactions = [];
+  bool _isLoading = false;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  int _offset = 0;
+
+  // Summary tab (all pages within a date range).
+  List<CardTransaction> _summaryTransactions = [];
+  bool _isSummaryLoading = false;
+  DateTimeRange? _summaryRange;
+  int _summaryGeneration = 0;
+
   List<HouseholdPerson> _people = [];
   List<StatementAccount> _accounts = [];
-  bool _isLoading = false;
   String? _error;
+  DateTime? _lastUpdated;
   CsvImportPreview? _csvPreview;
   bool _isPreviewing = false;
   DateTimeRange? _dateRange;
   String? _selectedAccountId;
   String? _selectedPersonId;
 
+  // Coalesces concurrent loads and guards against stale responses.
+  Future<void>? _activeLoadAll;
+  int _transactionsGeneration = 0;
+  bool _reloadScheduled = false;
+  bool _hydrated = false;
+
   List<CardTransaction> get transactions => _transactions;
+  List<CardTransaction> get summaryTransactions => _summaryTransactions;
   List<HouseholdPerson> get people => _people;
   List<StatementAccount> get accounts => _accounts;
   bool get isLoading => _isLoading;
+  bool get isLoadingMore => _isLoadingMore;
+  bool get isSummaryLoading => _isSummaryLoading;
+  bool get hasMore => _hasMore;
   String? get error => _error;
+  DateTime? get lastUpdated => _lastUpdated;
   CsvImportPreview? get csvPreview => _csvPreview;
   bool get isPreviewing => _isPreviewing;
   DateTimeRange? get dateRange => _dateRange;
@@ -63,6 +93,10 @@ class TransactionsNotifier extends ChangeNotifier {
 
   List<CardTransaction> get filteredTransactions {
     return _transactions.where((tx) {
+      // Only show charges that are due / not paid. Card payments to the card
+      // itself (isPayment) are not spending, so they are excluded here and the
+      // list no longer shows incoming/outgoing payment arrows.
+      if (tx.isPayment) return false;
       if (_selectedAccountId != null && tx.accountId != _selectedAccountId) return false;
       if (_selectedPersonId != null && tx.assignedPersonId != _selectedPersonId) return false;
       if (_dateRange != null) {
@@ -77,24 +111,28 @@ class TransactionsNotifier extends ChangeNotifier {
     }).toList();
   }
 
-  void setDateRange(DateTimeRange? range) {
+  void setDateRange(DateTimeRange? range, {bool reloadList = true}) {
     _dateRange = range;
     notifyListeners();
+    if (reloadList) _scheduleListReload();
   }
 
   void clearDateRange() {
     _dateRange = null;
     notifyListeners();
+    _scheduleListReload();
   }
 
   void setAccountFilter(String? accountId) {
     _selectedAccountId = accountId;
     notifyListeners();
+    _scheduleListReload();
   }
 
   void setPersonFilter(String? personId) {
     _selectedPersonId = personId;
     notifyListeners();
+    _scheduleListReload();
   }
 
   void clearAllFilters() {
@@ -102,13 +140,24 @@ class TransactionsNotifier extends ChangeNotifier {
     _selectedPersonId = null;
     _dateRange = null;
     notifyListeners();
+    _scheduleListReload();
   }
 
   bool get hasActiveFilters => _selectedAccountId != null || _selectedPersonId != null || _dateRange != null;
 
+  TransactionQuery _queryFor({required int offset}) {
+    return TransactionQuery(
+      limit: _pageSize,
+      offset: offset,
+      accountId: _selectedAccountId,
+      dateFrom: _dateRange?.start,
+      dateTo: _dateRange?.end,
+    );
+  }
+
   List<SummaryRow> get spendingByAccount {
     final Map<String, Map<String, dynamic>> grouped = {};
-    for (final tx in _transactions) {
+    for (final tx in _summaryTransactions) {
       if (tx.accountId == null) continue;
       final key = tx.accountId!;
       if (!grouped.containsKey(key)) {
@@ -139,7 +188,7 @@ class TransactionsNotifier extends ChangeNotifier {
 
   List<SummaryRow> get spendingByPerson {
     final Map<String, Map<String, dynamic>> grouped = {};
-    for (final tx in _transactions) {
+    for (final tx in _summaryTransactions) {
       final personId = tx.assignedPersonId ?? '__default__';
       if (!grouped.containsKey(personId)) {
         final person = _people.firstWhere((p) => p.id == personId, orElse: () => HouseholdPerson(id: '', displayName: '', isDefault: false));
@@ -176,22 +225,129 @@ class TransactionsNotifier extends ChangeNotifier {
     return palette[index % palette.length];
   }
 
-  Future<void> loadTransactions() async {
-    _isLoading = true;
+  /// Schedules a single list reload for a batch of filter changes (e.g. the
+  /// summary drill-down sets account, person and date in sequence).
+  void _scheduleListReload() {
+    if (_reloadScheduled) return;
+    _reloadScheduled = true;
+    Future.microtask(() {
+      _reloadScheduled = false;
+      loadTransactions(reset: true);
+    });
+  }
+
+  /// Loads one page of the transactions list. With [reset] the list is replaced;
+  /// otherwise the next page is appended. When the client-side person filter is
+  /// active every page is fetched so the filter operates on the full set.
+  Future<void> loadTransactions({bool reset = false}) async {
+    if (!reset && !_hasMore) return;
+    if (!reset && (_isLoading || _isLoadingMore)) return;
+
+    final generation = ++_transactionsGeneration;
+    final loadAllPages = _selectedPersonId != null;
+
+    if (reset) {
+      _isLoading = true;
+    } else {
+      _isLoadingMore = true;
+    }
     _error = null;
     notifyListeners();
 
     try {
-      final result = await _transactionRepository.loadTransactions();
-      result.fold(
-        (transactions) => _transactions = transactions,
-        (failure) => _error = failure.message,
-      );
+      final collected = <CardTransaction>[];
+      var offset = reset ? 0 : _offset;
+      var hasMore = true;
+
+      while (true) {
+        final result = await _transactionRepository.loadTransactions(_queryFor(offset: offset));
+        if (generation != _transactionsGeneration) return;
+        if (result.isFailure) {
+          _error = result.failure.message;
+          _isLoading = false;
+          _isLoadingMore = false;
+          notifyListeners();
+          return;
+        }
+        final page = result.value;
+        collected.addAll(page.items);
+        offset += page.items.length;
+        if (!page.hasMore || page.items.isEmpty) {
+          hasMore = false;
+          break;
+        }
+        if (!loadAllPages) {
+          hasMore = true;
+          break;
+        }
+      }
+
+      if (generation != _transactionsGeneration) return;
+      _transactions = reset ? collected : [..._transactions, ...collected];
+      _offset = offset;
+      _hasMore = hasMore;
+      _lastUpdated = DateTime.now();
+      _writeCache();
     } catch (e) {
-      _error = e.toString();
+      if (generation == _transactionsGeneration) _error = e.toString();
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (generation == _transactionsGeneration) {
+        _isLoading = false;
+        _isLoadingMore = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> loadMoreTransactions() async {
+    if (_isLoading || _isLoadingMore || !_hasMore) return;
+    await loadTransactions();
+  }
+
+  /// Loads every page of transactions within [range] for the summary tab. The
+  /// server applies the date bounds, so this never downloads the whole ledger.
+  Future<void> loadSummaryTransactions(DateTimeRange range) async {
+    _summaryRange = range;
+    final generation = ++_summaryGeneration;
+    _isSummaryLoading = true;
+    notifyListeners();
+
+    try {
+      final collected = <CardTransaction>[];
+      var offset = 0;
+      while (true) {
+        final result = await _transactionRepository.loadTransactions(
+          TransactionQuery(
+            limit: _pageSize,
+            offset: offset,
+            dateFrom: range.start,
+            dateTo: range.end,
+          ),
+        );
+        if (generation != _summaryGeneration) return;
+        if (result.isFailure) {
+          _error = result.failure.message;
+          _isSummaryLoading = false;
+          notifyListeners();
+          return;
+        }
+        final page = result.value;
+        collected.addAll(page.items);
+        offset += page.items.length;
+        if (!page.hasMore || page.items.isEmpty) break;
+      }
+
+      if (generation != _summaryGeneration) return;
+      _summaryTransactions = collected;
+      _lastUpdated = DateTime.now();
+      _writeCache();
+    } catch (e) {
+      if (generation == _summaryGeneration) _error = e.toString();
+    } finally {
+      if (generation == _summaryGeneration) {
+        _isSummaryLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -199,7 +355,10 @@ class TransactionsNotifier extends ChangeNotifier {
     try {
       final result = await _transactionRepository.loadAccounts();
       result.fold(
-        (accounts) => _accounts = accounts,
+        (accounts) {
+          _accounts = accounts;
+          _writeCache();
+        },
         (failure) => _error = failure.message,
       );
       notifyListeners();
@@ -213,7 +372,10 @@ class TransactionsNotifier extends ChangeNotifier {
     try {
       final result = await _householdRepository.loadPeople();
       result.fold(
-        (people) => _people = people,
+        (people) {
+          _people = people;
+          _writeCache();
+        },
         (failure) => _error = failure.message,
       );
       notifyListeners();
@@ -223,12 +385,38 @@ class TransactionsNotifier extends ChangeNotifier {
     }
   }
 
-  Future<void> loadAll() async {
-    await Future.wait([
-      loadPeople(),
-      loadAccounts(),
-    ]);
-    await loadTransactions();
+  /// Loads the shared data once. Concurrent callers (both tabs build at
+  /// startup) share the same future instead of firing duplicate fetches.
+  Future<void> loadAll() {
+    final existing = _activeLoadAll;
+    if (existing != null) return existing;
+    final future = _runLoadAll();
+    _activeLoadAll = future;
+    future.whenComplete(() {
+      if (identical(_activeLoadAll, future)) _activeLoadAll = null;
+    });
+    return future;
+  }
+
+  Future<void> _runLoadAll() async {
+    await _hydrateFromCache();
+    await Future.wait([loadPeople(), loadAccounts()]);
+    await loadTransactions(reset: true);
+  }
+
+  /// Reloads everything the user can see (used after mutations that change
+  /// derived data such as card display names).
+  Future<void> refresh() async {
+    await Future.wait([loadPeople(), loadAccounts()]);
+    await loadTransactions(reset: true);
+    await _reloadSummary();
+  }
+
+  Future<void> _reloadSummary() async {
+    final range = _summaryRange;
+    if (range != null) {
+      await loadSummaryTransactions(range);
+    }
   }
 
   Future<bool> assignTransaction(String transactionId, String? personId) async {
@@ -237,44 +425,29 @@ class TransactionsNotifier extends ChangeNotifier {
 
     try {
       final result = await _transactionRepository.assignTransaction(transactionId, personId);
-      return result.fold(
-        (_) {
-          final index = _transactions.indexWhere((t) => t.id == transactionId);
-          if (index != -1) {
-            _transactions[index] = CardTransaction(
-              id: _transactions[index].id,
-              accountId: _transactions[index].accountId,
-              accountName: _transactions[index].accountName,
-              displayName: _transactions[index].displayName,
-              plaidName: _transactions[index].plaidName,
-              officialName: _transactions[index].officialName,
-              accountMask: _transactions[index].accountMask,
-              amount: _transactions[index].amount,
-              currency: _transactions[index].currency,
-              date: _transactions[index].date,
-              name: _transactions[index].name,
-              merchant: _transactions[index].merchant,
-              pending: _transactions[index].pending,
-              transactionCode: _transactions[index].transactionCode,
-              assignedPersonId: personId,
-              assignmentSource: personId != null ? 'manual' : 'default',
-              hasSplits: _transactions[index].hasSplits,
-            );
-            notifyListeners();
-          }
-          return true;
-        },
-        (failure) {
-          _error = failure.message;
-          notifyListeners();
-          return false;
-        },
-      );
+      if (result.isFailure) {
+        _error = result.failure.message;
+        notifyListeners();
+        return false;
+      }
+      // Use the server's resolved assignment: unassigning reassigns the
+      // transaction to the household default person rather than leaving it null.
+      final assignment = result.value;
+      _applyAssignment(transactionId, assignment.personId, assignment.assignmentSource);
+      notifyListeners();
+      return true;
     } catch (e) {
       _error = e.toString();
       notifyListeners();
       return false;
     }
+  }
+
+  void _applyAssignment(String transactionId, String? personId, String source) {
+    _replaceTransaction(
+      transactionId,
+      (tx) => tx.copyWith(assignedPersonId: personId, assignmentSource: source),
+    );
   }
 
   Future<bool> assignTransactionSplit(String transactionId, List<TransactionSplit> splits) async {
@@ -283,21 +456,54 @@ class TransactionsNotifier extends ChangeNotifier {
 
     try {
       final result = await _transactionRepository.assignTransactionSplit(transactionId, splits);
-      return result.fold(
-        (_) {
-          loadTransactions();
-          return true;
-        },
-        (failure) {
-          _error = failure.message;
-          notifyListeners();
-          return false;
-        },
-      );
+      if (result.isFailure) {
+        _error = result.failure.message;
+        notifyListeners();
+        return false;
+      }
+      await loadTransactions(reset: true);
+      await _reloadSummary();
+      return true;
     } catch (e) {
       _error = e.toString();
       notifyListeners();
       return false;
+    }
+  }
+
+  Future<bool> setHouseholdVisible(String transactionId, bool visible) async {
+    // Optimistic update with rollback on failure.
+    _replaceTransaction(transactionId, (tx) => tx.copyWith(householdVisible: visible));
+    notifyListeners();
+
+    try {
+      final result = await _transactionRepository.setHouseholdVisible(transactionId, visible);
+      if (result.isFailure) {
+        _replaceTransaction(transactionId, (tx) => tx.copyWith(householdVisible: !visible));
+        _error = result.failure.message;
+        notifyListeners();
+        return false;
+      }
+      return true;
+    } catch (e) {
+      _replaceTransaction(transactionId, (tx) => tx.copyWith(householdVisible: !visible));
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  void _replaceTransaction(
+    String transactionId,
+    CardTransaction Function(CardTransaction) transform,
+  ) {
+    final index = _transactions.indexWhere((t) => t.id == transactionId);
+    if (index != -1) {
+      _transactions[index] = transform(_transactions[index]);
+    }
+    final summaryIndex = _summaryTransactions.indexWhere((t) => t.id == transactionId);
+    if (summaryIndex != -1) {
+      _summaryTransactions[summaryIndex] = transform(_summaryTransactions[summaryIndex]);
     }
   }
 
@@ -337,17 +543,14 @@ class TransactionsNotifier extends ChangeNotifier {
 
     try {
       final result = await _transactionRepository.confirmCsvImport(accountId, rows, filename);
-      return result.fold(
-        (result) {
-          loadTransactions();
-          return true;
-        },
-        (failure) {
-          _error = failure.message;
-          notifyListeners();
-          return false;
-        },
-      );
+      if (result.isFailure) {
+        _error = result.failure.message;
+        notifyListeners();
+        return false;
+      }
+      await loadTransactions(reset: true);
+      await _reloadSummary();
+      return true;
     } catch (e) {
       _error = e.toString();
       notifyListeners();
@@ -365,6 +568,44 @@ class TransactionsNotifier extends ChangeNotifier {
     } catch (e) {
       _error = e.toString();
     }
+  }
+
+  Future<void> _hydrateFromCache() async {
+    final cache = _cache;
+    if (cache == null || _hydrated) return;
+    _hydrated = true;
+    try {
+      final snapshot = await cache.read();
+      if (_people.isEmpty && snapshot.people.isNotEmpty) _people = snapshot.people;
+      if (_accounts.isEmpty && snapshot.accounts.isNotEmpty) _accounts = snapshot.accounts;
+      if (_transactions.isEmpty && snapshot.transactions.isNotEmpty) {
+        _transactions = snapshot.transactions;
+        _hasMore = false;
+      }
+      if (_summaryTransactions.isEmpty && snapshot.summaryTransactions.isNotEmpty) {
+        _summaryTransactions = snapshot.summaryTransactions;
+      }
+      _lastUpdated = snapshot.savedAt;
+      notifyListeners();
+    } catch (_) {
+      // Cache hydration is best-effort and must never block a network load.
+    }
+  }
+
+  void _writeCache() {
+    final cache = _cache;
+    if (cache == null) return;
+    // Fire-and-forget: caching must not delay the UI or surface errors.
+    cache.write(
+      people: _people,
+      accounts: _accounts,
+      transactions: _transactions,
+      summaryTransactions: _summaryTransactions,
+    ).catchError((_) {});
+  }
+
+  Future<void> clearCache() async {
+    await _cache?.clear();
   }
 
   void clearError() {

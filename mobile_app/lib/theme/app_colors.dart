@@ -26,6 +26,12 @@ class AppColors {
   static const Color orangePending = Colors.orange;
   static const Color redError = Colors.red;
   static const Color greyDisabled = Colors.grey;
+
+  // Pending transaction tile background (slight orange)
+  static const Color pendingBg = Color(0xFFFFCC80);
+
+  // Approved transaction tile background (soft sage green)
+  static const Color sageGreen = Color(0xFF7C916F);
 }
 
 extension AppColorsScheme on ColorScheme {

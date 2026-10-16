@@ -30,7 +30,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
     _summaryRange = _currentMonthRange();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<TransactionsNotifier>().loadAll();
+      context.read<TransactionsNotifier>().loadSummaryTransactions(_summaryRange);
       final accounts = context.read<AccountsNotifier>();
       accounts.loadConnections();
       accounts.loadStatementCycles();
@@ -65,12 +65,18 @@ class _SummaryScreenState extends State<SummaryScreen> {
   void _selectMonth(DateTime month) {
     final today = DateUtils.dateOnly(DateTime.now());
     final monthEnd = DateTime(month.year, month.month + 1, 0);
+    final range = DateTimeRange(
+      start: DateTime(month.year, month.month),
+      end: monthEnd.isAfter(today) ? today : monthEnd,
+    );
     setState(() {
-      _summaryRange = DateTimeRange(
-        start: DateTime(month.year, month.month),
-        end: monthEnd.isAfter(today) ? today : monthEnd,
-      );
+      _summaryRange = range;
     });
+    final notifier = context.read<TransactionsNotifier>();
+    // Sync the transactions tab's date range so the chips stay connected, but do
+    // not trigger a transactions list reload from the summary tab.
+    notifier.setDateRange(range, reloadList: false);
+    notifier.loadSummaryTransactions(range);
   }
 
   Future<void> _chooseSummaryRange() async {
@@ -84,16 +90,22 @@ class _SummaryScreenState extends State<SummaryScreen> {
       saveText: 'Apply range',
     );
     if (picked == null || !mounted) return;
+    final range = DateTimeRange(
+      start: DateUtils.dateOnly(picked.start),
+      end: DateUtils.dateOnly(picked.end),
+    );
     setState(() {
-      _summaryRange = DateTimeRange(
-        start: DateUtils.dateOnly(picked.start),
-        end: DateUtils.dateOnly(picked.end),
-      );
+      _summaryRange = range;
     });
+    final notifier = context.read<TransactionsNotifier>();
+    // Sync the transactions tab's date range so the chips stay connected, but do
+    // not trigger a transactions list reload from the summary tab.
+    notifier.setDateRange(range, reloadList: false);
+    notifier.loadSummaryTransactions(range);
   }
 
   Future<void> _refresh() async {
-    await context.read<TransactionsNotifier>().loadAll();
+    await context.read<TransactionsNotifier>().refresh();
     if (!mounted) return;
     final accounts = context.read<AccountsNotifier>();
     await accounts.loadStatementCycles();
@@ -136,7 +148,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
     final displayName = saved.isEmpty ? null : saved;
     final success = await accounts.updateDisplayName(account.accountId, displayName);
     if (success) {
-      await transactions.loadTransactions();
+      await transactions.refresh();
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(accounts.error ?? 'Failed to rename card')),
@@ -184,8 +196,8 @@ class _SummaryScreenState extends State<SummaryScreen> {
       ),
       body: Consumer<TransactionsNotifier>(
         builder: (context, notifier, _) {
-          if (notifier.isLoading &&
-              notifier.transactions.isEmpty &&
+          if (notifier.isSummaryLoading &&
+              notifier.summaryTransactions.isEmpty &&
               notifier.people.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -206,7 +218,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
     ThemeData theme,
     TransactionsNotifier notifier,
   ) {
-    final included = notifier.transactions
+    final included = notifier.summaryTransactions
         .where((transaction) {
           final date = transaction.parsedDate;
           if (date == null) return false;
@@ -225,7 +237,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
     final totalsByPersonAndCurrency = <String, double>{};
 
     final accountsById = <String, _AccountInfo>{};
-    for (final transaction in notifier.transactions) {
+    for (final transaction in notifier.summaryTransactions) {
       final accountId = transaction.accountId;
       if (accountId == null || accountsById.containsKey(accountId)) continue;
       accountsById[accountId] = _AccountInfo(
@@ -414,7 +426,9 @@ class _SummaryScreenState extends State<SummaryScreen> {
         'or a calculated amount to pay your partner.',
         style: theme.textTheme.bodySmall,
       ),
-      if (notifier.transactions.isEmpty) ...[
+      if (notifier.summaryTransactions.isEmpty &&
+          notifier.transactions.isEmpty &&
+          !notifier.isSummaryLoading) ...[
         const SizedBox(height: 12),
         _emptyCard(theme, 'No Plaid transactions have been synced yet.'),
       ],

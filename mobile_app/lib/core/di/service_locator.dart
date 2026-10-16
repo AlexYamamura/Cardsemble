@@ -7,6 +7,7 @@ import '../../features/household/data/household_repository_impl.dart';
 import '../../features/household/domain/household_repository.dart';
 import '../../features/household/presentation/household_notifier.dart';
 import '../../features/transactions/data/transaction_repository_impl.dart';
+import '../../features/transactions/data/transaction_cache.dart';
 import '../../features/transactions/domain/transaction_repository.dart';
 import '../../features/transactions/presentation/transactions_notifier.dart';
 import '../../features/card_events/data/card_event_repository_impl.dart';
@@ -93,9 +94,12 @@ class ServiceLocator {
           apiClient: apiClient,
         ));
 
+    registerFactory<TransactionCache>(() => TransactionCache());
+
     registerFactory<TransactionsNotifier>(() => TransactionsNotifier(
           transactionRepository: sl.get<TransactionRepository>(),
           householdRepository: sl.get<HouseholdRepository>(),
+          cache: sl.get<TransactionCache>(),
         ));
 
     registerFactory<CardEventRepository>(() => CardEventRepositoryImpl(

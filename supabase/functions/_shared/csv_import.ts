@@ -225,7 +225,7 @@ export async function generateCsvPreview(
     }
 
     if (match) {
-      preview.push({ row, status: "duplicate", match, matchScore: match.matchScore! });
+      preview.push({ row, status: "duplicate", match: match.match, matchScore: match.matchScore });
       console.log(`[CSV Import] MATCH (${matchDateType} date) score=${match.matchScore} | CSV merchant: ${normMerchant} | Plaid merchant: ${normalizeMerchant((match.match.merchant_name as string) || (match.match.name as string) || "")}`);
       continue;
     }
@@ -234,6 +234,16 @@ export async function generateCsvPreview(
     preview.push({ row, status: "new" });
     console.log(`[CSV Import] NO MATCH for posted key: ${accountId}|${normPostDate}|${amountCents}|${normMerchant}${normTransDate ? ` or trans key: ${accountId}|${normTransDate}|${amountCents}|${normMerchant}` : ''}`);
   }
+
+  const summary = preview.reduce(
+    (acc, p) => {
+      acc[p.status]++;
+      return acc;
+    },
+    { new: 0, duplicate: 0, error: 0 },
+  );
+
+  return { preview, summary, accountValidation };
 }
 
 function findBestMatchForDateAmount(
@@ -268,16 +278,6 @@ function findBestMatchForDateAmount(
     return { match: bestMatch, matchScore: bestScore };
   }
   return null;
-
-  const summary = preview.reduce(
-    (acc, p) => {
-      acc[p.status]++;
-      return acc;
-    },
-    { new: 0, duplicate: 0, error: 0 },
-  );
-
-  return { preview, summary, accountValidation };
 }
 
 export async function confirmCsvImport(
