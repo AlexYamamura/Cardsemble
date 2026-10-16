@@ -15,11 +15,11 @@ class PayButton extends StatelessWidget {
     if (amount <= 0) {
       return const SizedBox.shrink();
     }
-    final text = '\$${currency} ${amount.toStringAsFixed(2)}';
+    final text = '\$ $currency ${amount.toStringAsFixed(2)}';
     return FilledButton.icon(
       onPressed: () => _showPayActionSheet(context, amount, currency),
       icon: const Icon(Icons.payments_outlined),
-      label: Text('Pay \$text'),
+      label: Text('Pay $text'),
       style: FilledButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         minimumSize: const Size.fromHeight(56),
@@ -30,7 +30,6 @@ class PayButton extends StatelessWidget {
   Future<void> _showPayActionSheet(
       BuildContext context, double amount, String currency) async {
     final theme = Theme.of(context);
-    final text = '\$${currency} ${amount.toStringAsFixed(2)}';
     final launcher = DefaultExternalAppLauncher();
 
     await showModalBottomSheet<void>(
@@ -134,7 +133,7 @@ class PayButton extends StatelessWidget {
 
   Future<void> _handleCopy(
       BuildContext context, double amount, String currency) async {
-    final text = '\$${currency} ${amount.toStringAsFixed(2)}';
+    final text = '\$ $currency ${amount.toStringAsFixed(2)}';
     await Clipboard.setData(ClipboardData(text: text));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

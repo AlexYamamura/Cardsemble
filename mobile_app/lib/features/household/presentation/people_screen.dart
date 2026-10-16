@@ -4,6 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:cardsemble/features/household/presentation/household_notifier.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
 
+
 class PeopleScreen extends StatefulWidget {
   const PeopleScreen({super.key});
 
@@ -11,7 +12,13 @@ class PeopleScreen extends StatefulWidget {
   State<PeopleScreen> createState() => _PeopleScreenState();
 }
 
-class _PeopleScreenState extends State<PeopleScreen> {
+class _PeopleScreenState extends State<PeopleScreen>
+    with AutomaticKeepAliveClientMixin {
+  final TextEditingController _nameController = TextEditingController();
+
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   void initState() {
     super.initState();
@@ -21,141 +28,243 @@ class _PeopleScreenState extends State<PeopleScreen> {
   }
 
   @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text('Household People'),
       ),
-       body: Column(
-         children: [
-           Expanded(
-             child: Consumer<HouseholdNotifier>(
-               builder: (context, notifier, _) {
-                 if (notifier.isLoading && notifier.people.isEmpty) {
-                   return const Center(child: CircularProgressIndicator());
-                 }
+      body: Consumer<HouseholdNotifier>(
+        builder: (context, notifier, _) {
+          if (notifier.isLoading && notifier.people.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-                 if (notifier.error != null && notifier.people.isEmpty) {
-                   return Center(
-                     child: Column(
-                       mainAxisSize: MainAxisSize.min,
-                       children: [
-                         const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                         const SizedBox(height: 16),
-                         Text(notifier.error!),
-                         const SizedBox(height: 16),
-                         FilledButton(
-                           onPressed: () => notifier.loadPeople(),
-                           child: const Text('Retry'),
-                         ),
-                       ],
-                     ),
-                   );
-                 }
+          if (notifier.error != null && notifier.people.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                  const SizedBox(height: 16),
+                  Text(notifier.error!),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () => notifier.loadPeople(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            );
+          }
 
-                 if (notifier.people.isEmpty) {
-                   return Center(
-                     child: Column(
-                       mainAxisSize: MainAxisSize.min,
-                       children: [
-                         const Icon(Icons.people_outline, size: 64, color: Colors.grey),
-                         const SizedBox(height: 16),
-                         const Text('No household people yet'),
-                         const SizedBox(height: 8),
-                         const Text('Use the buttons below to add household people'),
-                       ],
-                     ),
-                   );
-                 }
+          return Column(
+            children: [
 
-                 return ListView.builder(
-                   padding: const EdgeInsets.all(16),
-                   itemCount: notifier.people.length,
-                   itemBuilder: (context, index) {
-                     final person = notifier.people[index];
-                     return Card(
-                       margin: const EdgeInsets.only(bottom: 12),
-                       child: ListTile(
-                         leading: CircleAvatar(
-                           backgroundColor: person.isDefault
-                               ? const Color(0xFF244A3A)
-                               : Colors.grey.shade300,
-                           child: Icon(
-                             person.isDefault ? Icons.star : Icons.person,
-                             color: person.isDefault ? Colors.white : Colors.grey.shade600,
-                           ),
-                         ),
-                         title: Text(person.displayName),
-                         trailing: Row(
-                           mainAxisSize: MainAxisSize.min,
-                           children: [
-                             if (!person.isDefault)
-                               TextButton.icon(
-                                 icon: const Icon(Icons.star_outline, size: 18),
-                                 label: const Text('Default'),
-                                 onPressed: () => _setDefault(context, notifier, person),
-                               ),
-                             PopupMenuButton<String>(
-                               onSelected: (value) => _handleMenuAction(context, notifier, person, value),
-                               itemBuilder: (context) => [
-                                 const PopupMenuItem(
-                                   value: 'edit',
-                                   child: Row(
-                                     children: [
-                                       Icon(Icons.edit, size: 18),
-                                       SizedBox(width: 8),
-                                       Text('Edit'),
-                                     ],
-                                   ),
-                                 ),
-                                 const PopupMenuItem(
-                                   value: 'delete',
-                                   child: Row(
-                                     children: [
-                                       Icon(Icons.delete, size: 18, color: Colors.red),
-                                       SizedBox(width: 8),
-                                       Text('Delete', style: TextStyle(color: Colors.red)),
-                                     ],
-                                   ),
-                                 ),
-                               ],
-                             ),
-                           ],
-                         ),
-                         subtitle: person.isDefault
-                             ? const Text('Default person', style: TextStyle(color: Color(0xFF244A3A)))
-                             : null,
-                       ),
-                     );
-                   },
-                 );
-               },
-             ),
-           ),
-           SafeArea(
-             child: Padding(
-               padding: EdgeInsets.all(16.0),
-               child: Column(
-                 mainAxisSize: MainAxisSize.min,
-                 children: [
-                   FilledButton.icon(
-                     onPressed: () => _scanQrCode(context),
-                     icon: Icon(Icons.person_add),
-                     label: Text('Add household member'),
-                   ),
-                   SizedBox(height: 8),
-                   OutlinedButton.icon(
-                     onPressed: () => _showAddPersonDialog(context),
-                     icon: Icon(Icons.person_outline),
-                     label: Text('Add manually'),
-                   ),
-                 ],
-               ),
-             ),
-           ),
-         ],
-       ),
+              _buildPersonFilterBar(context, notifier),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  children: [
+                    if (notifier.people.isEmpty)
+                      // No people at all.
+                      ...[
+                        const Icon(Icons.people_outline,
+                            size: 64, color: Colors.grey),
+                        const SizedBox(height: 16),
+                        const Text('No household people yet'),
+                        const SizedBox(height: 8),
+                        const Text(
+                            'Use the buttons below to add household people'),
+                      ]
+                    else if (notifier.filteredPeople.isEmpty)
+                      // People exist but none match the active filters.
+                      ...[
+                        const Icon(Icons.people_outline,
+                            size: 64, color: Colors.grey),
+                        const SizedBox(height: 16),
+                        const Text('No people match these filters'),
+                        const SizedBox(height: 8),
+                        const Text(
+                            'Try adjusting your search or filter criteria'),
+                      ]
+                    else
+                      ...[
+                        for (final person in notifier.filteredPeople)
+                          Card(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: person.isDefault
+                                    ? const Color(0xFF244A3A)
+                                    : Colors.grey.shade300,
+                                child: Icon(
+                                  person.isDefault ? Icons.star : Icons.person,
+                                  color: person.isDefault
+                                      ? Colors.white
+                                      : Colors.grey.shade600,
+                                ),
+                              ),
+                              title: Text(person.displayName),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (!person.isDefault)
+                                    TextButton.icon(
+                                      icon: const Icon(Icons.star_outline,
+                                          size: 18),
+                                      label: const Text('Default'),
+                                      onPressed: () => _setDefault(
+                                          context, notifier, person),
+                                    ),
+                                  PopupMenuButton<String>(
+                                    onSelected: (value) => _handleMenuAction(
+                                        context, notifier, person, value),
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem(
+                                        value: 'edit',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.edit, size: 18),
+                                            SizedBox(width: 8),
+                                            Text('Edit'),
+                                          ],
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'delete',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.delete,
+                                                size: 18, color: Colors.red),
+                                            SizedBox(width: 8),
+                                            Text('Delete',
+                                                style: TextStyle(
+                                                    color: Colors.red)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              subtitle: person.isDefault
+                                  ? const Text(
+                                      'Default person',
+                                      style: TextStyle(
+                                          color: Color(0xFF244A3A)),
+                                    )
+                                  : null,
+                            ),
+                          ),
+                      ],
+                  ],
+                ),
+              ),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: _buildAddButtons(context),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+
+  /// Compact single-row filter bar: the search field, the "Default status"
+  /// dropdown, and "Clear all" all share one box so the bar stays short.
+  Widget _buildPersonFilterBar(
+      BuildContext context, HouseholdNotifier notifier) {
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: 190,
+              child: TextField(
+                controller: _nameController,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Search by name',
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  suffixIcon: notifier.nameQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 16),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () {
+                            _nameController.clear();
+                            notifier.setNameQuery('');
+                          },
+                        )
+                      : null,
+                  border: const OutlineInputBorder(),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                ),
+                onChanged: notifier.setNameQuery,
+              ),
+            ),
+            _PersonDefaultFilterButton(
+              value: notifier.defaultFilter,
+              onChanged: notifier.setDefaultFilter,
+            ),
+            if (notifier.hasActiveFilters)
+              TextButton.icon(
+                onPressed: () {
+                  _nameController.clear();
+                  notifier.clearAllFilters();
+                },
+                icon: const Icon(Icons.clear_all, size: 16),
+                label: const Text('Clear all'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddButtons(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FilledButton.icon(
+            key: const ValueKey('add-household-member-button'),
+            onPressed: () => _scanQrCode(context),
+            icon: const Icon(Icons.person_add),
+            label: const Text('Add household member'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const ValueKey('add-manually-button'),
+            onPressed: () => _showAddPersonDialog(context),
+            icon: const Icon(Icons.person_outline),
+            label: const Text('Add manually'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -198,7 +307,8 @@ class _PeopleScreenState extends State<PeopleScreen> {
               onPressed: () async {
                 final name = controller.text.trim();
                 if (name.isEmpty) return;
-                final success = await notifier.createPerson(name, isDefault: isDefault);
+                final success =
+                    await notifier.createPerson(name, isDefault: isDefault);
                 if (success && dialogContext.mounted) {
                   Navigator.pop(dialogContext);
                 }
@@ -211,8 +321,10 @@ class _PeopleScreenState extends State<PeopleScreen> {
     );
   }
 
-  void _setDefault(BuildContext context, HouseholdNotifier notifier, HouseholdPerson person) async {
-    final success = await notifier.updatePerson(person.id, person.displayName, isDefault: true);
+  void _setDefault(BuildContext context, HouseholdNotifier notifier,
+      HouseholdPerson person) async {
+    final success = await notifier.updatePerson(person.id, person.displayName,
+        isDefault: true);
     if (!success && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(notifier.error ?? 'Failed to set default')),
@@ -220,7 +332,8 @@ class _PeopleScreenState extends State<PeopleScreen> {
     }
   }
 
-  void _handleMenuAction(BuildContext context, HouseholdNotifier notifier, HouseholdPerson person, String action) {
+  void _handleMenuAction(BuildContext context, HouseholdNotifier notifier,
+      HouseholdPerson person, String action) {
     switch (action) {
       case 'edit':
         _showEditDialog(context, notifier, person);
@@ -231,7 +344,8 @@ class _PeopleScreenState extends State<PeopleScreen> {
     }
   }
 
-  void _showEditDialog(BuildContext context, HouseholdNotifier notifier, HouseholdPerson person) {
+  void _showEditDialog(BuildContext context, HouseholdNotifier notifier,
+      HouseholdPerson person) {
     final controller = TextEditingController(text: person.displayName);
     bool isDefault = person.isDefault;
 
@@ -265,7 +379,8 @@ class _PeopleScreenState extends State<PeopleScreen> {
               onPressed: () async {
                 final name = controller.text.trim();
                 if (name.isEmpty) return;
-                final success = await notifier.updatePerson(person.id, name, isDefault: isDefault);
+                final success = await notifier.updatePerson(person.id, name,
+                    isDefault: isDefault);
                 if (success && dialogContext.mounted) {
                   Navigator.pop(dialogContext);
                 }
@@ -278,7 +393,8 @@ class _PeopleScreenState extends State<PeopleScreen> {
     );
   }
 
-  void _showDeleteConfirm(BuildContext context, HouseholdNotifier notifier, HouseholdPerson person) {
+  void _showDeleteConfirm(BuildContext context, HouseholdNotifier notifier,
+      HouseholdPerson person) {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -381,5 +497,77 @@ class _PeopleScreenState extends State<PeopleScreen> {
         }
       }
     }
+  }
+}
+
+/// Compact chip-style dropdown used by the People filter bar. Mirrors the
+/// transactions `_FilterMenuButton` so the two screens look consistent, while
+/// keeping "Clear all" inline in the same box.
+class _PersonDefaultFilterButton extends StatelessWidget {
+  const _PersonDefaultFilterButton({
+    required this.value,
+    required this.onChanged,
+  });
+
+  /// null = all, true = default only, false = others.
+  final bool? value;
+  final ValueChanged<bool?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final selected = value != null;
+    final label = switch (value) {
+      null => 'Default status',
+      true => 'Default only',
+      false => 'Others',
+    };
+
+    return PopupMenuButton<bool?>(
+      initialValue: value,
+      onSelected: onChanged,
+      itemBuilder: (context) => const [
+        PopupMenuItem<bool?>(value: null, child: Text('All')),
+        PopupMenuItem<bool?>(value: true, child: Text('Default only')),
+        PopupMenuItem<bool?>(value: false, child: Text('Others')),
+      ],
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outline,
+            ),
+            color: selected
+                ? theme.colorScheme.primaryContainer.withValues(alpha: 50)
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: selected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.arrow_drop_down,
+                size: 18,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

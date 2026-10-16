@@ -35,6 +35,7 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
   late final AnimationController _settingsAnimationController;
   late final Animation<double> _settingsFadeAnimation;
   late final Animation<Offset> _settingsSlideAnimation;
+  late final ValueNotifier<double> _pagePosition;
   bool _showSettings = false;
   bool _firstRunSettingsPending = true;
   static const _settingsReviewedKey = 'capture_settings_reviewed';
@@ -66,6 +67,7 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
     super.initState();
     _tabController = TabController(length: _tabs.length, vsync: this);
     _pageController = PageController(initialPage: _tabController.index);
+    _pagePosition = ValueNotifier<double>(_tabController.index.toDouble());
     _tabController.addListener(_onTabChanged);
     _pageController.addListener(_onPageScrolled);
     _settingsAnimationController = AnimationController(
@@ -100,19 +102,23 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _pageController.dispose();
+    _pagePosition.dispose();
     _settingsAnimationController.dispose();
     super.dispose();
   }
 
-  void _onTabChanged() {
-    if (mounted) setState(() {});
+  void _onPageScrolled() {
+    if (!mounted || !_pageController.hasClients) return;
+    _pagePosition.value = _pageController.page ?? _tabController.index.toDouble();
   }
 
-  /// Keeps the NavigationBar's highlighted icon in sync while the user swipes
-  /// between pages, since the TabController index only settles after the swipe.
-  void _onPageScrolled() {
+  void _onTabChanged() {
     if (!mounted) return;
-    setState(() {});
+    // Only needed before the PageController has clients (e.g. first frame);
+    // otherwise the page scroll drives the position.
+    if (!_pageController.hasClients) {
+      _pagePosition.value = _tabController.index.toDouble();
+    }
   }
 
   void _showTransactionsTab() {
@@ -162,12 +168,21 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
     });
   }
 
-  void _openSettings() {
-    setState(() => _showSettings = true);
-    _settingsAnimationController.forward();
-  }
+   void _openSettings() {
+     setState(() => _showSettings = true);
+     _settingsAnimationController.forward();
+   }
 
-  @override
+   void _selectTab(int index) {
+     _tabController.animateTo(index);
+     _pageController.animateToPage(
+       index,
+       duration: const Duration(milliseconds: 300),
+       curve: Curves.easeOutCubic,
+     );
+   }
+
+   @override
   Widget build(BuildContext context) {
     if (_firstRunSettingsPending) {
       final notifier = context.watch<DeviceCaptureNotifier>();
@@ -237,21 +252,15 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
           ],
         ),
       ),
-      bottomNavigationBar: _AnimatedTabBar(
-        tabs: _tabs,
-        selectedIndex: (_pageController.hasClients ? (_pageController.page ?? 0.0) : _tabController.index.toDouble()),
-        fractionalIndex: _pageController.hasClients
-            ? (_pageController.page ?? _tabController.index.toDouble())
-            : _tabController.index.toDouble(),
-        onSelected: (index) {
-          _tabController.animateTo(index);
-          _pageController.animateToPage(
-            index,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutCubic,
-          );
-        },
-      ),
+       bottomNavigationBar: ValueListenableBuilder<double>(
+         valueListenable: _pagePosition,
+         builder: (context, position, _) => _AnimatedTabBar(
+           tabs: _tabs,
+           selectedIndex: position,
+           fractionalIndex: position,
+           onSelected: _selectTab,
+         ),
+       ),
     );
   }
 

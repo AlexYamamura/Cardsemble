@@ -11,7 +11,10 @@ class CardEventsScreen extends StatefulWidget {
   State<CardEventsScreen> createState() => _CardEventsScreenState();
 }
 
-class _CardEventsScreenState extends State<CardEventsScreen> {
+class _CardEventsScreenState extends State<CardEventsScreen> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   void initState() {
     super.initState();
@@ -22,6 +25,7 @@ class _CardEventsScreenState extends State<CardEventsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(

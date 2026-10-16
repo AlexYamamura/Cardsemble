@@ -31,8 +31,11 @@ class TransactionsScreen extends StatefulWidget {
   State<TransactionsScreen> createState() => _TransactionsScreenState();
 }
 
-class _TransactionsScreenState extends State<TransactionsScreen> {
+class _TransactionsScreenState extends State<TransactionsScreen> with AutomaticKeepAliveClientMixin {
   final ScrollController _scrollController = ScrollController();
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -57,6 +60,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
@@ -112,8 +116,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                      onRetry: () => _refresh(context),
                      onDismiss: notifier.clearError,
                    ),
-                 if (notifier.filteredTotal > 0)
-                   PayButton(),
+                  if (notifier.filteredTotal > 0)
+                    PayButton(),
                  Expanded(
                   child: _buildList(
                     context,
@@ -493,11 +497,11 @@ class _TransactionFilterBar extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Card(
-       child: Padding(
-         padding: const EdgeInsets.all(8),
-         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+          child: Column(
+           crossAxisAlignment: CrossAxisAlignment.start,
+           children: [
             Row(
               children: [
                 Text('Filters', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
@@ -983,21 +987,21 @@ class _TransactionTile extends StatelessWidget {
                    ),
                  ),
                  const SizedBox(height: 8),
-                 SwitchListTile(
-                   contentPadding: EdgeInsets.zero,
-                   value: transaction.householdVisible,
-                   onChanged: (value) => onToggleHouseholdVisible(value),
-                   title: const Text('Visible to household'),
-                   subtitle: const Text('Shared with other household members'),
-                 ),
-                 const SizedBox(height: 8),
-                 if (people.length > 1) ...[
-                   const Text('Split:', style: TextStyle(fontWeight: FontWeight.bold)),
-                   const SizedBox(height: 8),
-                   _SplitBuilder(
-                     transaction: transaction,
-                     people: people,
-                     onSplit: onSplit,
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: transaction.householdVisible,
+                    onChanged: (value) => onToggleHouseholdVisible(value),
+                    title: const Text('Visible to household'),
+                    subtitle: const Text('Shared with other household members'),
+                  ),
+                  const SizedBox(height: 8),
+                  if (people.length > 1) ...[
+                    const Text('Split:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    _SplitBuilder(
+                      transaction: transaction,
+                      people: people,
+                      onSplit: onSplit,
                    ),
                  ],
                ],

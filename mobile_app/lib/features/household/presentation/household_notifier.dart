@@ -13,10 +13,36 @@ class HouseholdNotifier extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
 
+  // Filter state
+  String _nameQuery = '';
+  bool? _defaultFilter; // null = all, true = default only, false = others
+
   List<HouseholdPerson> get people => _people;
   List<HouseholdMember> get members => _members;
   bool get isLoading => _isLoading;
   String? get error => _error;
+
+  String get nameQuery => _nameQuery;
+  bool? get defaultFilter => _defaultFilter;
+
+  List<HouseholdPerson> get filteredPeople {
+    var filtered = _people;
+    if (_nameQuery.isNotEmpty) {
+      final query = _nameQuery.trim().toLowerCase();
+      filtered = filtered.where(
+        (person) => person.displayName.toLowerCase().contains(query),
+      ).toList();
+    }
+    if (_defaultFilter != null) {
+      filtered = filtered.where(
+        (person) => person.isDefault == _defaultFilter,
+      ).toList();
+    }
+    return filtered;
+  }
+
+  bool get hasActiveFilters =>
+      _nameQuery.isNotEmpty || _defaultFilter != null;
 
   Future<void> loadPeople() async {
     _isLoading = true;
@@ -162,33 +188,49 @@ class HouseholdNotifier extends ChangeNotifier {
     }
   }
 
-  Future<bool> joinByInviteCode(String inviteCode) async {
-    _error = null;
-    notifyListeners();
+   Future<bool> joinByInviteCode(String inviteCode) async {
+     _error = null;
+     notifyListeners();
 
-    try {
-      final result = await _householdRepository.joinByInviteCode(inviteCode);
-      return result.fold(
-        (_) {
-          loadPeople();
-          loadMembers();
-          return true;
-        },
-        (failure) {
-          _error = failure.message;
-          notifyListeners();
-          return false;
-        },
-      );
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-      return false;
-    }
-  }
+     try {
+       final result = await _householdRepository.joinByInviteCode(inviteCode);
+       return result.fold(
+         (_) {
+           loadPeople();
+           loadMembers();
+           return true;
+         },
+         (failure) {
+           _error = failure.message;
+           notifyListeners();
+           return false;
+         },
+       );
+     } catch (e) {
+       _error = e.toString();
+       notifyListeners();
+       return false;
+     }
+   }
 
-  void clearError() {
-    _error = null;
-    notifyListeners();
-  }
+   void setNameQuery(String query) {
+     _nameQuery = query;
+     notifyListeners();
+   }
+
+   void setDefaultFilter(bool? isDefault) {
+     _defaultFilter = isDefault;
+     notifyListeners();
+   }
+
+   void clearAllFilters() {
+     _nameQuery = '';
+     _defaultFilter = null;
+     notifyListeners();
+   }
+
+   void clearError() {
+     _error = null;
+     notifyListeners();
+   }
 }

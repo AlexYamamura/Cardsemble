@@ -27,9 +27,12 @@ class SummaryScreen extends StatefulWidget {
   State<SummaryScreen> createState() => _SummaryScreenState();
 }
 
-class _SummaryScreenState extends State<SummaryScreen> {
-   late DateTimeRange _summaryRange;
-   bool _isImporting = false;
+class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveClientMixin {
+    late DateTimeRange _summaryRange;
+    bool _isImporting = false;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -350,8 +353,9 @@ class _SummaryScreenState extends State<SummaryScreen> {
      );
    }
 
-   @override
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     final theme = Theme.of(context);
 
     return Scaffold(
