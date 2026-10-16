@@ -984,25 +984,33 @@ class _TransactionTile extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 maxLines: 2,
               )
-            : Text(
-                personName,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: assigneeColor,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 22,
+            : GestureDetector(
+                onTap: openPersonSelector,
+                behavior: HitTestBehavior.opaque,
+                child: Text(
+                  personName,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: assigneeColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 22,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
                 ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 2,
               ),
         subtitle: transaction.merchant != null
-            ? Text(
-                personName,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontSize: 16,
-                  color: assigneeColor,
+            ? GestureDetector(
+                onTap: openPersonSelector,
+                behavior: HitTestBehavior.opaque,
+                child: Text(
+                  personName,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: 16,
+                    color: assigneeColor,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               )
             : null,
         trailing: Row(
@@ -1116,18 +1124,27 @@ class _TransactionTile extends StatelessWidget {
                   subtitle: const Text('Shared with other household members'),
                 ),
                 const SizedBox(height: 8),
-                if (people.length > 1) ...[
-                  const Text(
-                    'Split:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  _SplitBuilder(
-                    transaction: transaction,
-                    people: people,
-                    onSplit: onSplit,
-                  ),
-                ],
+                 if (people.length > 1) ...[
+                   const Text(
+                     'Split:',
+                     style: TextStyle(fontWeight: FontWeight.bold),
+                   ),
+                   const SizedBox(height: 8),
+                   _SplitBuilder(
+                     transaction: transaction,
+                     people: people,
+                     onSplit: onSplit,
+                     fetchExistingSplits: () async {
+                       final result = await context.read<TransactionsNotifier>().transactionRepository.fetchTransactionSplits(transaction.id);
+                       if (result.isSuccess) {
+                         return result.value;
+                       } else {
+                         // Return empty list on error, or throw if you prefer
+                         return [];
+                       }
+                     },
+                   ),
+                 ],
               ],
             ),
           ),
@@ -1171,78 +1188,208 @@ class _SplitBuilder extends StatefulWidget {
     required this.transaction,
     required this.people,
     required this.onSplit,
+    required this.fetchExistingSplits,
   });
 
   final CardTransaction transaction;
   final List<HouseholdPerson> people;
   final Future<bool> Function(List<TransactionSplit>) onSplit;
+  final Future<List<TransactionSplit>> Function() fetchExistingSplits;
 
   @override
   State<_SplitBuilder> createState() => _SplitBuilderState();
 }
 
 class _SplitBuilderState extends State<_SplitBuilder> {
-  final Map<String, TextEditingController> _controllers = {};
+  Map<String, double> _percentages = {};
+  bool _isLoading = true;
+  List<TransactionSplit> _existingSplits = [];
 
   @override
   void initState() {
     super.initState();
+    _initializeSplits();
+  }
+
+  Future<void> _initializeSplits() async {
+    try {
+      final result = await widget.fetchExistingSplits();
+      if (mounted) {
+        setState(() {
+          _existingSplits = result;
+          _initializePercentages();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+      // Fall back to equal split if we can't fetch existing splits
+      _initializeEqualSplit();
+    }
+  }
+
+  void _initializeEqualSplit() {
+    final equalShare = 100.0 / widget.people.length;
     for (final person in widget.people) {
-      _controllers[person.id] = TextEditingController();
+      _percentages[person.id] = equalShare;
+    }
+  }
+
+  void _initializePercentages() {
+    // Clear existing percentages
+    _percentages = {};
+    
+    if (_existingSplits.isEmpty) {
+      // No existing splits, use equal split
+      _initializeEqualSplit();
+      return;
+    }
+    
+    // Calculate percentages from existing splits
+    final totalAmount = widget.transaction.amountValue.abs(); // Use absolute value
+    if (totalAmount <= 0) {
+      _initializeEqualSplit();
+      return;
+    }
+    
+    for (final person in widget.people) {
+      final split = _existingSplits.firstWhere(
+        (s) => s.personId == person.id,
+        orElse: () => TransactionSplit(personId: '', amount: 0),
+      );
+      
+      if (split.amount != 0 && totalAmount > 0) {
+        _percentages[person.id] = (split.amount / totalAmount) * 100.0;
+      } else {
+        _percentages[person.id] = 0.0;
+      }
+    }
+    
+    // Normalize to ensure we don't have rounding issues
+    final totalPercentage = _percentages.values.fold(0.0, (a, b) => a + b);
+    if (totalPercentage > 0) {
+      for (final personId in _percentages.keys) {
+        _percentages[personId] = (_percentages[personId]! / totalPercentage) * 100.0;
+      }
+    } else {
+      _initializeEqualSplit();
     }
   }
 
   @override
   void dispose() {
-    for (final c in _controllers.values) {
-      c.dispose();
-    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final totalPercentage = _percentages.values.fold(0.0, (a, b) => a + b);
+    final totalAmount = (totalPercentage / 100.0) * widget.transaction.amountValue.abs();
+
     return Column(
       children: [
         ...widget.people.map((person) {
           return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: Text(person.displayName)),
-                SizedBox(
-                  width: 80,
-                  child: TextField(
-                    controller: _controllers[person.id],
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Amount',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
+                Text(
+                  person.displayName,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: Colors.blue[200],
+                    inactiveTrackColor: Colors.grey[300],
+                    thumbColor: Colors.blue,
+                    overlayColor: Colors.blue.withValues(alpha: 0.2),
+                    tickMarkShape: const RoundSliderTickMarkShape(),
+                    activeTickMarkColor: Colors.blue[300]!,
+                    inactiveTickMarkColor: Colors.grey[300]!,
                   ),
+                  child: Slider(
+                    min: 0.0,
+                    max: 100.0,
+                    divisions: 4, // 0, 25, 50, 75, 100
+                    label: '${_percentages[person.id]!.round()}%',
+                    value: _percentages[person.id]!,
+                    onChanged: (value) {
+                      setState(() {
+                        _percentages[person.id] = value;
+                      });
+                    },
+                  ),
+                ),
+                Text(
+                  'Amount: ${formatCurrency((_percentages[person.id]! / 100.0) * widget.transaction.amountValue.abs(), widget.transaction.currency)}',
+                  style: const TextStyle(fontSize: 12),
                 ),
               ],
             ),
           );
         }),
+        const SizedBox(height: 16),
+        Text(
+          'Total: ${totalPercentage.toStringAsFixed(1)}% (${formatCurrency(totalAmount, widget.transaction.currency)})',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        if ((totalPercentage - 100.0).abs() > 0.1) // Use tolerance for floating point comparison
+          const Text(
+            'Warning: Total must be 100%',
+            style: TextStyle(color: Colors.red, fontSize: 12),
+          ),
         const SizedBox(height: 12),
         FilledButton(
-          onPressed: () async {
-            final splitList = <TransactionSplit>[];
-            for (final person in widget.people) {
-              final amt =
-                  double.tryParse(_controllers[person.id]?.text ?? '') ?? 0;
-              if (amt > 0) {
-                splitList.add(
-                  TransactionSplit(personId: person.id, amount: amt),
-                );
-              }
-            }
-            if (splitList.isNotEmpty) {
-              await widget.onSplit(splitList);
-            }
-          },
+          onPressed: (totalPercentage - 100.0).abs() <= 0.1 // Use tolerance for enabling save
+              ? () async {
+                  // Calculate exact amounts in cents to ensure they sum correctly
+                  final splits = <TransactionSplit>[];
+                  final totalAmountCents = (widget.transaction.amountValue.abs() * 100).round();
+                  final peopleList = widget.people.toList();
+                  
+                  for (int i = 0; i < peopleList.length; i++) {
+                    final person = peopleList[i];
+                    final percentage = _percentages[person.id]!;
+                    
+                    // Skip if percentage is 0 or very close to 0
+                    if (percentage <= 0.1) continue;
+                    
+                    // For the last person with non-zero percentage, assign the remainder to ensure exact total
+                    final int amountCents;
+                    if (i == peopleList.length - 1 || 
+                        widget.people.sublist(i + 1).every((p) => _percentages[p.id]! <= 0.1)) {
+                      // This person gets the remainder (last person with significant percentage)
+                      final usedCents = splits.fold(0, (sum, split) => sum + (split.amount * 100).round());
+                      amountCents = totalAmountCents - usedCents;
+                    } else {
+                      // Calculate based on percentage
+                      amountCents = (totalAmountCents * percentage / 100).round();
+                    }
+                    
+                    // Ensure we don't add zero or negative amounts
+                    if (amountCents > 0) {
+                      final amount = amountCents / 100.0;
+                      splits.add(
+                        TransactionSplit(personId: person.id, amount: amount),
+                      );
+                    }
+                  }
+                  
+                  // Only proceed if we have valid splits
+                  if (splits.isNotEmpty) {
+                    await widget.onSplit(splits);
+                  }
+                }
+              : null,
           child: const Text('Save Split'),
         ),
       ],

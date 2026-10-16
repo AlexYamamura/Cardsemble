@@ -32,6 +32,10 @@ class SummaryRow {
 }
 
 class TransactionsNotifier extends ChangeNotifier {
+  final TransactionRepository _transactionRepository;
+  final HouseholdRepository _householdRepository;
+  final TransactionCache? _cache;
+
   TransactionsNotifier({
     required TransactionRepository transactionRepository,
     required HouseholdRepository householdRepository,
@@ -40,9 +44,7 @@ class TransactionsNotifier extends ChangeNotifier {
        _householdRepository = householdRepository,
        _cache = cache;
 
-  final TransactionRepository _transactionRepository;
-  final HouseholdRepository _householdRepository;
-  final TransactionCache? _cache;
+  TransactionRepository get transactionRepository => _transactionRepository;
 
   /// Page size for the transactions list. The server caps this at 500.
   static const int _pageSize = 100;
