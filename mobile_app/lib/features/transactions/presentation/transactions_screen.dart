@@ -471,10 +471,13 @@ class _TransactionFilterBar extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(context, null),
-                            child: const Text('All time'),
-                          ),
+                           child: OutlinedButton(
+                             onPressed: () {
+                               onDateRangeChanged(null);
+                               Navigator.pop(context);
+                             },
+                             child: const Text('All time'),
+                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -833,11 +836,8 @@ class _TransactionTile extends StatelessWidget {
         ? theme.colorScheme.primary
         : _personColor(transaction.assignedPersonId!, people);
 
-    // Color code the tile box itself: slight orange when still pending,
-    // slight sage green when approved.
-    final boxFillColor = transaction.pending
-        ? AppColors.pendingBg.withValues(alpha: 0.5)
-        : AppColors.sageGreen.withValues(alpha: 0.35);
+     final personName = assignedPerson.displayName.isEmpty ? 'Unassigned' : assignedPerson.displayName;
+     final statusColor = transaction.pending ? AppColors.pendingBg : AppColors.sageGreen;
 
     void openPersonSelector() {
       showModalBottomSheet(
@@ -854,171 +854,189 @@ class _TransactionTile extends StatelessWidget {
     }
 
     return Card(
-      color: boxFillColor,
+      color: Colors.white,
       margin: const EdgeInsets.only(bottom: 8),
-      child: ExpansionTile(
-        leading: CircleAvatar(
-          backgroundColor: assigneeColor.withValues(alpha: 0.12),
-          child: Text(
-            assignedPerson.displayName.isEmpty
-                ? '?'
-                : assignedPerson.displayName.substring(0, 1).toUpperCase(),
-            style: TextStyle(
-              color: assigneeColor,
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        title: Text(
-          transaction.name,
-          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 2,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (transaction.merchant != null)
-              Text(
-                transaction.merchant!,
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
+        child: ExpansionTile(
+            leading: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
               ),
-            const SizedBox(height: 2),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  transaction.date != null
-                      ? DateFormat('MMM d').format(transaction.parsedDate!)
-                      : 'No date',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Text(
-              assignedPerson.displayName.isEmpty
-                  ? 'Unassigned'
-                  : assignedPerson.displayName,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurface,
-                fontWeight: FontWeight.w500,
-              ),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            _TransactionAmountChip(
-              amount: formatCurrency(transaction.amountValue, transaction.currency),
-              pending: transaction.pending,
-            ),
-          ],
-        ),
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                InkWell(
-                  onTap: openPersonSelector,
-                  borderRadius: BorderRadius.circular(16),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    curve: Curves.easeOutCubic,
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: assigneeColor.withValues(alpha: 24),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: assigneeColor.withValues(alpha: 150),
-                        width: 2,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      transaction.parsedDate != null
+                          ? DateFormat('MMM').format(transaction.parsedDate!)
+                          : '??',
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 22,
-                          backgroundColor: assigneeColor,
-                          child: Text(
-                            assignedPerson.displayName.isEmpty
-                                ? '?'
-                                : assignedPerson.displayName.substring(0, 1).toUpperCase(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'ASSIGNED TO',
-                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: assigneeColor,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.1,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                assignedPerson.displayName,
-                                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                  color: assigneeColor,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          color: assigneeColor.withValues(alpha: 180),
-                        ),
-                      ],
+                    const SizedBox(height: 2),
+                    Text(
+                      transaction.parsedDate != null
+                          ? DateFormat('d').format(transaction.parsedDate!)
+                          : '',
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: transaction.householdVisible,
-                  onChanged: (value) => onToggleHouseholdVisible(value),
-                  title: const Text('Visible to household'),
-                  subtitle: const Text('Shared with other household members'),
-                ),
-                const SizedBox(height: 8),
-                if (people.length > 1) ...[
-                  const Text('Split:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  _SplitBuilder(
-                    transaction: transaction,
-                    people: people,
-                    onSplit: onSplit,
-                  ),
-                ],
-              ],
+              ),
             ),
-          ),
-        ],
-      ),
+           title: transaction.merchant != null
+               ? Text(
+                   transaction.merchant!,
+                   style: theme.textTheme.titleLarge?.copyWith(
+                     fontWeight: FontWeight.w700,
+                     fontSize: 22,
+                   ),
+                   overflow: TextOverflow.ellipsis,
+                   maxLines: 2,
+                 )
+               : Text(
+                   personName,
+                   style: theme.textTheme.titleLarge?.copyWith(
+                     color: assigneeColor,
+                     fontWeight: FontWeight.w700,
+                     fontSize: 22,
+                   ),
+                   overflow: TextOverflow.ellipsis,
+                   maxLines: 2,
+                 ),
+           subtitle: transaction.merchant != null
+               ? Text(
+                   personName,
+                   style: theme.textTheme.bodySmall?.copyWith(
+                     fontSize: 16,
+                     color: assigneeColor,
+                   ),
+                   maxLines: 1,
+                   overflow: TextOverflow.ellipsis,
+                 )
+               : null,
+         trailing: Row(
+           mainAxisSize: MainAxisSize.min,
+           crossAxisAlignment: CrossAxisAlignment.center,
+           children: [
+             _TransactionAmountChip(
+               amount: formatCurrency(transaction.amountValue, transaction.currency),
+               pending: transaction.pending,
+             ),
+           ],
+         ),
+         children: [
+           Padding(
+             padding: const EdgeInsets.all(16),
+             child: Column(
+               crossAxisAlignment: CrossAxisAlignment.stretch,
+               children: [
+                 Text(
+                   transaction.name,
+                   style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                   maxLines: 2,
+                   overflow: TextOverflow.ellipsis,
+                 ),
+                 const SizedBox(height: 12),
+                 InkWell(
+                   onTap: openPersonSelector,
+                   borderRadius: BorderRadius.circular(16),
+                   child: AnimatedContainer(
+                     duration: const Duration(milliseconds: 150),
+                     curve: Curves.easeOutCubic,
+                     width: double.infinity,
+                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                     decoration: BoxDecoration(
+                       color: assigneeColor.withValues(alpha: 24),
+                       borderRadius: BorderRadius.circular(16),
+                       border: Border.all(
+                         color: assigneeColor.withValues(alpha: 150),
+                         width: 2,
+                       ),
+                     ),
+                     child: Row(
+                       children: [
+                         CircleAvatar(
+                           radius: 22,
+                           backgroundColor: assigneeColor,
+                           child: Text(
+                             assignedPerson.displayName.isEmpty
+                                 ? '?'
+                                 : assignedPerson.displayName.substring(0, 1).toUpperCase(),
+                             style: const TextStyle(
+                               color: Colors.white,
+                               fontSize: 17,
+                               fontWeight: FontWeight.w700,
+                             ),
+                           ),
+                         ),
+                         const SizedBox(width: 12),
+                         Expanded(
+                           child: Column(
+                             crossAxisAlignment: CrossAxisAlignment.start,
+                             children: [
+                               Text(
+                                 'ASSIGNED TO',
+                                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                   color: assigneeColor,
+                                   fontWeight: FontWeight.w800,
+                                   letterSpacing: 1.1,
+                                 ),
+                               ),
+                               const SizedBox(height: 2),
+                               Text(
+                                 assignedPerson.displayName,
+                                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                   color: assigneeColor,
+                                   fontWeight: FontWeight.w800,
+                                 ),
+                                 maxLines: 1,
+                                 overflow: TextOverflow.ellipsis,
+                               ),
+                             ],
+                           ),
+                         ),
+                         const SizedBox(width: 8),
+                         Icon(
+                           Icons.chevron_right_rounded,
+                           color: assigneeColor.withValues(alpha: 180),
+                         ),
+                       ],
+                     ),
+                   ),
+                 ),
+                 const SizedBox(height: 8),
+                 SwitchListTile(
+                   contentPadding: EdgeInsets.zero,
+                   value: transaction.householdVisible,
+                   onChanged: (value) => onToggleHouseholdVisible(value),
+                   title: const Text('Visible to household'),
+                   subtitle: const Text('Shared with other household members'),
+                 ),
+                 const SizedBox(height: 8),
+                 if (people.length > 1) ...[
+                   const Text('Split:', style: TextStyle(fontWeight: FontWeight.bold)),
+                   const SizedBox(height: 8),
+                   _SplitBuilder(
+                     transaction: transaction,
+                     people: people,
+                     onSplit: onSplit,
+                   ),
+                 ],
+               ],
+             ),
+           ),
+         ],
+       ),
     );
   }
 }
@@ -1036,23 +1054,20 @@ class _TransactionAmountChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = pending ? Colors.orange : AppColors.primary;
+      final color = pending ? Colors.orange.shade300 : AppColors.sageGreen;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
+        color: color,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Text(
         amount,
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: color,
-          fontWeight: FontWeight.w700,
-          fontSize: 11,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
         ),
-        overflow: TextOverflow.ellipsis,
       ),
     );
   }
