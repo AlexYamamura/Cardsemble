@@ -983,15 +983,15 @@ class _TransactionTile extends StatelessWidget {
           ),
         ),
         // Title shows the merchant when known, otherwise the transaction name.
-        title: Text(
-          transaction.merchant ?? transaction.name,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            fontSize: 22,
+          title: Text(
+            transaction.merchant ?? transaction.name,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w400,
+              fontSize: 20,
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
           ),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 2,
-        ),
         // Assignee selector lives in the main row's subtitle: tappable,
         // indented and "raised" to signal interactivity. Keeping it out of
         // `trailing` means the fixed-size amount chip can remain the only
@@ -1059,16 +1059,16 @@ class _TransactionTile extends StatelessWidget {
                              ),
                            ),
                            const Divider(height: 1),
-                           Padding(
-                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                             child: SwitchListTile(
-                               contentPadding: EdgeInsets.zero,
-                               value: transaction.householdVisible,
-                               onChanged: (value) => onToggleHouseholdVisible(value),
-                               title: const Text('Visible to household'),
-                               subtitle: const Text('Shared with other household members'),
-                             ),
-                           ),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                              child: SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                value: !transaction.householdVisible,
+                                onChanged: (value) => onToggleHouseholdVisible(!value),
+                                title: const Text('Hide from household members'),
+                                subtitle: const Text('Not shared with other household members'),
+                              ),
+                            ),
                          ],
                        ),
                      ),
@@ -1117,16 +1117,17 @@ class _TransactionTile extends StatelessWidget {
              padding: const EdgeInsets.all(16),
              child: Column(
                crossAxisAlignment: CrossAxisAlignment.stretch,
-               children: [
-                 Text(
-                   transaction.name,
-                   style: theme.textTheme.titleLarge?.copyWith(
-                     fontWeight: FontWeight.w700,
-                   ),
-                   maxLines: 2,
-                   overflow: TextOverflow.ellipsis,
-                 ),
-                 const SizedBox(height: 12),
+                children: [
+                  Text(
+                    transaction.name,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w400,
+                      fontSize: 20,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 12),
                  const SizedBox(height: 8),
                  if (people.length > 1) ...[
                    const Text(

@@ -4,6 +4,7 @@ import 'package:cardsemble/core/utils/currency.dart';
 import 'package:cardsemble/core/core.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_screen.dart';
+import 'package:cardsemble/features/accounts/domain/entities/account.dart';
 import 'package:cardsemble/features/auth/presentation/auth_notifier.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
@@ -30,6 +31,7 @@ class SummaryScreen extends StatefulWidget {
 class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveClientMixin {
     late DateTimeRange _summaryRange;
     bool _isImporting = false;
+    AccountsNotifier? _accountsNotifier;
 
   @override
   bool get wantKeepAlive => true;
@@ -38,13 +40,29 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
   void initState() {
     super.initState();
     _summaryRange = _currentMonthRange();
+    _accountsNotifier = context.read<AccountsNotifier>();
+    _accountsNotifier!.addListener(_onAccountsChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<TransactionsNotifier>().loadSummaryTransactions(_summaryRange);
-      final accounts = context.read<AccountsNotifier>();
-      accounts.loadConnections();
-      accounts.loadStatementCycles();
+      _accountsNotifier!.loadConnections();
+      _accountsNotifier!.loadStatementCycles();
     });
+  }
+
+  @override
+  void dispose() {
+    _accountsNotifier?.removeListener(_onAccountsChanged);
+    super.dispose();
+  }
+
+  void _onAccountsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  bool get _accountReady {
+    final summary = _accountsNotifier?.statementSummary;
+    return summary != null && summary.accounts.isNotEmpty;
   }
 
   DateTimeRange _currentMonthRange() {
@@ -171,21 +189,67 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
        MaterialPageRoute<void>(builder: (_) => const AccountsScreen()),
      );
    }
+    Future<void> _importCsv() async {
+      final accountsNotifier = context.read<AccountsNotifier>();
+      final statementSummary = accountsNotifier.statementSummary;
+      if (statementSummary == null || statementSummary.accounts.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No accounts available. Please link a card first.')),
+          );
+        }
+        return;
+      }
 
-   Future<void> _importCsv() async {
-     final accountsNotifier = context.read<AccountsNotifier>();
-     final statementSummary = accountsNotifier.statementSummary;
-     if (statementSummary == null || statementSummary.accounts.isEmpty) {
-       if (mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(
-           const SnackBar(content: Text('No accounts available. Please link a card first.')),
-         );
-       }
-       return;
-     }
+      final List<StatementAccount> availableAccounts = statementSummary.accounts;
+      String? selectedAccountId;
 
-     // Use the first account for simplicity; could be improved to let user choose.
-     final accountId = statementSummary.accounts.first.accountId;
+      if (availableAccounts.length == 1) {
+        selectedAccountId = availableAccounts.first.accountId;
+      } else {
+        // Show account selection dialog
+        selectedAccountId = await showDialog<String?>(
+          context: context,
+          builder: (BuildContext dialogContext) {
+            return AlertDialog(
+              title: const Text('Select Account for CSV Import'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: availableAccounts.length,
+                  itemBuilder: (context, index) {
+                    final account = availableAccounts[index];
+                     return RadioListTile<String>(
+                       title: Text(account.displayName ?? account.accountName),
+                       subtitle: Text('Ending in ${account.mask ?? '****'}'),
+                      value: account.accountId,
+                      groupValue: selectedAccountId,
+                      onChanged: (value) {
+                        Navigator.pop(dialogContext, value);
+                      },
+                    );
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, null),
+                  child: const Text('Cancel'),
+                ),
+              ],
+            );
+          },
+        );
+
+        // If the user canceled, return
+        if (selectedAccountId == null) {
+          return;
+        }
+      }
+
+      // Now proceed with the selected account
+      final accountId = selectedAccountId;
 
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -220,6 +284,7 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
         }
         return;
       }
+
       final csvText = utf8.decode(csvBytes);
 
       if (!mounted) return;
@@ -232,12 +297,12 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
           .read<TransactionsNotifier>()
           .previewCsvImport(accountId, csvText);
 
-     if (!mounted) {
-       setState(() {
-         _isImporting = false;
-       });
-       return;
-     }
+      if (!mounted) {
+        setState(() {
+          _isImporting = false;
+        });
+        return;
+      }
 
       previewResult.fold(
         (preview) {
@@ -257,7 +322,7 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
           }
         },
       );
-   }
+    }
 
    void _showImportPreviewDialog(CsvImportPreview preview, String accountId, String fileName) {
      showDialog(
@@ -595,7 +660,7 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
            ),
            const SizedBox(width: 12),
            FilledButton.icon(
-             onPressed: _isImporting ? null : _importCsv,
+             onPressed: _isImporting || !_accountReady ? null : _importCsv,
              icon: const Icon(Icons.upload_file, size: 18),
              label: Text(_isImporting ? 'Importing...' : 'Import CSV'),
              style: FilledButton.styleFrom(
