@@ -1130,17 +1130,12 @@ class _TransactionTile extends StatelessWidget {
                   const SizedBox(height: 12),
                  const SizedBox(height: 8),
                  if (people.length > 1) ...[
-                   const Text(
-                     'Split:',
-                     style: TextStyle(fontWeight: FontWeight.bold),
-                   ),
-                   const SizedBox(height: 8),
-                   _SplitSection(
-                     transaction: transaction,
-                     people: people,
-                     onSplit: onSplit,
-                   ),
-                 ],
+                    _SplitSection(
+                      transaction: transaction,
+                      people: people,
+                      onSplit: onSplit,
+                    ),
+                  ],
                ],
              ),
            ),
@@ -1393,16 +1388,28 @@ class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> 
           ),
         ),
          const SizedBox(height: 24),
-        // Save button
-        FilledButton(
-          onPressed: _isLoading ? null : _saveSplit,
-          child: _isLoading
-              ? const SizedBox(
-                  height: 16,
-                  width: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Save Split'),
+        // Cancel / Save actions
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 12,
+          children: [
+            FilledButton(
+              onPressed: _isLoading ? null : _saveSplit,
+              child: _isLoading
+                  ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Save Split'),
+            ),
+            TextButton(
+              onPressed: _isLoading
+                  ? null
+                  : () => ExpansibleController.maybeOf(context)?.collapse(),
+              child: const Text('Cancel'),
+            ),
+          ],
         ),
       ],
     );
