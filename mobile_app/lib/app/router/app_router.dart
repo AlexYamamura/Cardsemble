@@ -8,6 +8,8 @@ import 'package:cardsemble/features/summary/presentation/summary_screen.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_screen.dart';
 import 'package:cardsemble/features/card_events/presentation/card_events_screen.dart';
+import 'package:cardsemble/features/auth/presentation/auth_notifier.dart';
+import 'package:cardsemble/features/household/domain/entities/household.dart';
 import 'package:cardsemble/features/household/presentation/people_screen.dart';
 
 class _TabInfo {
@@ -29,7 +31,8 @@ class MainTabs extends StatefulWidget {
   State<MainTabs> createState() => _MainTabsState();
 }
 
-class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
+class _MainTabsState extends State<MainTabs>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late final TabController _tabController;
   late final PageController _pageController;
   late final AnimationController _settingsAnimationController;
@@ -38,6 +41,7 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
   late final ValueNotifier<double> _pagePosition;
   bool _showSettings = false;
   bool _firstRunSettingsPending = true;
+  bool _step1AutoConfigured = false;
   static const _settingsReviewedKey = 'capture_settings_reviewed';
   static const List<_TabInfo> _tabs = [
     _TabInfo(
@@ -94,17 +98,27 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
       // fire duplicate multi-page fetches on startup.
       context.read<TransactionsNotifier>().loadAll();
     });
+    WidgetsBinding.instance.addObserver(this);
     _showFirstRunSettings();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _pageController.dispose();
     _pagePosition.dispose();
     _settingsAnimationController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      // User returned from notification access settings; re-check status.
+      context.read<DeviceCaptureNotifier>().checkStatus();
+    }
   }
 
   void _onPageScrolled() {
@@ -266,7 +280,31 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
 
   Widget _buildSettingsOverlay() {
     final notifier = context.watch<DeviceCaptureNotifier>();
+    final auth = context.watch<AuthNotifier>();
     final theme = Theme.of(context);
+
+    // Find the household member matching the logged-in user for auto step 1.
+    final authUserId = auth.userSession?.userId;
+    final defaultPerson = notifier.people.isNotEmpty
+        ? notifier.people.firstWhere(
+            (p) => p.id == authUserId,
+            orElse: () => notifier.people.firstWhere(
+              (p) => p.isDefault,
+              orElse: () => notifier.people.first,
+            ),
+          )
+        : null;
+
+    // Auto-configure step 1 (username) on first load — no person selection needed.
+    if (defaultPerson != null &&
+        notifier.credentials == null &&
+        !notifier.isLoading &&
+        !_step1AutoConfigured) {
+      _step1AutoConfigured = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _autoConfigureStep1(defaultPerson);
+      });
+    }
 
     return FadeTransition(
       opacity: _settingsFadeAnimation,
@@ -287,146 +325,80 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
               const SizedBox(height: 32),
+
+              // Step 1: Your username — auto-assigned from login, no selection needed.
               SettingsStep(
                 number: '1',
-                title: 'Select a person',
-                description:
-                    'Choose which household member\'s cards to capture.',
+                title: 'Your username',
+                description: defaultPerson != null
+                    ? 'Using ${defaultPerson.displayName} as your capture identity.'
+                    : 'No household member found for your account.',
                 icon: Icons.person_outline,
-                isComplete: notifier.credentials != null,
+                isComplete: defaultPerson != null && notifier.credentials != null,
               ),
               const SizedBox(height: 16),
+
+              // Step 1 content — auto-configure or show status.
+              if (defaultPerson != null && notifier.credentials == null) ...[
+                if (notifier.isLoading) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation(Colors.white),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text('Setting up your account...',
+                          style: theme.textTheme.bodyMedium),
+                    ],
+                  ),
+                ] else ...[
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: () => _autoConfigureStep1(defaultPerson),
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Set up capture'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 56),
+                    ),
+                  ),
+                ],
+                if (notifier.error != null) ...[
+                  const SizedBox(height: 16),
+                  Text(notifier.error!,
+                      style: TextStyle(color: theme.colorScheme.error)),
+                ],
+              ],
+
+              const SizedBox(height: 24),
+
+              // Step 2: Grant notification access.
               SettingsStep(
                 number: '2',
-                title: 'Enable capture',
-                description:
-                    'Create a secure device token and configure Google Pay notifications.',
-                icon: Icons.phone_android,
-                isComplete: notifier.isConfigured,
-              ),
-              const SizedBox(height: 16),
-              SettingsStep(
-                number: '3',
-                title: 'Grant notification access',
+                title: 'Enable notifications',
                 description:
                     'Allow Cardsemble to read Google Pay purchase notifications.',
                 icon: Icons.notifications_active,
                 isComplete: notifier.hasNotificationAccess,
                 action: notifier.hasNotificationAccess
                     ? null
-                    : TextButton(
+                    : FilledButton.icon(
                         onPressed: () =>
                             notifier.openNotificationAccessSettings(),
-                        child: const Text('Grant Access'),
+                        icon: const Icon(Icons.notifications_active),
+                        label: const Text('Turn on Notifications'),
                       ),
               ),
-              const SizedBox(height: 24),
-              if (notifier.credentials == null) ...[
-                Text('Step 1: Select Person',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 16),
+
+              if (!notifier.hasNotificationAccess &&
+                  notifier.credentials != null) ...[
                 const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: notifier.people.map((person) {
-                    return FilledButton(
-                      onPressed: () async {
-                        final success = await notifier.createDeviceToken(person.id);
-                        if (success && notifier.credentials != null) {
-                          const apiUrl = 'https://creditcards-beige.vercel.app';
-                          await notifier.configureCapture(apiUrl);
-                        }
-                      },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: person.isDefault
-                            ? theme.colorScheme.primary
-                            : null,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircleAvatar(
-                            radius: 12,
-                            backgroundColor: person.isDefault
-                                ? Colors.white
-                                : Colors.grey.shade300,
-                            child: Text(
-                              person.displayName.substring(0, 1).toUpperCase(),
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: person.isDefault
-                                    ? theme.colorScheme.primary
-                                    : Colors.grey.shade600,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(person.displayName),
-                          if (person.isDefault) ...[
-                            const SizedBox(width: 4),
-                            const Icon(Icons.star, size: 16),
-                          ],
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-                if (notifier.error != null) ...[
-                  const SizedBox(height: 16),
-                  Text(notifier.error!,
-                      style: TextStyle(color: theme.colorScheme.error)),
-                ],
-              ] else if (!notifier.isConfigured) ...[
-                Text('Step 2: Enable Capture',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: notifier.isLoading
-                      ? null
-                      : () async {
-                          const apiUrl = 'https://creditcards-beige.vercel.app';
-                          await notifier.configureCapture(apiUrl);
-                        },
-                  icon: notifier.isLoading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation(Colors.white),
-                          ),
-                        )
-                      : const Icon(Icons.play_arrow),
-                  label: Text(notifier.isLoading
-                      ? 'Configuring...'
-                      : 'Enable Google Pay Capture'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(double.infinity, 56),
-                  ),
-                ),
-                if (notifier.error != null) ...[
-                  const SizedBox(height: 16),
-                  Text(notifier.error!,
-                      style: TextStyle(color: theme.colorScheme.error)),
-                ],
-              ] else if (!notifier.hasNotificationAccess) ...[
-                Text('Step 3: Grant Notification Access',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: () => notifier.openNotificationAccessSettings(),
-                  icon: const Icon(Icons.notifications_active),
-                  label: const Text('Open Notification Access Settings'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(double.infinity, 56),
-                  ),
-                ),
-                const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: () => notifier.sendTestNotification(),
                   icon: const Icon(Icons.send),
@@ -440,7 +412,7 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
                   Text(notifier.error!,
                       style: TextStyle(color: theme.colorScheme.error)),
                 ],
-              ] else ...[
+              ] else if (notifier.isConfigured && notifier.hasNotificationAccess) ...[
                 Card(
                   color: Colors.green.shade50,
                   child: Padding(
@@ -492,6 +464,15 @@ class _MainTabsState extends State<MainTabs> with TickerProviderStateMixin {
         ),
       ),
     );
+  }
+
+  Future<void> _autoConfigureStep1(HouseholdPerson person) async {
+    final capture = context.read<DeviceCaptureNotifier>();
+    final success = await capture.createDeviceToken(person.id);
+    if (success && capture.credentials != null && mounted) {
+      const apiUrl = 'https://creditcards-beige.vercel.app';
+      await capture.configureCapture(apiUrl);
+    }
   }
 }
 

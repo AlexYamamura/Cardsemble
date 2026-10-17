@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cardsemble/features/auth/presentation/auth_notifier.dart';
+import 'package:cardsemble/theme/app_colors.dart';
 
 class SignInScreen extends StatelessWidget {
   const SignInScreen({super.key});
@@ -11,20 +12,9 @@ class SignInScreen extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              colorScheme.primaryContainer.withValues(alpha: 60),
-              colorScheme.secondaryContainer.withValues(alpha: 40),
-              colorScheme.surface,
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
               child: Consumer<AuthNotifier>(
@@ -39,45 +29,24 @@ class SignInScreen extends StatelessWidget {
                           width: 120,
                           height: 120,
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                colorScheme.primary,
-                                colorScheme.primary.withValues(alpha: 200),
-                                colorScheme.secondary,
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(36),
-                            boxShadow: [
-                              BoxShadow(
-                                color: colorScheme.primary.withValues(alpha: 60),
-                                blurRadius: 30,
-                                offset: const Offset(0, 12),
-                                spreadRadius: -4,
-                              ),
-                            ],
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(20),
                           ),
                           child: const Icon(
-                            Icons.account_balance_wallet_rounded,
-                            size: 60,
+                            Icons.credit_card,
+                            size: 56,
                             color: Colors.white,
                           ),
                         ),
                         const SizedBox(height: 32),
                         // Title
-                        ShaderMask(
-                          shaderCallback: (bounds) => LinearGradient(
-                            colors: [colorScheme.primary, colorScheme.secondary],
-                          ).createShader(bounds),
-                          child: Text(
-                            'Cardsemble',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.headlineLarge?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
-                              color: Colors.white,
-                            ),
+                        Text(
+                          'Cardsemble',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.headlineLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5,
+                            color: colorScheme.primary,
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -152,39 +121,6 @@ class SignInScreen extends StatelessWidget {
                             ),
                           ],
                         ),
-                        if (auth.error != null) ...[
-                          const SizedBox(height: 24),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: colorScheme.errorContainer,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: colorScheme.error.withValues(alpha: 80),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.error_outline_rounded,
-                                  color: colorScheme.error,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    auth.error!,
-                                    style: TextStyle(
-                                      color: colorScheme.onErrorContainer,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   );
@@ -193,8 +129,7 @@ class SignInScreen extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 }
 
