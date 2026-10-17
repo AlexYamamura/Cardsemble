@@ -144,10 +144,12 @@ Future<void> _pumpTransactionsScreen(
   required List<HouseholdPerson> people,
   required CardTransaction transaction,
 }) async {
-  final notifier = TransactionsNotifier(
-    transactionRepository: _FakeTransactionRepository(transactions: [transaction]),
-    householdRepository: _FakeHouseholdRepository(people: people),
-  );
+   final notifier = TransactionsNotifier(
+     transactionRepository: _FakeTransactionRepository(transactions: [transaction]),
+     householdRepository: _FakeHouseholdRepository(people: people),
+     loadTransactionSplitDraft: LoadTransactionSplitDraft(_FakeTransactionRepository(transactions: [transaction])),
+     saveTransactionSplit: SaveTransactionSplit(_FakeTransactionRepository(transactions: [transaction])),
+   );
   await notifier.loadAll();
 
   await tester.pumpWidget(

@@ -83,7 +83,7 @@ class _UnifiedSplitSliderState extends State<UnifiedSplitSlider> {
     return true;
   }
 
-  void _handleDragUpdate(Offset position, double width) {
+  void _handleDragUpdate(Offset position, double trackWidth, double inset) {
     if (_dragStartPosition == null ||
         _draggingBoundaryIndex == null ||
         _dragStartCumulative == null) {
@@ -91,7 +91,7 @@ class _UnifiedSplitSliderState extends State<UnifiedSplitSlider> {
     }
 
     final double deltaX = position.dx - _dragStartPosition!.dx;
-    final double percentPerPixel = 100.0 / width;
+    final double percentPerPixel = 100.0 / trackWidth;
     final double deltaPercent = deltaX * percentPerPixel;
 
     // Target is the boundary's position at drag start plus total displacement,
@@ -135,12 +135,16 @@ class _UnifiedSplitSliderState extends State<UnifiedSplitSlider> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double width = constraints.maxWidth;
-        const double height = 40.0;
+        const double trackHeight = 40.0;
+        const double thumbSize = 24.0; // visible circle
+        const double thumbHitSize = 32.0; // gesture target
+        final double inset = thumbHitSize / 2; // 16.0
+        final double trackWidth = width - 2 * inset; // width available for the track
 
         return GestureDetector(
           onHorizontalDragStart: (details) {
             final double clickPercent =
-                (details.localPosition.dx / width) * 100.0;
+                (details.localPosition.dx - inset) / trackWidth * 100.0;
             double cumulative = 0.0;
 
             for (int i = 0; i < _orderedParticipantIds.length - 1; i++) {
@@ -154,7 +158,7 @@ class _UnifiedSplitSliderState extends State<UnifiedSplitSlider> {
             }
           },
           onHorizontalDragUpdate: (details) {
-            _handleDragUpdate(details.localPosition, width);
+            _handleDragUpdate(details.localPosition, trackWidth, inset);
           },
           onHorizontalDragEnd: (_) => _handleDragEnd(),
           onHorizontalDragCancel: _handleDragEnd,
@@ -163,32 +167,39 @@ class _UnifiedSplitSliderState extends State<UnifiedSplitSlider> {
             children: [
               // Background track + colored segments, clipped to an oval so
               // segments never overflow the pill-shaped track corners.
-              ClipRRect(
-                borderRadius: BorderRadius.circular(height / 2),
-                child: Container(
+              Align(
+                alignment: Alignment.center,
+                child: SizedBox(
                   width: width,
-                  height: height,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(height / 2),
-                  ),
-                  child: Stack(
-                    children: [
-                      // Colored segments proportional to each participant's share
-                      for (int i = 0; i < widget.participants.length; i++)
-                        Positioned(
-                          left: (_getCumulativePercentage(i) / 100.0) * width,
-                          width:
-                              ((_percentages[widget.participants[i].id] ?? 0.0) /
-                                      100.0) *
-                                  width,
-                          height: height,
-                          child: Container(
-                            color: widget.participants[i].color
-                                .withValues(alpha: 0.3),
-                          ),
-                        ),
-                    ],
+                  height: trackHeight,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(trackHeight / 2),
+                    child: Container(
+                      width: trackWidth,
+                      height: trackHeight,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(trackHeight / 2),
+                      ),
+                      child: Stack(
+                        children: [
+                          // Colored segments proportional to each participant's share
+                          for (int i = 0; i < widget.participants.length; i++)
+                            Positioned(
+                              left: (_getCumulativePercentage(i) / 100.0) * trackWidth,
+                              width:
+                                  ((_percentages[widget.participants[i].id] ?? 0.0) /
+                                          100.0) *
+                                      trackWidth,
+                              height: trackHeight,
+                              child: Container(
+                                color: widget.participants[i].color
+                                    .withValues(alpha: 0.3),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -197,42 +208,56 @@ class _UnifiedSplitSliderState extends State<UnifiedSplitSlider> {
               // circular thumbs are never clipped at 0%/100%.
               for (int i = 0; i < widget.participants.length - 1; i++)
                 Positioned(
-                  left:
-                      (_getCumulativePercentage(i + 1) / 100.0) * width - 10,
-                  width: 20,
-                  height: height,
+                  left: inset +
+                      (_getCumulativePercentage(i + 1) / 100.0) * trackWidth -
+                      thumbHitSize / 2,
+                  width: thumbHitSize,
+                  height: trackHeight,
                   child: GestureDetector(
+                    key: ValueKey('split-handle-$i'),
                     onHorizontalDragStart: (details) {
                       _draggingBoundaryIndex = i;
                       _dragStartPosition = details.localPosition;
                       _dragStartCumulative = _getCumulativePercentage(i + 1);
                     },
                     onHorizontalDragUpdate: (details) {
-                      _handleDragUpdate(details.localPosition, width);
+                      _handleDragUpdate(details.localPosition, trackWidth, inset);
                     },
                     onHorizontalDragEnd: (_) => _handleDragEnd(),
                     onHorizontalDragCancel: _handleDragEnd,
-                    child: Center(
-                      child: Container(
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.15),
-                              blurRadius: 2,
-                              offset: const Offset(0, 1),
+                    child: Stack(
+                      children: [
+                        // Invisible hit target for dragging
+                        Positioned.fill(
+                          child: Container(
+                            color: Colors.transparent,
+                          ),
+                        ),
+                        // Visible thumb (circle)
+                        Center(
+                          child: Container(
+                            key: ValueKey('split-handle-thumb-$i'),
+                            width: thumbSize,
+                            height: thumbSize,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.15),
+                                  blurRadius: 2,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
                             ),
-                          ],
+                            child: const Icon(
+                              Icons.drag_handle,
+                              color: Colors.blue,
+                              size: 14,
+                            ),
+                          ),
                         ),
-                        child: const Icon(
-                          Icons.drag_handle,
-                          color: Colors.blue,
-                          size: 14,
-                        ),
-                      ),
+                      ],
                     ),
                   ),
                 ),

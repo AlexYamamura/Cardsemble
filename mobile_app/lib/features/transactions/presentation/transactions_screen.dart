@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:cardsemble/core/error/failure.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/transactions/presentation/widgets/pay_action_sheet.dart';
@@ -239,21 +240,41 @@ class _TransactionsScreenState extends State<TransactionsScreen>
     return ok;
   }
 
-  Future<bool> _runSplit(
-    BuildContext context,
-    TransactionsNotifier notifier,
-    CardTransaction tx,
-    List<TransactionSplit> splits,
-  ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await notifier.assignTransactionSplit(tx.id, splits);
-    if (!ok) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(notifier.error ?? 'Could not save the split')),
-      );
-    }
-    return ok;
-  }
+   Future<bool> _runSplit(
+     BuildContext context,
+     TransactionsNotifier notifier,
+     CardTransaction tx,
+     List<TransactionSplit> splits,
+   ) async {
+     final messenger = ScaffoldMessenger.of(context);
+     try {
+       final totalAmount = tx.amountValue.abs();
+        final participantIds =
+            notifier.people.take(4).map((p) => p.id).toList();
+       final percentages = percentagesFromExistingSplits(
+         splits,
+         totalAmount,
+         allPersonIds: participantIds,
+       );
+       final ok = await notifier.saveTransactionSplit(
+         transactionId: tx.id,
+         totalAmount: totalAmount,
+         percentages: percentages,
+         orderedPersonIds: participantIds,
+       );
+       if (!ok) {
+         messenger.showSnackBar(
+           SnackBar(content: Text(notifier.error ?? 'Could not save the split')),
+         );
+       }
+       return ok;
+     } catch (e) {
+       messenger.showSnackBar(
+         SnackBar(content: Text('Error processing split: $e')),
+       );
+       return false;
+     }
+   }
 
   Future<bool> _runVisibility(
     BuildContext context,
@@ -915,9 +936,11 @@ class _TransactionTile extends StatelessWidget {
         ? theme.colorScheme.primary
         : _personColor(transaction.assignedPersonId!, people);
 
-    final personName = assignedPerson.displayName.isEmpty
-        ? 'Unassigned'
-        : assignedPerson.displayName;
+     final personName = transaction.hasSplits
+         ? 'SPLIT'
+         : assignedPerson.displayName.isEmpty
+             ? 'Unassigned'
+             : assignedPerson.displayName;
     final statusColor = transaction.pending
         ? AppColors.pendingBg
         : AppColors.sageGreen;
@@ -1129,17 +1152,34 @@ class _SplitSection extends StatefulWidget {
 }
 
 class _SplitSectionState extends State<_SplitSection> {
-  late final Future<List<TransactionSplit>> _splitsFuture;
+   late Future<Result<Map<String, double>>> _splitsFuture;
 
   @override
   void initState() {
     super.initState();
-    _splitsFuture = context
-        .read<TransactionsNotifier>()
-        .transactionRepository
-        .fetchTransactionSplits(widget.transaction.id)
-        .then((result) =>
-            result.isSuccess ? result.value : <TransactionSplit>[]);
+    final notifier = context.read<TransactionsNotifier>();
+    final transaction = widget.transaction;
+    final participants = widget.people.length > 4 ? widget.people.take(4).toList() : widget.people;
+    final personIds = participants.map((p) => p.id).toList();
+    _splitsFuture = notifier.loadSplitDraft(
+      transactionId: transaction.id,
+      totalAmount: transaction.amountValue.abs(),
+      participantIds: personIds,
+    );
+  }
+
+  void _retry() {
+    setState(() {
+      final notifier = context.read<TransactionsNotifier>();
+      final transaction = widget.transaction;
+      final participants = widget.people.length > 4 ? widget.people.take(4).toList() : widget.people;
+      final personIds = participants.map((p) => p.id).toList();
+      _splitsFuture = notifier.loadSplitDraft(
+        transactionId: transaction.id,
+        totalAmount: transaction.amountValue.abs(),
+        participantIds: personIds,
+      );
+    });
   }
 
   @override
@@ -1153,33 +1193,71 @@ class _SplitSectionState extends State<_SplitSection> {
 
     final List<String> personIds = participants.map((p) => p.id).toList();
 
-    return FutureBuilder<List<TransactionSplit>>(
-      future: _splitsFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final existingSplits = snapshot.data ?? <TransactionSplit>[];
+     return FutureBuilder<Result<Map<String, double>>>(
+       future: _splitsFuture,
+       builder: (context, snapshot) {
+         if (snapshot.connectionState == ConnectionState.waiting) {
+           return const Center(child: CircularProgressIndicator());
+         }
+         if (snapshot.hasError) {
+           return Center(
+             child: Column(
+               mainAxisSize: MainAxisSize.min,
+               children: [
+                 Text(
+                   'Failed to load split data: ${snapshot.error}',
+                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                     color: Theme.of(context).colorScheme.error,
+                   ),
+                 ),
+                 const SizedBox(height: 8),
+                 ElevatedButton(
+                   onPressed: _retry,
+                   child: const Text('Retry'),
+                 ),
+               ],
+             ),
+           );
+         }
+         final result = snapshot.data;
+         if (result == null) {
+           return const Center(child: CircularProgressIndicator());
+         }
 
-        Map<String, double> percentages;
-        if (existingSplits.isEmpty) {
-          percentages = equalSplitPercentages(personIds);
-        } else {
-          percentages = percentagesFromExistingSplits(
-            existingSplits,
-            widget.transaction.amountValue.abs(),
-            allPersonIds: personIds,
-          );
-        }
+         return result.fold(
+           (percentages) {
+             final finalPercentages = percentages.isEmpty
+                 ? equalSplitPercentages(personIds)
+                 : percentages;
 
-        return _UnifiedSplitSliderBuilder(
-          transaction: widget.transaction,
-          people: participants,
-          initialPercentages: percentages,
-          onSplit: widget.onSplit,
-        );
-      },
-    );
+             return _UnifiedSplitSliderBuilder(
+               transaction: widget.transaction,
+               people: participants,
+               initialPercentages: finalPercentages,
+               onSplit: widget.onSplit,
+             );
+           },
+           (failure) => Center(
+             child: Column(
+               mainAxisSize: MainAxisSize.min,
+               children: [
+                 Text(
+                   'Failed to load split data: ${failure.message}',
+                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                     color: Theme.of(context).colorScheme.error,
+                   ),
+                 ),
+                 const SizedBox(height: 8),
+                 ElevatedButton(
+                   onPressed: _retry,
+                   child: const Text('Retry'),
+                 ),
+               ],
+             ),
+           ),
+         );
+       },
+     );
   }
 }
 

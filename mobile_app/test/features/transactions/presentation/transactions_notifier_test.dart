@@ -223,10 +223,12 @@ void main() {
 
     await notifier.loadTransactions(reset: true);
     final before = repository.transactionLoads;
-    final ok = await notifier.assignTransactionSplit(
-      't1',
-      const [TransactionSplit(personId: 'p1', amount: 10)],
-    );
+     final ok = await notifier.saveTransactionSplit(
+       transactionId: 't1',
+       totalAmount: 10.0,
+       percentages: const {'p1': 50.0, 'p2': 50.0},
+       orderedPersonIds: const ['p1', 'p2'],
+     );
 
     expect(ok, isTrue);
     expect(repository.transactionLoads, before + 1);

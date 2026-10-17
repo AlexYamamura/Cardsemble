@@ -109,37 +109,39 @@ class _CardsembleAppState extends State<CardsembleApp> {
     );
   }
 
-  ThemeData _theme() {
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.light(
-        primary: AppColors.primary,
-        primaryContainer: AppColors.primaryDark,
-        secondary: AppColors.sand,
-        secondaryContainer: AppColors.cream,
-        surface: AppColors.surface,
-        error: AppColors.error,
-        onPrimary: AppColors.onPrimary,
-        onSecondary: AppColors.charcoal,
-        onSurface: AppColors.onSurface,
-        onError: AppColors.onError,
-        outline: AppColors.outline,
-        outlineVariant: AppColors.outlineVariant,
-      ),
-      scaffoldBackgroundColor: AppColors.background,
-      appBarTheme: AppBarTheme(
-        backgroundColor: AppColors.primary,
-        foregroundColor: AppColors.onPrimary,
-        elevation: 0,
-        centerTitle: true,
-        titleTextStyle: const TextStyle(
-          color: Colors.white,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
+   ThemeData _theme() {
+     return ThemeData(
+       useMaterial3: true,
+       colorScheme: ColorScheme.light(
+         primary: AppColors.primary,
+         primaryContainer: AppColors.primaryDark,
+         secondary: AppColors.sand,
+         secondaryContainer: AppColors.cream,
+         surface: AppColors.surface,
+         error: AppColors.error,
+         onPrimary: AppColors.onPrimary,
+         onSecondary: AppColors.charcoal,
+         onSurface: AppColors.onSurface,
+         onError: AppColors.onError,
+         outline: AppColors.outline,
+       ),
+       datePickerTheme: DatePickerThemeData(
+         rangeSelectionBackgroundColor: Color.alphaBlend(AppColors.primary.withValues(alpha: 0.24), AppColors.surface),
+       ),
+       scaffoldBackgroundColor: AppColors.background,
+       appBarTheme: AppBarTheme(
+         backgroundColor: AppColors.primary,
+         foregroundColor: AppColors.onPrimary,
+         elevation: 0,
+         centerTitle: true,
+         titleTextStyle: const TextStyle(
+           color: Colors.white,
+           fontSize: 20,
+           fontWeight: FontWeight.w600,
+         ),
+       ),
+     );
+   }
 }
 
 class _LoadingScreen extends StatelessWidget {

@@ -8,7 +8,7 @@ import '../../features/household/domain/household_repository.dart';
 import '../../features/household/presentation/household_notifier.dart';
 import '../../features/transactions/data/transaction_repository_impl.dart';
 import '../../features/transactions/data/transaction_cache.dart';
-import '../../features/transactions/domain/transaction_repository.dart';
+import '../../features/transactions/domain/transactions_domain.dart';
 import '../../features/transactions/presentation/transactions_notifier.dart';
 import '../../features/card_events/data/card_event_repository_impl.dart';
 import '../../features/card_events/domain/card_event_repository.dart';
@@ -96,11 +96,13 @@ class ServiceLocator {
 
     registerFactory<TransactionCache>(() => TransactionCache());
 
-    registerFactory<TransactionsNotifier>(() => TransactionsNotifier(
-          transactionRepository: sl.get<TransactionRepository>(),
-          householdRepository: sl.get<HouseholdRepository>(),
-          cache: sl.get<TransactionCache>(),
-        ));
+     registerFactory<TransactionsNotifier>(() => TransactionsNotifier(
+           transactionRepository: sl.get<TransactionRepository>(),
+           loadTransactionSplitDraft: sl.get<LoadTransactionSplitDraft>(),
+           saveTransactionSplit: sl.get<SaveTransactionSplit>(),
+           householdRepository: sl.get<HouseholdRepository>(),
+           cache: sl.get<TransactionCache>(),
+         ));
 
     registerFactory<CardEventRepository>(() => CardEventRepositoryImpl(
           apiClient: apiClient,
@@ -124,10 +126,18 @@ class ServiceLocator {
           supabase: supabaseClient,
         ));
 
-    registerFactory<DeviceCaptureNotifier>(() => DeviceCaptureNotifier(
-          deviceCaptureRepository: sl.get<DeviceCaptureRepository>(),
-          householdRepository: sl.get<HouseholdRepository>(),
-        ));
+     registerFactory<DeviceCaptureNotifier>(() => DeviceCaptureNotifier(
+           deviceCaptureRepository: sl.get<DeviceCaptureRepository>(),
+           householdRepository: sl.get<HouseholdRepository>(),
+         ));
+
+     // Use cases
+     registerFactory<LoadTransactionSplitDraft>(() => LoadTransactionSplitDraft(
+           sl.get<TransactionRepository>(),
+         ));
+     registerFactory<SaveTransactionSplit>(() => SaveTransactionSplit(
+           sl.get<TransactionRepository>(),
+         ));
   }
 }
 

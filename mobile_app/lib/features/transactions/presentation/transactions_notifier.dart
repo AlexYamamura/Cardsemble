@@ -33,18 +33,22 @@ class SummaryRow {
 
 class TransactionsNotifier extends ChangeNotifier {
   final TransactionRepository _transactionRepository;
+  final LoadTransactionSplitDraft _loadTransactionSplitDraft;
+  final SaveTransactionSplit _saveTransactionSplit;
   final HouseholdRepository _householdRepository;
   final TransactionCache? _cache;
 
-  TransactionsNotifier({
-    required TransactionRepository transactionRepository,
-    required HouseholdRepository householdRepository,
-    TransactionCache? cache,
-  }) : _transactionRepository = transactionRepository,
-       _householdRepository = householdRepository,
-       _cache = cache;
-
-  TransactionRepository get transactionRepository => _transactionRepository;
+   TransactionsNotifier({
+     required TransactionRepository transactionRepository,
+     LoadTransactionSplitDraft? loadTransactionSplitDraft,
+     SaveTransactionSplit? saveTransactionSplit,
+     required HouseholdRepository householdRepository,
+     TransactionCache? cache,
+   }) : _transactionRepository = transactionRepository,
+        _loadTransactionSplitDraft = loadTransactionSplitDraft ?? LoadTransactionSplitDraft(transactionRepository),
+        _saveTransactionSplit = saveTransactionSplit ?? SaveTransactionSplit(transactionRepository),
+        _householdRepository = householdRepository,
+        _cache = cache;
 
   /// Page size for the transactions list. The server caps this at 500.
   static const int _pageSize = 100;
@@ -489,33 +493,45 @@ class TransactionsNotifier extends ChangeNotifier {
     }
   }
 
-  void _applyAssignment(String transactionId, String? personId, String source) {
-    _replaceTransaction(
-      transactionId,
-      (tx) => tx.copyWith(assignedPersonId: personId, assignmentSource: source),
-    );
-  }
+   void _applyAssignment(String transactionId, String? personId, String source) {
+     _replaceTransaction(
+       transactionId,
+       (tx) => tx.copyWith(
+         assignedPersonId: personId,
+         assignmentSource: source,
+         hasSplits: false,
+       ),
+     );
+   }
 
-  Future<bool> assignTransactionSplit(String transactionId, List<TransactionSplit> splits) async {
-    _error = null;
-    notifyListeners();
-
-    try {
-      final result = await _transactionRepository.assignTransactionSplit(transactionId, splits);
-      if (result.isFailure) {
-        _error = result.failure.message;
-        notifyListeners();
-        return false;
-      }
-      await loadTransactions(reset: true);
-      await _reloadSummary();
-      return true;
-    } catch (e) {
-      _error = e.toString();
+    Future<bool> saveTransactionSplit({
+      required String transactionId,
+      required double totalAmount,
+      required Map<String, double> percentages,
+      required List<String> orderedPersonIds,
+    }) async {
+      _error = null;
       notifyListeners();
-      return false;
+
+      final outcome = await _saveTransactionSplit.call(
+        transactionId: transactionId,
+        totalAmount: totalAmount,
+        percentages: percentages,
+        orderedPersonIds: orderedPersonIds,
+      );
+       return outcome.fold(
+         (splits) async {
+           await loadTransactions(reset: true);
+           await _reloadSummary();
+           return true;
+         },
+         (failure) async {
+           _error = failure.message;
+           notifyListeners();
+           return false;
+         },
+       );
     }
-  }
 
   Future<bool> setHouseholdVisible(String transactionId, bool visible) async {
     // Optimistic update with rollback on failure.
@@ -638,7 +654,19 @@ class TransactionsNotifier extends ChangeNotifier {
     }
   }
 
-  void _writeCache() {
+    Future<Result<Map<String, double>>> loadSplitDraft({
+      required String transactionId,
+      required double totalAmount,
+      required List<String> participantIds,
+    }) {
+      return _loadTransactionSplitDraft.call(
+        transactionId: transactionId,
+        totalAmount: totalAmount,
+        participantIds: participantIds,
+      );
+    }
+
+   void _writeCache() {
     final cache = _cache;
     if (cache == null) return;
     // Fire-and-forget: caching must not delay the UI or surface errors.

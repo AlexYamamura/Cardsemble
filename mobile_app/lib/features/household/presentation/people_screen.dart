@@ -62,10 +62,10 @@ class _PeopleScreenState extends State<PeopleScreen>
             );
           }
 
-          return Column(
-            children: [
-              _buildQrPlaceholder(),
-              Flexible(
+           return Column(
+             children: [
+               _buildQrPlaceholder(context),
+               Flexible(
                 child: ListView(
                   shrinkWrap: true,
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -168,47 +168,53 @@ class _PeopleScreenState extends State<PeopleScreen>
     );
   }
 
-  Widget _buildQrPlaceholder() {
+  Widget _buildQrPlaceholder(BuildContext context) {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: Colors.grey.shade300,
-          width: 2,
-        ),
-        borderRadius: BorderRadius.circular(8),
+      child: Material(
         color: Colors.grey.shade50,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.qr_code, size: 32, color: Colors.grey.shade600),
-              const SizedBox(width: 8),
-              Text(
-                'QR Code Placeholder',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade600,
-                  fontWeight: FontWeight.w500,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: Colors.grey.shade300, width: 2),
+        ),
+        child: InkWell(
+          key: const ValueKey('qr-placeholder-card'),
+          onTap: () => _scanQrCode(context),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.qr_code, size: 32, color: Colors.grey.shade600),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Scan QR Code',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Scan QR code to add household members',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade500,
+                const SizedBox(height: 8),
+                Text(
+                  'Scan QR code to add household members',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade500,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
-            textAlign: TextAlign.center,
           ),
-        ],
+        ),
       ),
     );
   }

@@ -111,4 +111,29 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('QR placeholder opens the scanner dialog', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<HouseholdNotifier>.value(
+        value: notifier,
+        child: const MaterialApp(
+          home: PeopleScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final qrCard = find.byKey(const ValueKey('qr-placeholder-card'));
+    expect(qrCard, findsOneWidget);
+
+    await tester.tap(qrCard);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Scan to Add Household Member'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Scan to Add Household Member'), findsNothing);
+  });
 }
