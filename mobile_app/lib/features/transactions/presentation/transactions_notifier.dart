@@ -82,6 +82,11 @@ class TransactionsNotifier extends ChangeNotifier {
   bool _reloadScheduled = false;
   bool _hydrated = false;
 
+  // In-memory cache of split draft percentages keyed by transaction id. Keeps
+  // the split dropdown from re-hitting the network on every open/close of the
+  // expansion tile; rewritten when a split is saved.
+  final Map<String, Map<String, double>> _splitDraftCache = {};
+
   List<CardTransaction> get transactions => _transactions;
   List<CardTransaction> get summaryTransactions => _summaryTransactions;
   List<HouseholdPerson> get people => _people;
@@ -520,11 +525,14 @@ class TransactionsNotifier extends ChangeNotifier {
         orderedPersonIds: orderedPersonIds,
       );
        return outcome.fold(
-         (splits) async {
-           await loadTransactions(reset: true);
-           await _reloadSummary();
-           return true;
-         },
+          (splits) async {
+            // Rewrite the split draft cache with the saved percentages so the
+            // dropdown re-opens instantly without a network call.
+            _splitDraftCache[transactionId] = Map<String, double>.from(percentages);
+            await loadTransactions(reset: true);
+            await _reloadSummary();
+            return true;
+          },
          (failure) async {
            _error = failure.message;
            notifyListeners();
@@ -659,11 +667,23 @@ class TransactionsNotifier extends ChangeNotifier {
       required double totalAmount,
       required List<String> participantIds,
     }) {
+      // Serve the split draft from the local cache so re-opening the split
+      // dropdown does not hit the network on every expand/collapse.
+      final cached = _splitDraftCache[transactionId];
+      if (cached != null) {
+        return Future.value(Success(cached));
+      }
       return _loadTransactionSplitDraft.call(
         transactionId: transactionId,
         totalAmount: totalAmount,
         participantIds: participantIds,
-      );
+      ).then((result) {
+        result.fold(
+          (percentages) => _splitDraftCache[transactionId] = Map<String, double>.from(percentages),
+          (_) => null,
+        );
+        return result;
+      });
     }
 
    void _writeCache() {

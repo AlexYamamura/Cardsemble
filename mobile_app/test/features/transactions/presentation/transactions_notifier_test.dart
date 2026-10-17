@@ -33,6 +33,7 @@ class FakeTransactionRepository implements TransactionRepository {
   TransactionAssignment? assignment;
   int transactionLoads = 0;
   int accountLoads = 0;
+  int splitLoads = 0;
 
   @override
   Future<Result<TransactionPage>> loadTransactions(TransactionQuery query) {
@@ -71,6 +72,7 @@ class FakeTransactionRepository implements TransactionRepository {
 
   @override
   Future<Result<List<TransactionSplit>>> fetchTransactionSplits(String transactionId) async {
+    splitLoads++;
     return const Success(<TransactionSplit>[]);
   }
 
@@ -232,6 +234,74 @@ void main() {
 
     expect(ok, isTrue);
     expect(repository.transactionLoads, before + 1);
+  });
+
+  test('loadSplitDraft serves the second call from cache without a network hit', () async {
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) async =>
+          Success(TransactionPage(items: [_tx('t1')], hasMore: false)),
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+    );
+
+    final first = await notifier.loadSplitDraft(
+      transactionId: 't1',
+      totalAmount: 10.0,
+      participantIds: const ['p1', 'p2'],
+    );
+    expect(first.isSuccess, isTrue);
+    expect(repository.splitLoads, 1);
+
+    // Same transaction again: should be served from the local cache.
+    final second = await notifier.loadSplitDraft(
+      transactionId: 't1',
+      totalAmount: 10.0,
+      participantIds: const ['p1', 'p2'],
+    );
+    expect(second.isSuccess, isTrue);
+    expect(repository.splitLoads, 1); // no additional network hit
+  });
+
+  test('saveTransactionSplit rewrites the split draft cache', () async {
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) async =>
+          Success(TransactionPage(items: [_tx('t1')], hasMore: false)),
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+    );
+
+    // Prime the cache with equal splits.
+    await notifier.loadSplitDraft(
+      transactionId: 't1',
+      totalAmount: 10.0,
+      participantIds: const ['p1', 'p2'],
+    );
+    expect(repository.splitLoads, 1);
+
+    // Saving a different allocation rewrites the cache.
+    final ok = await notifier.saveTransactionSplit(
+      transactionId: 't1',
+      totalAmount: 10.0,
+      percentages: const {'p1': 70.0, 'p2': 30.0},
+      orderedPersonIds: const ['p1', 'p2'],
+    );
+    expect(ok, isTrue);
+
+    // Re-loading the draft returns the saved percentages, no network hit.
+    final reloaded = await notifier.loadSplitDraft(
+      transactionId: 't1',
+      totalAmount: 10.0,
+      participantIds: const ['p1', 'p2'],
+    );
+    expect(reloaded.isSuccess, isTrue);
+    expect(reloaded.value.length, 2);
+    expect(reloaded.value['p1'], 70.0);
+    expect(reloaded.value['p2'], 30.0);
+    expect(repository.splitLoads, 1); // still no additional network hit
   });
 
   test('rolls back an optimistic household visibility change on failure', () async {
