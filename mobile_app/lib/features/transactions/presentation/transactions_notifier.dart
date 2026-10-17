@@ -182,12 +182,20 @@ class TransactionsNotifier extends ChangeNotifier {
   }
 
   void setAccountFilter(String? accountId) {
+    // Switching the account chip must not compound with a stale date filter
+    // (e.g. one synced from the summary tab). Clear the date range so the new
+    // chip applies fresh from the main list for the current month.
+    _dateRange = null;
     _selectedAccountId = accountId;
     notifyListeners();
     _scheduleListReload();
   }
 
   void setPersonFilter(String? personId) {
+    // Switching the person chip must not compound with a stale date filter
+    // (e.g. one synced from the summary tab). Clear the date range so the new
+    // chip applies fresh from the main list for the current month.
+    _dateRange = null;
     _selectedPersonId = personId;
     notifyListeners();
     _scheduleListReload();

@@ -101,9 +101,10 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
       _summaryRange = range;
     });
     final notifier = context.read<TransactionsNotifier>();
-    // Sync the transactions tab's date range so the chips stay connected, but do
-    // not trigger a transactions list reload from the summary tab.
-    notifier.setDateRange(range, reloadList: false);
+    // Sync the transactions tab's date range so the chips stay connected, and
+    // reload the transactions list so the transactions tab reflects the newly
+    // chosen date range instead of showing stale data for the old range.
+    notifier.setDateRange(range, reloadList: true);
     notifier.loadSummaryTransactions(range);
   }
 
@@ -126,9 +127,10 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
       _summaryRange = range;
     });
     final notifier = context.read<TransactionsNotifier>();
-    // Sync the transactions tab's date range so the chips stay connected, but do
-    // not trigger a transactions list reload from the summary tab.
-    notifier.setDateRange(range, reloadList: false);
+    // Sync the transactions tab's date range so the chips stay connected, and
+    // reload the transactions list so the transactions tab reflects the newly
+    // chosen date range instead of showing stale data for the old range.
+    notifier.setDateRange(range, reloadList: true);
     notifier.loadSummaryTransactions(range);
   }
 
