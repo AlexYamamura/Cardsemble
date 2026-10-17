@@ -93,17 +93,31 @@ class TransactionRepositoryImpl implements TransactionRepository {
   @override
   Future<Result<List<TransactionSplit>>> fetchTransactionSplits(String transactionId) async {
     final result = await _apiClient.safeGet('/api/plaid-transactions/$transactionId/splits');
-    return result.map(
-      (payload) {
-        final splits = payload['splits'] as List? ?? [];
-        return splits
-            .map((s) => TransactionSplit(
-                  personId: s['person_id'] as String,
-                  amount: (s['amount'] as num).toDouble(),
-                ))
-            .toList();
-      },
-    );
+    return result.flatMap((payload) {
+      final raw = payload['splits'];
+      if (raw == null) {
+        return const Success<List<TransactionSplit>>(<TransactionSplit>[]);
+      }
+      if (raw is! List) {
+        return const FailureResult<List<TransactionSplit>>(
+          UnknownFailure(
+            'Could not read transaction splits: "splits" is not a list.',
+          ),
+        );
+      }
+
+      try {
+        final splits = raw
+            .map(TransactionSplit.tryParse)
+            .whereType<TransactionSplit>()
+            .toList(growable: false);
+        return Success<List<TransactionSplit>>(splits);
+      } catch (e) {
+        return FailureResult<List<TransactionSplit>>(
+          UnknownFailure('Could not read transaction splits: $e'),
+        );
+      }
+    });
   }
 
   @override

@@ -129,8 +129,165 @@ void main() {
       final result = await repository.assignTransaction('t1', 'p2');
 
       expect(result.isSuccess, isTrue);
-      expect(result.value.personId, 'p2');
-      expect(result.value.assignmentSource, 'manual');
+       expect(result.value.personId, 'p2');
+       expect(result.value.assignmentSource, 'manual');
+     });
+   });
+
+  group('fetchTransactionSplits', () {
+    test('returns success with two valid splits', () async {
+      final client = MockClient((request) async {
+        expect(request.url.path, '/api/plaid-transactions/t1/splits');
+        return http.Response(
+          jsonEncode({
+            'splits': [
+              {'person_id': 'p1', 'amount': 5.25},
+              {'person_id': 'p2', 'amount': 4.75},
+            ],
+          }),
+          200,
+        );
+      });
+      final repository = buildRepository(client);
+      final result = await repository.fetchTransactionSplits('t1');
+      expect(result.isSuccess, isTrue);
+      final splits = result.value;
+      expect(splits, hasLength(2));
+      expect(splits[0].personId, 'p1');
+      expect(splits[0].amount, 5.25);
+      expect(splits[1].personId, 'p2');
+      expect(splits[1].amount, 4.75);
+    });
+
+    test('skips null amount rows (single assignment)', () async {
+      final client = MockClient((request) async {
+        expect(request.url.path, '/api/plaid-transactions/t1/splits');
+        return http.Response(
+          jsonEncode({
+            'splits': [
+              {'person_id': 'p1', 'amount': null},
+              {'person_id': 'p2', 'amount': 10.0},
+            ],
+          }),
+          200,
+        );
+      });
+      final repository = buildRepository(client);
+      final result = await repository.fetchTransactionSplits('t1');
+      expect(result.isSuccess, isTrue);
+      final splits = result.value;
+      expect(splits, hasLength(1));
+      expect(splits[0].personId, 'p2');
+      expect(splits[0].amount, 10.0);
+    });
+
+    test('skips zero and negative amounts', () async {
+      final client = MockClient((request) async {
+        expect(request.url.path, '/api/plaid-transactions/t1/splits');
+        return http.Response(
+          jsonEncode({
+            'splits': [
+              {'person_id': 'p1', 'amount': 0},
+              {'person_id': 'p2', 'amount': -5.0},
+              {'person_id': 'p3', 'amount': 7.5},
+            ],
+          }),
+          200,
+        );
+      });
+      final repository = buildRepository(client);
+      final result = await repository.fetchTransactionSplits('t1');
+      expect(result.isSuccess, isTrue);
+      final splits = result.value;
+      expect(splits, hasLength(1));
+      expect(splits[0].personId, 'p3');
+      expect(splits[0].amount, 7.5);
+    });
+
+    test('skips empty or non-string personId', () async {
+      final client = MockClient((request) async {
+        expect(request.url.path, '/api/plaid-transactions/t1/splits');
+        return http.Response(
+          jsonEncode({
+            'splits': [
+              {'person_id': '', 'amount': 5.0},
+              {'person_id': null, 'amount': 5.0},
+              {'person_id': 'p1', 'amount': 5.0},
+            ],
+          }),
+          200,
+        );
+      });
+      final repository = buildRepository(client);
+      final result = await repository.fetchTransactionSplits('t1');
+      expect(result.isSuccess, isTrue);
+      final splits = result.value;
+      expect(splits, hasLength(1));
+      expect(splits[0].personId, 'p1');
+      expect(splits[0].amount, 5.0);
+    });
+
+    test('accepts numeric string amounts', () async {
+      final client = MockClient((request) async {
+        expect(request.url.path, '/api/plaid-transactions/t1/splits');
+        return http.Response(
+          jsonEncode({
+            'splits': [
+              {'person_id': 'p1', 'amount': '5.25'},
+              {'person_id': 'p2', 'amount': '4.75'},
+            ],
+          }),
+          200,
+        );
+      });
+      final repository = buildRepository(client);
+      final result = await repository.fetchTransactionSplits('t1');
+      expect(result.isSuccess, isTrue);
+      final splits = result.value;
+      expect(splits, hasLength(2));
+      expect(splits[0].amount, 5.25);
+      expect(splits[1].amount, 4.75);
+    });
+
+    test('returns empty list when splits key is missing', () async {
+      final client = MockClient((request) async {
+        expect(request.url.path, '/api/plaid-transactions/t1/splits');
+        return http.Response(
+          jsonEncode({
+            // no splits key
+          }),
+          200,
+        );
+      });
+      final repository = buildRepository(client);
+      final result = await repository.fetchTransactionSplits('t1');
+      expect(result.isSuccess, isTrue);
+      final splits = result.value;
+      expect(splits, isEmpty);
+    });
+
+    test('returns failure when splits is not a list', () async {
+      final client = MockClient((request) async {
+        expect(request.url.path, '/api/plaid-transactions/t1/splits');
+        return http.Response(
+          jsonEncode({
+            'splits': 'not a list',
+          }),
+          200,
+        );
+      });
+      final repository = buildRepository(client);
+      final result = await repository.fetchTransactionSplits('t1');
+      expect(result.isFailure, isTrue);
+      expect(result.failure, isA<UnknownFailure>());
+    });
+
+    test('propagates HTTP error as failure', () async {
+      final client = MockClient((request) async => http.Response('{"detail":"boom"}', 500));
+      final repository = buildRepository(client);
+      final result = await repository.fetchTransactionSplits('t1');
+      expect(result.isFailure, isTrue);
+      expect(result.failure, isA<NetworkFailure>());
     });
   });
 }

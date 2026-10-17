@@ -247,6 +247,23 @@ class TransactionSplit {
       amount: (json['amount'] as num).toDouble(),
     );
   }
+
+  static TransactionSplit? tryParse(Object? value) {
+    if (value is! Map<String, dynamic>) return null;
+
+    final personId = value['person_id'];
+    if (personId is! String || personId.isEmpty) return null;
+
+    final rawAmount = value['amount'];
+    final amount = rawAmount is num
+        ? rawAmount.toDouble()
+        : rawAmount is String
+            ? double.tryParse(rawAmount)
+            : null;
+
+    if (amount == null || !amount.isFinite || amount <= 0) return null;
+    return TransactionSplit(personId: personId, amount: amount);
+  }
 }
 
 class CsvImportRow {

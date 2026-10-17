@@ -19,9 +19,13 @@ String _today() {
 }
 
 class _FakeTransactionRepository implements TransactionRepository {
-  _FakeTransactionRepository({required this.transactions});
+  _FakeTransactionRepository({
+    required this.transactions,
+    Map<String, List<TransactionSplit>>? splitsMap,
+  }) : splitsMap = splitsMap ?? {};
 
   final List<CardTransaction> transactions;
+  final Map<String, List<TransactionSplit>> splitsMap;
 
   @override
   Future<Result<TransactionPage>> loadTransactions(TransactionQuery query) async {
@@ -55,7 +59,7 @@ class _FakeTransactionRepository implements TransactionRepository {
   Future<Result<List<TransactionSplit>>> fetchTransactionSplits(
     String transactionId,
   ) async {
-    return Success(const <TransactionSplit>[]);
+    return Success(splitsMap[transactionId] ?? const <TransactionSplit>[]);
   }
 
   @override
@@ -140,26 +144,40 @@ class _FakeHouseholdRepository implements HouseholdRepository {
 }
 
 Future<void> _pumpTransactionsScreen(
-  WidgetTester tester, {
-  required List<HouseholdPerson> people,
-  required CardTransaction transaction,
-}) async {
-   final notifier = TransactionsNotifier(
-     transactionRepository: _FakeTransactionRepository(transactions: [transaction]),
-     householdRepository: _FakeHouseholdRepository(people: people),
-     loadTransactionSplitDraft: LoadTransactionSplitDraft(_FakeTransactionRepository(transactions: [transaction])),
-     saveTransactionSplit: SaveTransactionSplit(_FakeTransactionRepository(transactions: [transaction])),
-   );
-  await notifier.loadAll();
+    WidgetTester tester, {
+    required List<HouseholdPerson> people,
+    required CardTransaction transaction,
+  }) async {
+    final emptySplitsMap = <String, List<TransactionSplit>>{};
+    final notifier = TransactionsNotifier(
+      transactionRepository: _FakeTransactionRepository(
+        transactions: [transaction],
+        splitsMap: emptySplitsMap,
+      ),
+      householdRepository: _FakeHouseholdRepository(people: people),
+      loadTransactionSplitDraft: LoadTransactionSplitDraft(
+        _FakeTransactionRepository(
+          transactions: [transaction],
+          splitsMap: emptySplitsMap,
+        ),
+      ),
+      saveTransactionSplit: SaveTransactionSplit(
+        _FakeTransactionRepository(
+          transactions: [transaction],
+          splitsMap: emptySplitsMap,
+        ),
+      ),
+    );
+    await notifier.loadAll();
 
-  await tester.pumpWidget(
-    ChangeNotifierProvider<TransactionsNotifier>.value(
-      value: notifier,
-      child: const MaterialApp(home: TransactionsScreen()),
-    ),
-  );
-  await tester.pumpAndSettle();
-}
+    await tester.pumpWidget(
+      ChangeNotifierProvider<TransactionsNotifier>.value(
+        value: notifier,
+        child: const MaterialApp(home: TransactionsScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
 
 void main() {
   // A narrow but realistic phone width. The ListTile.trailing contract only
@@ -347,7 +365,87 @@ void main() {
         }
       }
 
+       expect(find.byType(UnifiedSplitSlider), findsOneWidget);
+       expect(tester.takeException(), isNull);
+     },
+   );
+
+  testWidgets(
+    'expanded split section shows stored splits in unified slider',
+    (tester) async {
+      tester.view.physicalSize = phoneSize;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final people = [
+        HouseholdPerson(id: 'p1', displayName: 'Alice', isDefault: true),
+        HouseholdPerson(id: 'p2', displayName: 'Bob', isDefault: false),
+        HouseholdPerson(id: 'p3', displayName: 'Cara', isDefault: false),
+      ];
+      final transaction = CardTransaction(
+        id: 'tx-split',
+        amount: '10.0',
+        currency: 'USD',
+        date: _today(),
+        name: 'Groceries',
+        merchant: 'Store',
+        pending: false,
+        assignmentSource: 'manual',
+        hasSplits: true,
+      );
+
+      final splitsMap = {
+        'tx-split': [
+          TransactionSplit(personId: 'p1', amount: 6.0),
+          TransactionSplit(personId: 'p2', amount: 4.0),
+        ],
+      };
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<TransactionsNotifier>.value(
+          value: TransactionsNotifier(
+            transactionRepository: _FakeTransactionRepository(
+              transactions: [transaction],
+              splitsMap: splitsMap,
+            ),
+            householdRepository: _FakeHouseholdRepository(people: people),
+            loadTransactionSplitDraft: LoadTransactionSplitDraft(
+              _FakeTransactionRepository(
+                transactions: [transaction],
+                splitsMap: splitsMap,
+              ),
+            ),
+            saveTransactionSplit: SaveTransactionSplit(
+              _FakeTransactionRepository(
+                transactions: [transaction],
+                splitsMap: splitsMap,
+              ),
+            ),
+          ),
+          child: const MaterialApp(home: TransactionsScreen()),
+        ),
+      );
+
+      // Wait for initial load
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'Initial load should not throw');
+
+      // Verify the transaction tile is present
+      expect(find.text('Groceries'), findsOneWidget);
+
+      // Find and expand the transaction tile
+      final tileFinder = find.byType(ExpansionTile).first;
+      expect(tileFinder, findsOneWidget);
+      await tester.tap(tileFinder);
+      await tester.pumpAndSettle();
+
+      // Verify the unified split slider is present
       expect(find.byType(UnifiedSplitSlider), findsOneWidget);
+
+      // Get the slider widget and verify its percentages
+      final slider = tester.widget<UnifiedSplitSlider>(find.byType(UnifiedSplitSlider).first);
+      expect(slider.percentages, equals([60, 40, 0])); // Alice 60%, Bob 40%, Cara 0%
+
       expect(tester.takeException(), isNull);
     },
   );

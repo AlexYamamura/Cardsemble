@@ -302,15 +302,17 @@ alter table public.card_events
     references public.device_tokens(id) on delete set null;
 
 create table if not exists public.transaction_assignments (
-    transaction_id text primary key
+    transaction_id text not null
         references public.plaid_transactions(transaction_id) on delete cascade,
     user_id uuid not null references auth.users(id) on delete cascade,
     person_id uuid not null
         references public.household_people(person_id) on delete cascade,
+    amount numeric(12, 2) check (amount is null or amount > 0),
     assignment_source text not null
         check (assignment_source in ('manual', 'wallet_event')),
     event_id text references public.card_events(event_id) on delete set null,
-    updated_at timestamptz not null default now()
+    updated_at timestamptz not null default now(),
+    primary key (transaction_id, person_id)
 );
 
 create index if not exists transaction_assignments_user_person_idx

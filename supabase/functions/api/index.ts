@@ -585,11 +585,13 @@ Deno.serve(async (req) => {
         throw new ApiError(403, "A user-linked device key or Supabase session is required");
       }
       const transactionId = path.split("/")[1];
-      const { data: splits, error } = await supabase
-        .from("transaction_assignments")
-        .select("person_id, amount")
-        .eq("transaction_id", transactionId)
-        .eq("user_id", auth.userId);
+       const { data: splits, error } = await supabase
+         .from("transaction_assignments")
+         .select("person_id, amount")
+         .eq("transaction_id", transactionId)
+         .eq("user_id", auth.userId)
+         .not("amount", "is", null)
+         .gt("amount", 0);
       if (error) throw new ApiError(502, error.message);
       return jsonResponse({
         splits: (splits ?? []).map((s: any) => ({
@@ -640,17 +642,26 @@ Deno.serve(async (req) => {
         });
       }
 
-      const { data: rows, error } = await supabase
-        .from("transaction_assignments")
-        .upsert({
-          transaction_id: transactionId,
-          user_id: auth.userId,
-          person_id: personId,
-          assignment_source: "manual",
-          event_id: null,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "transaction_id" })
-        .select();
+       // Delete any existing assignment for this transaction
+       const { error: deleteError } = await supabase
+         .from("transaction_assignments")
+         .delete()
+         .eq("transaction_id", transactionId)
+         .eq("user_id", auth.userId);
+       if (deleteError) throw new ApiError(502, deleteError.message);
+
+       const { data: rows, error } = await supabase
+         .from("transaction_assignments")
+         .insert({
+           transaction_id: transactionId,
+           user_id: auth.userId,
+           person_id: personId,
+           amount: null,
+           assignment_source: "manual",
+           event_id: null,
+           updated_at: new Date().toISOString(),
+         })
+         .select();
       if (error) throw new ApiError(502, error.message);
       await calculateStatementSummaries(auth.userId);
       return jsonResponse({ ok: true, assignment: rows?.[0] });

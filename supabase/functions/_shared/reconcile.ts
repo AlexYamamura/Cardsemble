@@ -470,13 +470,26 @@ export async function refreshWalletAssignments(userId: string): Promise<number> 
     if (error) throw new Error(`Could not save ambiguous reconciliations: ${error.message}`);
   }
 
-  for (let i = 0; i < updates.length; i += 500) {
-    const batch = updates.slice(i, i + 500);
-    const { error } = await supabase
-      .from("transaction_assignments")
-      .upsert(batch, { onConflict: "transaction_id" });
-    if (error) throw new Error(`Could not save transaction assignments: ${error.message}`);
-  }
+   // Delete existing assignments for the transactions in the batch
+   const transactionIds = updates.map((u) => u.transaction_id);
+   if (transactionIds.length > 0) {
+     const { error: deleteError } = await supabase
+       .from("transaction_assignments")
+       .delete()
+       .in("transaction_id", transactionIds)
+       .eq("user_id", userId);
+     if (deleteError) throw new Error(`Could not delete transaction assignments: ${deleteError.message}`);
+   }
+
+   // Insert wallet_event assignments with amount = null
+   for (let i = 0; i < updates.length; i += 500) {
+     const batch = updates.slice(i, i + 500);
+     const { error } = await supabase
+       .from("transaction_assignments")
+       .insert(batch.map(u => ({ ...u, amount: null })))
+       .error;
+     if (error) throw new Error(`Could not save transaction assignments: ${error.message}`);
+   }
 
   return updates.length;
 }
