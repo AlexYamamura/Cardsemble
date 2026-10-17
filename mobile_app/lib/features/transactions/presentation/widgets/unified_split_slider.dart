@@ -136,131 +136,122 @@ class _UnifiedSplitSliderState extends State<UnifiedSplitSlider> {
       builder: (context, constraints) {
         final double width = constraints.maxWidth;
         const double trackHeight = 40.0;
-        const double thumbSize = 24.0; // visible circle
-        const double thumbHitSize = 32.0; // gesture target
-        final double inset = thumbHitSize / 2; // 16.0
-        final double trackWidth = width - 2 * inset; // width available for the track
+        final double thumbSize = 28.0; // visible circle
+         final double thumbHitSize = 32.0; // gesture target
+         final double trackLeft = thumbHitSize / 2.0; // offset from outer left to start of track
+         final double trackWidth = width - thumbHitSize; // width available for the track
 
         return GestureDetector(
-          onHorizontalDragStart: (details) {
-            final double clickPercent =
-                (details.localPosition.dx - inset) / trackWidth * 100.0;
-            double cumulative = 0.0;
+           onHorizontalDragStart: (details) {
+             final double clickPercent =
+                 (details.localPosition.dx - trackLeft) / trackWidth * 100.0;
+             double cumulative = 0.0;
 
-            for (int i = 0; i < _orderedParticipantIds.length - 1; i++) {
-              cumulative += _percentages[_orderedParticipantIds[i]]!;
-              if ((clickPercent - cumulative).abs() <= 5.0) {
-                _draggingBoundaryIndex = i;
-                _dragStartPosition = details.localPosition;
-                _dragStartCumulative = cumulative;
-                break;
-              }
-            }
-          },
-          onHorizontalDragUpdate: (details) {
-            _handleDragUpdate(details.localPosition, trackWidth, inset);
-          },
+             for (int i = 0; i < _orderedParticipantIds.length - 1; i++) {
+               cumulative += _percentages[_orderedParticipantIds[i]]!;
+               if ((clickPercent - cumulative).abs() <= 5.0) {
+                 _draggingBoundaryIndex = i;
+                 _dragStartPosition = details.localPosition;
+                 _dragStartCumulative = cumulative;
+                 break;
+               }
+             }
+           },
+           onHorizontalDragUpdate: (details) {
+             _handleDragUpdate(details.localPosition, trackWidth, trackLeft);
+           },
           onHorizontalDragEnd: (_) => _handleDragEnd(),
           onHorizontalDragCancel: _handleDragEnd,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // Background track + colored segments, clipped to an oval so
-              // segments never overflow the pill-shaped track corners.
-              Align(
-                alignment: Alignment.center,
-                child: SizedBox(
-                  width: width,
-                  height: trackHeight,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(trackHeight / 2),
-                    child: Container(
-                      width: trackWidth,
-                      height: trackHeight,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[300],
-                        borderRadius: BorderRadius.circular(trackHeight / 2),
-                      ),
-                      child: Stack(
-                        children: [
-                          // Colored segments proportional to each participant's share
-                          for (int i = 0; i < widget.participants.length; i++)
-                            Positioned(
-                              left: (_getCumulativePercentage(i) / 100.0) * trackWidth,
-                              width:
-                                  ((_percentages[widget.participants[i].id] ?? 0.0) /
-                                          100.0) *
-                                      trackWidth,
-                              height: trackHeight,
-                              child: Container(
-                                color: widget.participants[i].color
-                                    .withValues(alpha: 0.3),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+               // Background track + colored segments, clipped to an oval so
+               // segments never overflow the pill-shaped track corners.
+               Positioned(
+                 left: trackLeft,
+                 width: trackWidth,
+                 height: trackHeight,
+                 child: ClipRRect(
+                   borderRadius: BorderRadius.circular(trackHeight / 2),
+                   child: Container(
+                     width: trackWidth,
+                     height: trackHeight,
+                     decoration: BoxDecoration(
+                       color: Colors.grey[300],
+                       borderRadius: BorderRadius.circular(trackHeight / 2),
+                     ),
+                     child: Stack(
+                       children: [
+                         // Colored segments proportional to each participant's share
+                         for (int i = 0; i < widget.participants.length; i++)
+                           Positioned(
+                             left: (_getCumulativePercentage(i) / 100.0) * trackWidth,
+                             width:
+                                 ((_percentages[widget.participants[i].id] ?? 0.0) /
+                                         100.0) *
+                                     trackWidth,
+                             height: trackHeight,
+                             child: Container(
+                               color: widget.participants[i].color
+                                   .withValues(alpha: 0.3),
+                             ),
+                           ),
+                       ],
+                     ),
+                   ),
+                 ),
+               ),
 
-              // Draggable boundary handles rendered outside the clip so the
-              // circular thumbs are never clipped at 0%/100%.
-              for (int i = 0; i < widget.participants.length - 1; i++)
-                Positioned(
-                  left: inset +
-                      (_getCumulativePercentage(i + 1) / 100.0) * trackWidth -
-                      thumbHitSize / 2,
-                  width: thumbHitSize,
-                  height: trackHeight,
-                  child: GestureDetector(
-                    key: ValueKey('split-handle-$i'),
-                    onHorizontalDragStart: (details) {
-                      _draggingBoundaryIndex = i;
-                      _dragStartPosition = details.localPosition;
-                      _dragStartCumulative = _getCumulativePercentage(i + 1);
-                    },
-                    onHorizontalDragUpdate: (details) {
-                      _handleDragUpdate(details.localPosition, trackWidth, inset);
-                    },
-                    onHorizontalDragEnd: (_) => _handleDragEnd(),
-                    onHorizontalDragCancel: _handleDragEnd,
-                    child: Stack(
-                      children: [
-                        // Invisible hit target for dragging
-                        Positioned.fill(
-                          child: Container(
-                            color: Colors.transparent,
-                          ),
-                        ),
-                        // Visible thumb (circle)
-                        Center(
-                          child: Container(
-                            key: ValueKey('split-handle-thumb-$i'),
-                            width: thumbSize,
-                            height: thumbSize,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.white,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.15),
-                                  blurRadius: 2,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                            child: const Icon(
-                              Icons.drag_handle,
-                              color: Colors.blue,
-                              size: 14,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+               // Draggable boundary handles rendered outside the clip so the
+               // circular thumbs are never clipped at 0%/100%.
+               for (int i = 0; i < widget.participants.length - 1; i++)
+                 Positioned(
+                   left: (_getCumulativePercentage(i + 1) / 100.0) * trackWidth,
+                   width: thumbHitSize,
+                   height: trackHeight,
+                   child: GestureDetector(
+                     key: ValueKey('split-handle-$i'),
+                     onHorizontalDragStart: (details) {
+                       _draggingBoundaryIndex = i;
+                       _dragStartPosition = details.localPosition;
+                       _dragStartCumulative = _getCumulativePercentage(i + 1);
+                     },
+                     onHorizontalDragUpdate: (details) {
+                       _handleDragUpdate(details.localPosition, trackWidth, trackLeft);
+                     },
+                     onHorizontalDragEnd: (_) => _handleDragEnd(),
+                     onHorizontalDragCancel: _handleDragEnd,
+                     child: Stack(
+                       children: [
+                         // Invisible hit target for dragging
+                         Positioned.fill(
+                           child: Container(
+                             color: Colors.transparent,
+                           ),
+                         ),
+                         // Visible thumb (circle)
+                         Center(
+                           child: Container(
+                             key: ValueKey('split-handle-thumb-$i'),
+                             width: thumbSize,
+                             height: thumbSize,
+                             decoration: BoxDecoration(
+                               shape: BoxShape.circle,
+                               color: Colors.white,
+                               boxShadow: [
+                                 BoxShadow(
+                                   color: Colors.black.withValues(alpha: 0.15),
+                                   blurRadius: 2,
+                                   offset: const Offset(0, 1),
+                                 ),
+                               ],
+                             ),
+                           ),
+                         ),
+                       ],
+                     ),
+                   ),
+                 ),
             ],
           ),
         );

@@ -926,40 +926,23 @@ class _TransactionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final assignedPerson = people.firstWhere(
-      (p) => p.id == transaction.assignedPersonId,
-      orElse: () =>
-          HouseholdPerson(id: '', displayName: 'Unassigned', isDefault: false),
-    );
+     final assignedPerson = people.firstWhere(
+       (p) => p.id == transaction.assignedPersonId,
+       orElse: () =>
+           HouseholdPerson(id: '', displayName: 'Unassigned', isDefault: false),
+     );
 
-    final assigneeColor = transaction.assignedPersonId == null
-        ? theme.colorScheme.primary
-        : _personColor(transaction.assignedPersonId!, people);
+     final assigneeColor = transaction.assignedPersonId == null
+         ? theme.colorScheme.primary
+         : _personColor(transaction.assignedPersonId!, people);
 
-     final personName = transaction.hasSplits
-         ? 'SPLIT'
-         : assignedPerson.displayName.isEmpty
-             ? 'Unassigned'
-             : assignedPerson.displayName;
-    final statusColor = transaction.pending
-        ? AppColors.pendingBg
-        : AppColors.sageGreen;
+      final String label = transaction.hasSplits ? 'Split' : assignedPerson.displayName;
 
-    void openPersonSelector() {
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => _PersonSelectorSheet(
-          title: 'Assign to',
-          currentPersonId: transaction.assignedPersonId,
-          people: people,
-          onSelected: (personId) => onAssign(personId),
-        ),
-      );
-    }
+     final statusColor = transaction.pending
+         ? AppColors.pendingBg
+          : AppColors.sageGreen;
 
-    return Card(
+     return Card(
       color: Colors.white,
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
@@ -1014,43 +997,113 @@ class _TransactionTile extends StatelessWidget {
         // `trailing` means the fixed-size amount chip can remain the only
         // trailing child, so ListTile's "trailing consumes the entire tile
         // width" contract always holds.
-        subtitle: Align(
-          alignment: Alignment.centerLeft,
-          child: InkWell(
-            onTap: openPersonSelector,
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              margin: const EdgeInsets.only(top: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                // alpha takes 0.0-1.0; the values are legacy 0-255 bytes.
-                color: assigneeColor.withValues(alpha: 24 / 255),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: assigneeColor.withValues(alpha: 150 / 255),
-                  width: 1,
-                ),
-                // Subtle shadow to reinforce the "raised" tappable cue
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 2,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: Text(
-                personName,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: assigneeColor,
-                  fontWeight: FontWeight.w600,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+          subtitle: Align(
+            alignment: Alignment.centerLeft,
+             child: InkWell(
+               onTap: () {
+                 final notifier = context.read<TransactionsNotifier>();
+                 final DateTime? lastUpdated = notifier.lastUpdated;
+                 final String updatedText = lastUpdated != null
+                     ? DateFormat.yMMMd().format(lastUpdated)
+                     : '';
+                 final String byWho = transaction.assignmentSource;
+                 showModalBottomSheet(
+                   context: context,
+                   isScrollControlled: true,
+                   backgroundColor: Colors.transparent,
+                   builder: (_) => Container(
+                     decoration: BoxDecoration(
+                       color: Theme.of(context).colorScheme.surface,
+                       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                     ),
+                     child: SafeArea(
+                       child: Column(
+                         mainAxisSize: MainAxisSize.min,
+                         children: [
+                           Padding(
+                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                             child: Row(
+                               children: [
+                                 Expanded(
+                                   child: Text(
+                                     label,
+                                     style: theme.textTheme.titleLarge?.copyWith(
+                                       fontWeight: FontWeight.w700,
+                                     ),
+                                   ),
+                                 ),
+                                 IconButton(
+                                   tooltip: 'Close',
+                                   onPressed: () => Navigator.pop(context),
+                                   icon: const Icon(Icons.close_rounded),
+                                 ),
+                               ],
+                             ),
+                           ),
+                           const Divider(height: 1),
+                           Padding(
+                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                             child: Column(
+                               crossAxisAlignment: CrossAxisAlignment.start,
+                               children: [
+                                 Text(
+                                   'Last updated: $updatedText',
+                                   style: theme.textTheme.bodyMedium,
+                                 ),
+                                 const SizedBox(height: 4),
+                                 Text(
+                                   'Edited by: $byWho',
+                                   style: theme.textTheme.bodyMedium,
+                                 ),
+                               ],
+                             ),
+                           ),
+                           const Divider(height: 1),
+                           Padding(
+                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                             child: SwitchListTile(
+                               contentPadding: EdgeInsets.zero,
+                               value: transaction.householdVisible,
+                               onChanged: (value) => onToggleHouseholdVisible(value),
+                               title: const Text('Visible to household'),
+                               subtitle: const Text('Shared with other household members'),
+                             ),
+                           ),
+                         ],
+                       ),
+                     ),
+                   ),
+                 );
+               },
+               borderRadius: BorderRadius.circular(8),
+               child: Container(
+                 margin: const EdgeInsets.only(top: 4),
+                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                 decoration: BoxDecoration(
+                   color: assigneeColor.withValues(alpha: 24 / 255),
+                   borderRadius: BorderRadius.circular(8),
+                   border: Border.all(
+                     color: assigneeColor.withValues(alpha: 150 / 255),
+                     width: 1,
+                   ),
+                   boxShadow: [
+                     BoxShadow(
+                       color: Colors.black.withValues(alpha: 0.08),
+                       blurRadius: 2,
+                       offset: const Offset(0, 1),
+                     ),
+                   ],
+                 ),
+                 child: Text(
+                   label,
+                   style: theme.textTheme.bodySmall?.copyWith(
+                     color: assigneeColor,
+                     fontWeight: FontWeight.w600,
+                   ),
+                 ),
+               ),
+             ),
           ),
-        ),
         // Fixed-size amount chip only, so the ListTile trailing contract holds.
         trailing: _TransactionAmountChip(
           amount: formatCurrency(
@@ -1059,45 +1112,38 @@ class _TransactionTile extends StatelessWidget {
           ),
           pending: transaction.pending,
         ),
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  transaction.name,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: transaction.householdVisible,
-                  onChanged: (value) => onToggleHouseholdVisible(value),
-                  title: const Text('Visible to household'),
-                  subtitle: const Text('Shared with other household members'),
-                ),
-                const SizedBox(height: 8),
-                if (people.length > 1) ...[
-                  const Text(
-                    'Split:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  _SplitSection(
-                    transaction: transaction,
-                    people: people,
-                    onSplit: onSplit,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
+         children: [
+           Padding(
+             padding: const EdgeInsets.all(16),
+             child: Column(
+               crossAxisAlignment: CrossAxisAlignment.stretch,
+               children: [
+                 Text(
+                   transaction.name,
+                   style: theme.textTheme.titleLarge?.copyWith(
+                     fontWeight: FontWeight.w700,
+                   ),
+                   maxLines: 2,
+                   overflow: TextOverflow.ellipsis,
+                 ),
+                 const SizedBox(height: 12),
+                 const SizedBox(height: 8),
+                 if (people.length > 1) ...[
+                   const Text(
+                     'Split:',
+                     style: TextStyle(fontWeight: FontWeight.bold),
+                   ),
+                   const SizedBox(height: 8),
+                   _SplitSection(
+                     transaction: transaction,
+                     people: people,
+                     onSplit: onSplit,
+                   ),
+                 ],
+               ],
+             ),
+           ),
+         ],
       ),
     );
   }
@@ -1345,17 +1391,7 @@ class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> 
             },
           ),
         ),
-        const SizedBox(height: 12),
-        // Total display
-        Text(
-          'Total: ${_percentages.values.fold(0.0, (a, b) => a + b).toStringAsFixed(1)}% '
-          '(${formatCurrency((_percentages.values.fold(0.0, (a, b) => a + b) / 100.0) * widget.transaction.amountValue.abs(), widget.transaction.currency)})',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
-        ),
-        const SizedBox(height: 12),
+         const SizedBox(height: 24),
         // Save button
         FilledButton(
           onPressed: _isLoading ? null : _saveSplit,
@@ -1385,24 +1421,25 @@ class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Person name with bold style, truncated when too long
-        Text(
-          person.displayName,
-          key: ValueKey('split-name-${person.id}'),
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: personColor,
-                fontWeight: FontWeight.w800,
-              ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+         // Person name with bold style, truncated when too long
+         Text(
+           person.displayName,
+           key: ValueKey('split-name-${person.id}'),
+           style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                 color: personColor,
+                 fontWeight: FontWeight.w800,
+                 fontSize: 18,
+               ),
+           maxLines: 1,
+           overflow: TextOverflow.ellipsis,
+         ),
         const SizedBox(height: 4),
         // Enlarged price alongside the percentage
         Text(
           formatCurrency(amount, widget.transaction.currency),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                fontSize: 20,
               ),
         ),
         const SizedBox(height: 2),
@@ -1410,6 +1447,8 @@ class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> 
           '${percentage.toStringAsFixed(1)}%',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: personColor,
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
               ),
         ),
       ],
