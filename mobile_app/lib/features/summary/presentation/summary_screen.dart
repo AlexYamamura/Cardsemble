@@ -39,12 +39,17 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
   @override
   void initState() {
     super.initState();
-    _summaryRange = _currentMonthRange();
     _accountsNotifier = context.read<AccountsNotifier>();
     _accountsNotifier!.addListener(_onAccountsChanged);
+    // Use the shared notifier's date range as the single source of truth so the
+    // summary and transactions tabs stay in sync. This avoids a duplicate list
+    // fetch and setState during initialization; loadAll() already fetched the
+    // list for this range, so we only load the summary slice here.
+    final notifier = context.read<TransactionsNotifier>();
+    _summaryRange = notifier.dateRange ?? _currentMonthRange();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<TransactionsNotifier>().loadSummaryTransactions(_summaryRange);
+      notifier.loadSummaryTransactions(_summaryRange);
       _accountsNotifier!.loadConnections();
       _accountsNotifier!.loadStatementCycles();
     });
@@ -66,11 +71,7 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
   }
 
   DateTimeRange _currentMonthRange() {
-    final today = DateUtils.dateOnly(DateTime.now());
-    return DateTimeRange(
-      start: DateTime(today.year, today.month),
-      end: today,
-    );
+    return monthRange(DateTime.now());
   }
 
   List<DateTime> _quickMonths() {
@@ -91,12 +92,7 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
   }
 
   void _selectMonth(DateTime month) {
-    final today = DateUtils.dateOnly(DateTime.now());
-    final monthEnd = DateTime(month.year, month.month + 1, 0);
-    final range = DateTimeRange(
-      start: DateTime(month.year, month.month),
-      end: monthEnd.isAfter(today) ? today : monthEnd,
-    );
+    final range = monthRange(month);
     setState(() {
       _summaryRange = range;
     });

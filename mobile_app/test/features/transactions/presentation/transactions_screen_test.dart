@@ -370,5 +370,42 @@ void main() {
      },
    );
 
+  testWidgets(
+    'shows the current-month date chip on first load',
+    (tester) async {
+      tester.view.physicalSize = phoneSize;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      const people = [
+        HouseholdPerson(id: 'p1', displayName: 'Me', isDefault: true),
+      ];
+      final transaction = CardTransaction(
+        id: 'tx-1',
+        amount: '-42.50',
+        currency: 'USD',
+        date: _today(),
+        name: 'Coffee',
+        merchant: 'Cafe',
+        pending: false,
+        assignmentSource: 'manual',
+        assignedPersonId: 'p1',
+      );
+
+      await _pumpTransactionsScreen(
+        tester,
+        people: people,
+        transaction: transaction,
+      );
+
+      // The shared notifier defaults to the current month, so the date filter
+      // is active from the first frame and the date chip / Clear all control
+      // renders without the user touching any filter.
+      expect(find.text('Clear all'), findsOneWidget);
+      expect(find.byType(InputChip), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
 
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cardsemble/core/utils/date_utils.dart';
 import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
 import 'package:cardsemble/features/transactions/data/transaction_cache.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
@@ -72,7 +73,10 @@ class TransactionsNotifier extends ChangeNotifier {
   DateTime? _lastUpdated;
   CsvImportPreview? _csvPreview;
   bool _isPreviewing = false;
-  DateTimeRange? _dateRange;
+  // Default filter: current month-to-date. Owned here so the transactions tab
+  // has a date filter (and therefore a visible date chip) without depending on
+  // the summary tab's lifecycle or post-frame callback ordering.
+  DateTimeRange? _dateRange = monthRange(DateTime.now());
   String? _selectedAccountId;
   String? _selectedPersonId;
 
@@ -101,19 +105,13 @@ class TransactionsNotifier extends ChangeNotifier {
   bool get isPreviewing => _isPreviewing;
   DateTimeRange? get dateRange => _dateRange;
 
-  DateTimeRange get _currentMonthRange {
-     final now = DateTime.now();
-     final start = DateTime(now.year, now.month, 1);
-     final end = DateTime(now.year, now.month + 1, 0);
-     return DateTimeRange(start: start, end: end);
-   }
+  DateTimeRange get _currentMonthRange => monthRange(DateTime.now());
 
-   DateTimeRange get effectiveDateRange => _dateRange ?? _currentMonthRange;
-   String? get selectedAccountId => _selectedAccountId;
+  String? get selectedAccountId => _selectedAccountId;
   String? get selectedPersonId => _selectedPersonId;
 
   List<CardTransaction> get filteredTransactions {
-    final effectiveDateRange = _dateRange ?? _currentMonthRange;
+    final effectiveDateRange = _dateRange;
     return _transactions.where((tx) {
       // Only show charges that are due / not paid. Card payments to the card
       // itself (isPayment) are not spending, so they are excluded here and the
@@ -121,12 +119,13 @@ class TransactionsNotifier extends ChangeNotifier {
       if (tx.isPayment) return false;
       if (_selectedAccountId != null && tx.accountId != _selectedAccountId) return false;
       if (_selectedPersonId != null && tx.assignedPersonId != _selectedPersonId) return false;
-         if (tx.date == null) return false;
-         final txDate = tx.parsedDate!;
-         if (txDate.isBefore(effectiveDateRange.start.subtract(const Duration(days: 1))) ||
-             txDate.isAfter(effectiveDateRange.end.add(const Duration(days: 1)))) {
-           return false;
-         }
+      if (tx.date == null) return false;
+      final txDate = tx.parsedDate!;
+      if (effectiveDateRange != null &&
+          (txDate.isBefore(effectiveDateRange.start.subtract(const Duration(days: 1))) ||
+          txDate.isAfter(effectiveDateRange.end.add(const Duration(days: 1))))) {
+        return false;
+      }
       return true;
     }).toList();
   }
@@ -170,6 +169,10 @@ class TransactionsNotifier extends ChangeNotifier {
   }
 
   void setDateRange(DateTimeRange? range, {bool reloadList = true}) {
+    // Re-selecting the same range is a no-op: it avoids redundant reloads and
+    // keeps the active-filter chip stable when the user taps an already-active
+    // month chip. `DateTimeRange` implements value equality on start/end.
+    if (_dateRange == range) return;
     _dateRange = range;
     notifyListeners();
     if (reloadList) _scheduleListReload();
@@ -182,6 +185,9 @@ class TransactionsNotifier extends ChangeNotifier {
   }
 
   void setAccountFilter(String? accountId) {
+    // Re-selecting the same account (including clearing an already-null one)
+    // must not wipe the date filter or trigger a redundant reload.
+    if (_selectedAccountId == accountId) return;
     // Switching the account chip must not compound with a stale date filter
     // (e.g. one synced from the summary tab). Clear the date range so the new
     // chip applies fresh from the main list for the current month.
@@ -192,6 +198,9 @@ class TransactionsNotifier extends ChangeNotifier {
   }
 
   void setPersonFilter(String? personId) {
+    // Re-selecting the same person (including clearing an already-null one)
+    // must not wipe the date filter or trigger a redundant reload.
+    if (_selectedPersonId == personId) return;
     // Switching the person chip must not compound with a stale date filter
     // (e.g. one synced from the summary tab). Clear the date range so the new
     // chip applies fresh from the main list for the current month.

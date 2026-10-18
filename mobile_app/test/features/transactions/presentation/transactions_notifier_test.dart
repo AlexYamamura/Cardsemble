@@ -323,6 +323,20 @@ void main() {
     expect(ok, isFalse);
     expect(notifier.transactions.single.householdVisible, isTrue);
   });
+
+  test('defaults the shared date filter to current month-to-date', () {
+    final notifier = TransactionsNotifier(
+      transactionRepository: FakeTransactionRepository(),
+      householdRepository: FakeHouseholdRepository(),
+    );
+
+    final today = dateOnly(DateTime.now());
+
+    expect(notifier.dateRange, isNotNull);
+    expect(notifier.dateRange!.start, DateTime(today.year, today.month));
+    expect(notifier.dateRange!.end, today);
+    expect(notifier.hasActiveFilters, isTrue);
+  });
 }
 
 class _FailingVisibilityRepository extends FakeTransactionRepository {

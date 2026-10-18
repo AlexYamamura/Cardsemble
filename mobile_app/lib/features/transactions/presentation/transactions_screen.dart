@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:cardsemble/core/error/failure.dart';
+import 'package:cardsemble/core/utils/date_utils.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/transactions/presentation/widgets/pay_action_sheet.dart';
@@ -542,10 +543,10 @@ class _TransactionFilterBar extends StatelessWidget {
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () {
-                              onDateRangeChanged(null);
+                              onDateRangeChanged(monthRange(DateTime.now()));
                               Navigator.pop(context);
                             },
-                            child: const Text('All time'),
+                            child: const Text('This month'),
                           ),
                         ),
                         const SizedBox(width: 12),
