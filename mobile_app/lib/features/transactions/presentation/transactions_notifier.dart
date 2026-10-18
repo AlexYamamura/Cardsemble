@@ -54,6 +54,18 @@ class TransactionsNotifier extends ChangeNotifier {
   /// Page size for the transactions list. The server caps this at 500.
   static const int _pageSize = 100;
 
+  /// When the user clears all date chips, bound the load to a recent trailing
+  /// window instead of downloading the entire transaction history.
+  static const int _defaultHistoryDays = 60;
+
+  /// Bounded window used when [dateRange] is null: roughly the last 60 days
+  /// ending now. Keeps the server query bounded while still paginating normally.
+  DateTimeRange get _defaultHistoryRange {
+    final end = DateTime.now();
+    final start = end.subtract(const Duration(days: _defaultHistoryDays));
+    return DateTimeRange(start: start, end: end);
+  }
+
   // Transactions tab (paged, server-filtered).
   List<CardTransaction> _transactions = [];
   bool _isLoading = false;
@@ -104,8 +116,6 @@ class TransactionsNotifier extends ChangeNotifier {
   CsvImportPreview? get csvPreview => _csvPreview;
   bool get isPreviewing => _isPreviewing;
   DateTimeRange? get dateRange => _dateRange;
-
-  DateTimeRange get _currentMonthRange => monthRange(DateTime.now());
 
   String? get selectedAccountId => _selectedAccountId;
   String? get selectedPersonId => _selectedPersonId;
@@ -221,14 +231,19 @@ class TransactionsNotifier extends ChangeNotifier {
   bool get hasActiveFilters => _selectedAccountId != null || _selectedPersonId != null || _dateRange != null;
 
    TransactionQuery _queryFor({required int offset}) {
-     final effectiveDateRange = _dateRange ?? _currentMonthRange;
+     // A null dateRange means "no explicit date chip": bound the load to a recent
+     // trailing window instead of downloading the entire transaction history. The
+     // repository emits date_from/date_to and the SQL edge function applies them,
+     // so only this window is returned, paginated by offset/limit with a
+     // deterministic date desc, transaction_id asc order.
+     final effectiveRange = _dateRange ?? _defaultHistoryRange;
      return TransactionQuery(
        limit: _pageSize,
        offset: offset,
-        accountId: _selectedAccountId,
-        dateFrom: effectiveDateRange.start,
-        dateTo: effectiveDateRange.end,
-      );
+       accountId: _selectedAccountId,
+       dateFrom: effectiveRange.start,
+       dateTo: effectiveRange.end,
+     );
    }
 
   List<SummaryRow> get spendingByAccount {
