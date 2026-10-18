@@ -1,0 +1,364 @@
+# Cardsemble Agent Guide
+
+Cardsemble is a Flutter household credit-card tracker backed by a Supabase Edge Function, Supabase Postgres/RLS, and Plaid. The app captures Google Wallet notifications on Android (and accepts external card events from an iPhone Shortcut), syncs Plaid transactions, lets people assign/split charges, and shows spending summaries.
+
+This file is a navigation map, not a specification. Verify behavior in the cited source before changing it. Last inspected against the working tree on 2026-10-18.
+
+## Repository Map
+
+| Path | Purpose |
+|---|---|
+| `mobile_app/` | Flutter app. Run all Flutter commands from this directory. |
+| `mobile_app/lib/main.dart` | Minimal entry point; runs `CardsembleApp`. |
+| `mobile_app/lib/app/` | App bootstrap (`app.dart`), environment constants (`config/env.dart`), and the actual shell/navigation (`router/app_router.dart`, which contains `MainTabs`, not a `go_router` table). |
+| `mobile_app/lib/core/` | Cross-cutting layers: dependency injection, Supabase client, authenticated HTTP client, `Result`/`Failure` types, date/currency helpers, external-app launcher. |
+| `mobile_app/lib/features/<feature>/domain/` | Entities, repository interfaces, use cases, split arithmetic. Pure Dart; no Flutter UI except `DateTimeRange` in transaction queries. |
+| `mobile_app/lib/features/<feature>/data/` | Repository implementations, direct Supabase queries, and `SharedPreferences` cache. |
+| `mobile_app/lib/features/<feature>/presentation/` | `ChangeNotifier` state holders and screens/widgets. |
+| `mobile_app/lib/features/` | Features: `auth`, `household`, `transactions`, `summary`, `accounts`, `card_events`, `device_capture`. |
+| `mobile_app/test/` | Flutter unit/widget tests. No `integration_test/` directory exists. |
+| `mobile_app/android/` | Android host, notification-listener capture service, Gradle config, and instrumented parser tests. |
+| `mobile_app/ios/`, `web/`, `windows/`, etc. | Platform scaffolds. Native capture is implemented only for Android. |
+| `supabase/functions/api/` | Single Deno Edge Function serving the app API (`index.ts`). |
+| `supabase/functions/_shared/` | Shared backend modules: auth/device tokens, Plaid, reconciliation/statement math, CSV import, types, service-role Supabase client. |
+| `supabase/migrations/` | Incremental schema, grant, and RLS migrations. They assume the base tables already exist. |
+| `supabase/config.toml` | Local Supabase/function configuration. `functions.api` has `verify_jwt = false`; the function authenticates requests itself. |
+| `card-events-api/` | Legacy FastAPI service plus `card_events.sql`, which is the canonical full base schema/policies for the Supabase tables. The Edge Function has replaced runtime use of the FastAPI app. |
+| Root Python files (`cloud_store.py`, `analyze_csv.py`, `transactions.db`) | Developer/legacy utilities and local data. Not imported by the Flutter app. |
+
+Flutter dependencies declared in `mobile_app/pubspec.yaml` include `provider`, `supabase_flutter`, `http`, `shared_preferences`, `crypto`, `file_picker`, `mobile_scanner`, `qr_flutter`, `android_intent_plus`, `url_launcher`, `plaid_flutter`, and `go_router`. `plaid_flutter` and `go_router` are currently unused in `mobile_app/lib/`.
+
+## Key Files and Functions
+
+### App shell, core, and transactions
+
+| File | Important symbols | Responsibility / when to inspect | Inspect together with |
+|---|---|---|---|
+| `mobile_app/lib/app/app.dart` | `CardsembleApp`, `_CardsembleAppState._initialize`, `_theme` | Fetches `GET {apiBaseUrl}/api/public-config`, initializes Supabase/DI, installs all `ChangeNotifier` providers, wraps the shell in `AuthWrapper`. Change here for startup/provider wiring. | `app/config/env.dart`, `core/di/service_locator.dart`, `auth/presentation/auth_wrapper.dart` |
+| `mobile_app/lib/app/config/env.dart` | `apiBaseUrl`, `oauthRedirectUrl`, `settingsReviewedKey` | Compile-time API base (`CARD_EVENTS_API_URL`, default Supabase `.../functions/v1/api`) and OAuth redirect. | `app.dart`, `auth_notifier.dart`, `app_router.dart` |
+| `mobile_app/lib/app/router/app_router.dart` | `MainTabs`, `_MainTabsState`, `_AnimatedTabBar`, `_buildSettingsOverlay`, `_autoConfigureStep1`, `_showFirstRunSettings` | The real app shell: `PageView` tabs Summary/Transactions/Events/People, custom bottom bar, first-run capture setup overlay, settings overlay. `_autoConfigureStep1` creates a device token and configures native capture. | `summary_screen.dart`, `transactions_screen.dart`, `card_events_screen.dart`, `people_screen.dart`, `DeviceCaptureNotifier` |
+| `mobile_app/lib/core/di/service_locator.dart` | `ServiceLocator`, `sl`, `initialize`, `registerFactory`, `get` | Hand-rolled singleton/factory registry. `initialize` creates `ApiClient`, Supabase, repositories, notifiers, and split use cases. Factories are cached as singletons on first `get`. | All repository/notifier constructors; `app.dart` |
+| `mobile_app/lib/core/network/api_client.dart` | `ApiClient`, `get/post/patch/delete`, `safeGet/safePost/safePatch/safeDelete`, `extractRecords` | Adds the Supabase bearer token, maps non-2xx responses to `NetworkException` (using the JSON `detail` field), and converts exceptions into `Result` failures. | `core/error/failure.dart`, all `*_repository_impl.dart`, `supabase/functions/api/index.ts` |
+| `mobile_app/lib/core/error/failure.dart` | `Result<T>`, `Success`, `FailureResult`, `Failure` subclasses, `ResultExtensions.map/flatMap` | Error/result contract used by every repository and notifier. Preserve this API when changing service boundaries. | repository implementations, notifiers |
+| `mobile_app/lib/core/database/supabase_client.dart` | `AppSupabaseClient.initialize`, `instance`, `client`, `auth`, `database` | Initializes the Supabase Flutter singleton and exposes auth/database/realtime/storage/functions. | `app.dart`, direct-Supabase repositories |
+| `mobile_app/lib/features/transactions/domain/entities/transaction.dart` | `CardTransaction`, `TransactionAssignment`, `TransactionQuery`, `TransactionPage`, `TransactionSplit`, `CsvImportRow`, `CsvImportPreview*`, `CsvImportResult`, `CsvImportHistory` | Wire/domain models for the ledger, assignments, splits, and CSV import. `CardTransaction.fromJson` defines the exact server field names. | repository impl, notifier, cache, summary/transactions screens |
+| `mobile_app/lib/features/transactions/domain/transaction_repository.dart` | `TransactionRepository` | Repository interface for loading the ledger, assignments/splits, visibility, and CSV import. | `transaction_repository_impl.dart`, notifier, use cases |
+| `mobile_app/lib/features/transactions/data/transaction_repository_impl.dart` | `loadTransactions`, `loadAccounts`, `assignTransaction`, `assignTransactionSplit`, `fetchTransactionSplits`, `setHouseholdVisible`, `previewCsvImport`, `confirmCsvImport`, `loadCsvImportHistory` | Maps `TransactionRepository` calls to Edge Function routes and parses responses. Most routes are under `/api/plaid-transactions`, `/api/csv-import`, and `/api/owed`. | `supabase/functions/api/index.ts`, `transaction.dart`, tests |
+| `mobile_app/lib/features/transactions/presentation/transactions_notifier.dart` | `TransactionsNotifier`, `SummaryRow`, `loadAll`, `_runLoadAll`, `loadTransactions`, `loadMoreTransactions`, `loadSummaryTransactions`, `loadPeople`, `loadAccounts`, `assignTransaction`, `saveTransactionSplit`, `setHouseholdVisible`, `loadSplitDraft`, `filteredTransactions`, `filteredTotalsByCurrency`, `refresh` | Single owner of ledger list, summary list, date/account/person filters, split-draft cache, and cached people/accounts. Contains generation counters and request coalescing. Start here for most transaction-state changes. | screen, summary, cache, split use cases, repo |
+| `mobile_app/lib/features/transactions/presentation/transactions_screen.dart` | `TransactionsScreen`, `_TransactionFilterBar`, `_TransactionTile`, `_SplitSection`, `_UnifiedSplitSliderBuilder`, `_runAssignment`, `_runSplit`, `_runVisibility`, `_refresh` | Ledger UI: filters, date chips, assignment selector, household-visibility switch, expandable split editor, paging trigger. | notifier, `split_math.dart`, `unified_split_slider.dart` |
+| `mobile_app/lib/features/transactions/domain/split_math.dart` | `equalSplitPercentages`, `percentagesFromExistingSplits`, `moveBoundary`, `snapToGuideline`, `percentagesToCents` | Pure split arithmetic. `percentagesToCents` is the cent-exact authority used before persistence. | split use cases, `_SplitSection`, `split_math_test.dart` |
+| `mobile_app/lib/features/transactions/domain/use_cases/load_transaction_split_draft.dart` | `LoadTransactionSplitDraft.call` | Fetches existing splits; converts to normalized percentages, falling back to equal split when absent/invalid. | repo `fetchTransactionSplits`, `split_math.dart` |
+| `mobile_app/lib/features/transactions/domain/use_cases/save_transaction_split.dart` | `SaveTransactionSplit.call` | Validates participants, 100% sum, positive total, and exact cent totals, then persists splits. | repo `assignTransactionSplit`, `split_math.dart` |
+| `mobile_app/lib/features/transactions/data/transaction_cache.dart` | `TransactionCache`, `TransactionCacheSnapshot` | Persists people/accounts/ledger/summary to `SharedPreferences` for first-frame hydration. Keys are constant and not user-scoped. | notifier `_hydrateFromCache`/`_writeCache`, `clearCache` |
+| `mobile_app/lib/features/transactions/presentation/widgets/unified_split_slider.dart` | `UnifiedSplitSlider`, `ParticipantInfo`, `_handleDragUpdate` | Drag boundaries for 2-4 participants, snapping to 25/50/75 and keeping the total at 100%. | `split_math.dart`, `_SplitSection` |
+| `mobile_app/lib/features/transactions/presentation/widgets/pay_action_sheet.dart` | `PayButton`, `_showPayActionSheet`, `_handlePress`, `_handleCopy` | Opens Fidelity/Chase/Venmo apps with the filtered amount or copies the amount. No payment API is involved. | `TransactionsNotifier.filteredTotal`, `core/services/external_app_launcher.dart` |
+
+### Summary, household, accounts, auth, events, capture
+
+| File | Important symbols | Responsibility / when to inspect | Inspect together with |
+|---|---|---|---|
+| `mobile_app/lib/features/summary/presentation/summary_screen.dart` | `SummaryScreen`, `_buildSummaryContent`, `_selectMonth`, `_chooseSummaryRange`, `_drilldownIntoTransactions`, `_editCardName`, `_importCsv`, `_showImportPreviewDialog`, `_refresh` | Monthly spending dashboard and CSV import entry point. Computes local totals from `summaryTransactions` (positive, posted, non-payment charges), drills into the Transactions tab by setting filters. | notifier, accounts, CSV backend, transaction repo |
+| `mobile_app/lib/features/household/domain/entities/household.dart` | `HouseholdPerson`, `HouseholdMember`, `JoinHouseholdResult` | Person/member models. `HouseholdPerson.fromJson` accepts `person_id` or `id`. | household repo/notifier, people screen, device capture |
+| `mobile_app/lib/features/household/domain/household_repository.dart` | `HouseholdRepository` | Interface for people CRUD, member listing/addition, invite-code join. | `household_repository_impl.dart` |
+| `mobile_app/lib/features/household/data/household_repository_impl.dart` | `loadPeople`, `createPerson`, `updatePerson`, `deletePerson`, `loadMembers`, `addMember`, `joinByInviteCode` | Calls `/api/household/people` and `/api/household/members*` through `ApiClient`. | `supabase/functions/api/index.ts` household routes |
+| `mobile_app/lib/features/household/presentation/household_notifier.dart` | `HouseholdNotifier`, `loadPeople`, `loadMembers`, `createPerson`, `updatePerson`, `deletePerson`, `addMember`, `joinByInviteCode`, `filteredPeople` | Owns a separate people/members list used by People/Members/Invite screens. Mutations do not automatically refresh `TransactionsNotifier.people` or `DeviceCaptureNotifier.people`. | people/members/invite screens, transactions notifier |
+| `mobile_app/lib/features/household/presentation/people_screen.dart` | `PeopleScreen`, `_buildQrPlaceholder`, `_scanQrCode`, `_processScannedCode`, `_showAddPersonDialog`, `_setDefault` | Manage household people. QR flow first tries `addMember(scannedCode)`, then `joinByInviteCode(scannedCode)`. | household notifier/repository, `mobile_scanner` |
+| `mobile_app/lib/features/household/presentation/members_screen.dart` | `MembersScreen` | Lists members and adds by raw user ID. Not instantiated anywhere in the inspected app. | household notifier/repository |
+| `mobile_app/lib/features/household/presentation/invite_screen.dart` | `InviteScreen` | Form to join by invite code. Not instantiated anywhere in the inspected app. | household notifier/repository |
+| `mobile_app/lib/features/auth/data/auth_repository_impl.dart` | `AuthRepositoryImpl.getCurrentSession`, `signInWithGoogle`, `signOut`, `authStateChanges` | Supabase Google OAuth and session stream. | `auth_notifier.dart`, `app.dart`, Android/iOS URL config |
+| `mobile_app/lib/features/auth/presentation/auth_notifier.dart` | `AuthNotifier`, `initialize`, `signInWithGoogle`, `signOut`, `updateSession` | Session state for the UI. `AuthWrapper` calls `initialize()` after first frame. | `auth_wrapper.dart`, `sign_in_screen.dart` |
+| `mobile_app/lib/features/auth/presentation/auth_wrapper.dart` | `AuthWrapper` | Shows loading/sign-in or the main shell based on `AuthNotifier.isAuthenticated`. | `auth_notifier.dart`, `sign_in_screen.dart` |
+| `mobile_app/lib/features/accounts/data/account_repository_impl.dart` | `loadPlaidConnections`, `createPlaidLinkToken`, `syncPlaidConnections`, `exchangePlaidPublicToken`, `updateCreditCardDisplayName`, `loadStatementCycles` | Mixed persistence: `plaid_items`/`plaid_credit_accounts` reads/writes go directly through Supabase; Plaid link/sync/statement-cycle calls go through the API. | `accounts_notifier.dart`, `_shared/plaid.ts`, `api/index.ts` |
+| `mobile_app/lib/features/accounts/presentation/accounts_notifier.dart` | `AccountsNotifier`, `loadConnections`, `loadStatementCycles`, `createLinkToken`, `syncConnections`, `exchangePublicToken`, `updateDisplayName` | Owns connection list and statement summary. `exchangePublicToken` is currently not called by any screen. | accounts screen/repo |
+| `mobile_app/lib/features/accounts/presentation/accounts_screen.dart` | `AccountsScreen`, `_linkNewAccount`, `_syncAccounts`, `_editDisplayName`, `_buildStatementSection` | Connection/statement UI. `_linkNewAccount` currently displays the Plaid link token in a dialog; it does not launch Plaid Link. Reachable from Summary's "Link a card" button. | accounts notifier/repo, Plaid backend |
+| `mobile_app/lib/features/card_events/domain/entities/card_event.dart` | `CardEventRecord` | Captured Wallet/Shortcut event model. It has no `householdVisible` field; `reconciliationStatus` carries a reconciliation status string. | repository, notifier, screen |
+| `mobile_app/lib/features/card_events/data/card_event_repository_impl.dart` | `loadCardEvents`, `setHouseholdVisible` | Reads `card_events` and `card_event_reconciliations` directly via Supabase; visibility update uses the API PATCH route. | migrations, `api/index.ts`, reconcile |
+| `mobile_app/lib/features/card_events/presentation/card_events_notifier.dart` | `CardEventsNotifier.loadEvents`, `setHouseholdVisible` | Loads at most 200 events for the current user; on visibility success it rebuilds the local record but does not change any field. | card events repo/screen |
+| `mobile_app/lib/features/card_events/presentation/card_events_screen.dart` | `CardEventsScreen`, `_EventTile`, `_SourceBadge`, `_ReconciliationBadge` | Event feed UI. Derives "household visible" from `reconciliationStatus == 'household_visible'`, which is not a documented backend reconciliation status. | card events notifier/repo, reconcile statuses |
+| `mobile_app/lib/features/device_capture/data/device_capture_repository_impl.dart` | `createGooglePayDeviceToken`, `revokeDeviceToken`, `isConfigured`, `hasNotificationAccess`, `openNotificationAccessSettings`, `sendTestNotification`, `getDeviceId`, `configure`, `clear` | Generates a SHA-256 device token, inserts `device_tokens` directly via Supabase, and drives the Android `MethodChannel` `com.plaidtest.cardsemble/google_pay_capture`. | `MainActivity.kt`, `CaptureCredentialStore.kt`, `DeviceCaptureNotifier` |
+| `mobile_app/lib/features/device_capture/presentation/device_capture_notifier.dart` | `DeviceCaptureNotifier`, `loadPeople`, `checkStatus`, `createDeviceToken`, `configureCapture`, `sendTestNotification`, `revokeDeviceToken`, `clearCapture` | Capture setup state. `configureCapture` stores the API URL/token/device ID in native secure storage. | `app_router.dart` settings overlay, native files |
+| `mobile_app/lib/features/device_capture/presentation/device_capture_screen.dart` | `DeviceCaptureScreen` | Standalone capture UI; not instantiated anywhere. The active setup UI is `_buildSettingsOverlay` in `app_router.dart`. | `app_router.dart`, notifier |
+| `mobile_app/lib/features/device_capture/presentation/settings_step.dart` | `SettingsStep` | Presentational step row used by the capture setup overlay. | `app_router.dart` |
+| `mobile_app/android/app/src/main/kotlin/com/plaidtest/cardsemble/GooglePayNotificationListenerService.kt` | `GooglePayNotificationListenerService`, `onNotificationPosted`, `parseTransaction`, `sendEvent`, `wasAlreadySent`, `rememberSent` | Listens only to `com.google.android.apps.walletnfcrel` (and its own test notification), parses amount/currency/card, deduplicates by fingerprint, and POSTs to `{configuredApiUrl}/api/card-events` with the device bearer token. | `MainActivity.kt`, `CaptureCredentialStore.kt`, backend card-events route |
+| `mobile_app/android/app/src/main/kotlin/com/plaidtest/cardsemble/MainActivity.kt` | `MainActivity`, `configureFlutterEngine`, `hasNotificationAccess`, `_postTestNotification` | Implements the Flutter `MethodChannel`, requests notification permission, opens notification-listener settings, and posts the test notification. | `device_capture_repository_impl.dart`, Android manifest |
+| `mobile_app/android/app/src/main/kotlin/com/plaidtest/cardsemble/CaptureCredentialStore.kt` | `CaptureCredentialStore.save`, `credentials`, `isConfigured`, `clear` | AES/GCM encryption with Android Keystore for the API URL/device token/device ID. | `MainActivity.kt`, listener service |
+
+### Backend and schema
+
+| File | Important symbols | Responsibility / when to inspect | Inspect together with |
+|---|---|---|---|
+| `supabase/functions/api/index.ts` | `Deno.serve`, `jsonResponse`, `errorResponse`, `fetchAllRows`, `anyReadyRow`, route blocks | Single API router. Path normalization strips `/functions/v1/<name>`, `/api`, and `api/`; routes are then matched without a leading `/`. It handles public config, card events, household people/members, device tokens, Plaid items/link/sync, Plaid transactions/assignments/splits, CSV import, credit-account rename/cycle start, statement cycles, reconciliations, and `cron/plaid-sync`. | `_shared/*`, migrations, repository route strings |
+| `supabase/functions/_shared/auth.ts` | `authenticateRequest`, `getBearerToken`, `verifySupabaseUser`, `ensureDefaultPerson`, `getHouseholdPerson`, `getDefaultPerson`, `clearDefaultPersonCache`, `addHouseholdMember` | Authenticates Supabase JWT, `CARD_EVENTS_API_TOKEN` test token, or SHA-256 device-token hash. Resolves/creates the household default person. All person lookups are scoped to `(user_id, person_id)`. | `index.ts`, `plaid.ts`, `reconcile.ts` |
+| `supabase/functions/_shared/plaid.ts` | `createPlaidLinkToken`, `createLiabilitiesLinkToken`, `exchangePublicToken`, `syncPlaidItemsForUser`, `syncPlaidTransactionPage`, `savePlaidCreditAccounts`, `syncPlaidCreditAccounts`, `syncPlaidLiabilities`, `runPlaidSync` | Plaid REST calls, cursor-based transaction sync, credit-account/liability persistence, legacy access-token migration, and post-sync reconciliation. | `index.ts`, `reconcile.ts`, `plaid_transactions`/`plaid_items` tables |
+| `supabase/functions/_shared/reconcile.ts` | `reconcileUserCardEvents`, `refreshWalletAssignments`, `calculateStatementSummaries`, `normalizeMerchant`, `creditCardDisplayName`, `isGenericCardName`, `fetchUserRows` | Matches captured Wallet events to Plaid transactions by amount/merchant/date (with tip detection), writes reconciliations, refreshes wallet assignments while preserving manual ones, and computes statement-cycle summaries. | `plaid.ts`, `index.ts`, `card_event*`/`transaction_assignments`/`card_statement_summaries` tables |
+| `supabase/functions/_shared/csv_import.ts` | `parseChaseCsv`, `generateCsvPreview`, `confirmCsvImport`, `findBestMatchForDateAmount`, `csvTransactionId`, `normalizeDate` | Chase CSV parsing, account/last-4 validation, duplicate detection (date tolerance, exact cents, merchant similarity), deterministic `csv_<hash>` IDs, insert, and import-history write. | Summary CSV UI, `transactions` CSV models, `csv_import_history` |
+| `supabase/functions/_shared/supabase.ts` | `createSupabaseAdmin`, `getSupabase`, `supabase` proxy | Service-role Supabase client for the Edge Function. Never expose this client/key to the mobile app. | all backend modules |
+| `supabase/functions/_shared/types.ts` | `CardEvent`, `PlaidTransaction`, `PlaidSyncPayload`, `CardEventReconciliation`, etc. | Backend payload/interface definitions. | `index.ts`, `plaid.ts` |
+| `card-events-api/card_events.sql` | Base `create table`/policy/trigger statements | Canonical full schema for `card_events`, `profiles`, `device_tokens`, `plaid_transactions`, `plaid_items`, reconciliations, `household_people`, `transaction_assignments`, credit accounts, liabilities, statement summaries, and cycle overrides. Apply this before/alongside migrations on a fresh project. | `supabase/migrations/*`, README |
+| `supabase/migrations/20261012210924_add_household_visible_columns.sql` | `household_visible` columns/grants/policies | Adds visibility flags and own-row UPDATE policies. | transactions/card-events visibility code |
+| `supabase/migrations/20261012212134_create_household_members_table.sql` | `household_members` table/RLS | Links Supabase users to an owner household and defines owner/member policies. | household membership code |
+| `supabase/migrations/20261012213524_add_household_invite_codes.sql` | `generate_invite_code`, `set_owner_invite_code` | Adds unique invite codes for owner rows (`household_id = user_id`). | join-by-invite route |
+| `supabase/migrations/20261012220000_add_csv_import_support.sql` | `plaid_transactions.source`, `csv_import_history` | CSV source tracking and import audit log/policies. | `_shared/csv_import.ts`, Summary import UI |
+| `supabase/migrations/20261017000000_fix_transaction_assignment_splits.sql` | `transaction_assignments.amount`, positive constraint, `(transaction_id, person_id)` PK | Defines the single-assignment (`amount NULL`) vs split (`amount > 0`) contract and supports multiple rows per transaction. | split math, assignment routes, cache |
+
+## Feature-to-File Map
+
+### Screens, widgets, navigation, and UI state
+
+- **App shell/navigation:** `mobile_app/lib/app/router/app_router.dart` (`MainTabs`). Tabs are Summary (0), Transactions (1), Events (2), People (3) in a `PageView`; `_showTransactionsTab` animates to index 1. There is no `go_router` route table despite the dependency.
+- **Settings/capture overlay:** `app_router.dart` (`_buildSettingsOverlay`, `_showFirstRunSettings`, `_autoConfigureStep1`) plus `features/device_capture/presentation/settings_step.dart`. The Summary app-bar settings icon opens this capture overlay, not the bank-link screen.
+- **Bank/account screen:** `features/summary/presentation/summary_screen.dart` (`_openAccounts`) pushes `features/accounts/presentation/accounts_screen.dart` via `MaterialPageRoute`. Accounts screen also has a "Link Account" FAB.
+- **Transactions UI:** `features/transactions/presentation/transactions_screen.dart` and widgets under `presentation/widgets/`.
+- **Summary UI:** `features/summary/presentation/summary_screen.dart`.
+- **Events UI:** `features/card_events/presentation/card_events_screen.dart`.
+- **People UI:** `features/household/presentation/people_screen.dart`; `members_screen.dart` and `invite_screen.dart` exist but are not routed.
+- **Auth UI:** `features/auth/presentation/auth_wrapper.dart`, `sign_in_screen.dart`.
+- **Shared presentation helpers:** `theme/app_colors.dart`, `core/utils/currency.dart`, `core/utils/date_utils.dart`, `core/utils/color_palette.dart`.
+
+### Transaction queries, filtering, updates, and persistence
+
+- **Query construction:** `TransactionsNotifier._queryFor` builds `TransactionQuery` with page size 100, offset, account filter, and inclusive dates. A null date range falls back to the last 60 days for the server query. The repository serializes `date_from`/`date_to`/`account_id`/`household_visible` in `TransactionQuery.toQueryParameters`.
+- **List loading:** `TransactionsNotifier.loadTransactions` / `loadAll`; HTTP route is `GET /api/plaid-transactions` via `TransactionRepositoryImpl.loadTransactions`. The server returns `transactions` + `has_more`.
+- **Client-side filtering:** `TransactionsNotifier.filteredTransactions` excludes `isPayment`, applies account/person/date filters, and drops rows without a date. `filteredTotalsByCurrency` sums positive, non-pending, non-payment rows; `filteredTotal` returns the largest currency total, not a cross-currency sum.
+- **Filter synchronization:** `setDateRange` reloads the list unless `reloadList: false`; `setAccountFilter`/`setPersonFilter` clear the date range before reloading; `clearAllFilters` clears all three. Summary drilldown calls account, person, then date; `_scheduleListReload` coalesces those into one microtask reload.
+- **Assignment:** UI `_runAssignment` -> `TransactionsNotifier.assignTransaction` -> `POST /api/plaid-transactions/{id}/assignment`. Backend deletes existing assignments and inserts a manual assignment (or deletes and reports the default person for unassign), then calls `calculateStatementSummaries`.
+- **Splits:** UI `_SplitSection` -> `TransactionsNotifier.loadSplitDraft` -> `LoadTransactionSplitDraft` -> `GET /api/plaid-transactions/{id}/splits`. Save path: slider -> `percentagesToCents` -> `_runSplit` -> `TransactionsNotifier.saveTransactionSplit` -> `SaveTransactionSplit` -> `POST /api/plaid-transactions/{id}/assignment-split`.
+- **Visibility:** UI `_runVisibility` -> `TransactionsNotifier.setHouseholdVisible` -> `PATCH /api/plaid-transactions/{id}/household-visible`. The notifier applies an optimistic update and rolls back on failure.
+- **Persistence/cache:** `TransactionCache` uses `SharedPreferences` keys `tx_cache_people_v1`, `tx_cache_accounts_v1`, `tx_cache_transactions_v1`, `tx_cache_summary_v1`, `tx_cache_saved_at_v1`. `_hydrateFromCache` runs before the first network load; `_writeCache` is fire-and-forget.
+
+### Household membership and shared visibility
+
+- **People CRUD:** `PeopleScreen` -> `HouseholdNotifier` -> `HouseholdRepositoryImpl` -> `/api/household/people` (`GET`, `POST`, `DELETE`; update is PATCH by person ID in the repository interface but no matching route was found in `index.ts` — verify before relying on rename/default PATCH).
+- **Members/invites:** `HouseholdRepositoryImpl.loadMembers/addMember/joinByInviteCode` -> `/api/household/members`, `/api/household/members/join`. `MembersScreen` and `InviteScreen` are not routed; `PeopleScreen` QR scanning is the only in-app caller of `addMember`/`joinByInviteCode`.
+- **Household identity:** `household_members` stores `(household_id, user_id, role, invite_code)`; owners have `household_id = user_id`.
+- **Current data scoping:** `GET /api/household/people`, `/api/plaid-transactions`, `/api/owed/statement-cycles`, and all shared backend helpers query by `user_id = auth.userId` (or `getHouseholdPerson(userId, personId)`). The inspected RLS policies also compare `auth.uid() = user_id`. There is no inspected join from a member's `household_id` to the owner's transactions/people. See "Verified current-state cautions."
+- **Shared-transaction flag:** `plaid_transactions.household_visible` and `card_events.household_visible` default true. The API supports a `household_visible` query parameter, but `TransactionsNotifier` never sets `TransactionQuery.householdVisible`; visibility is currently a per-row flag, not a cross-user data-sharing mechanism.
+
+### Authentication, authorization, and RLS
+
+- **Client sign-in/session:** `AuthRepositoryImpl` uses `SupabaseClient.auth` (`signInWithOAuth(google)`, `signOut`, `onAuthStateChange`). `AuthNotifier` subscribes to the session stream; `AuthWrapper` calls `AuthNotifier.initialize()` after the first frame.
+- **OAuth redirect:** `auth_notifier.dart` hardcodes `com.plaidtest.cardsemble://login-callback/`; the same scheme/host is registered in `mobile_app/android/app/src/main/AndroidManifest.xml` and `mobile_app/ios/Runner/Info.plist`.
+- **Bearer tokens:** `ApiClient` supplies the Supabase access token. Edge function `authenticateRequest` also accepts `CARD_EVENTS_API_TOKEN` (test; `userId = null`) and SHA-256 device-token hashes stored in `device_tokens` (maps to the owning `user_id`).
+- **Route authorization:** Edge routes returning user data require a non-null `auth.userId`. Device-token creation (`POST /device-tokens`) requires a Supabase session via `verifySupabaseUser`; Plaid link/exchange routes use `authenticateRequest` and therefore accept any user-linked credential (Supabase session or device token) with a non-null `userId`. `cron/plaid-sync` requires `CRON_SECRET`; `plaid-transactions/sync-now` and liabilities link-token are restricted to `PLAID_USER_ID`.
+- **RLS/table grants:** Base schema in `card-events-api/card_events.sql` plus `supabase/migrations/*`. Key tables are `user_id`-scoped. `plaid_items` exposes metadata SELECT to the client but not `access_token`; the Edge Function uses the service-role key. `transaction_assignments` grants insert/delete/update to authenticated with own-row policies.
+
+### Plaid connections, synchronization, and duplicate handling
+
+- **Connection list:** `AccountRepositoryImpl.loadPlaidConnections` queries `plaid_items` directly via Supabase (metadata only, excluding `status = 'disconnected'`).
+- **Link token:** `AccountsNotifier.createLinkToken` -> `POST /api/plaid/items/link-token?platform=android` -> `createPlaidLinkToken`. The Accounts screen currently displays the returned token rather than opening Plaid Link; `plaid_flutter` is a dependency but has no import/caller in `mobile_app/lib`.
+- **Token exchange:** `AccountRepositoryImpl.exchangePlaidPublicToken` exists and `AccountsNotifier.exchangePublicToken` exists, but no screen calls them. The backend `exchangePublicToken` upserts `plaid_items` and immediately runs `syncPlaidItemsForUser`.
+- **Manual sync:** `AccountsNotifier.syncConnections` -> `POST /api/plaid/items/sync` -> `syncPlaidItemsForUser`.
+- **Sync pipeline:** For each connected item, `syncPlaidItemsForUser` loops `/transactions/sync` with `transactions_cursor`, upserts added/modified rows, marks removed rows `is_removed = true`, then syncs credit accounts (`/accounts/get`) and liabilities (`/liabilities/get`), writes liability snapshots/state, and runs `reconcileUserCardEvents`, `refreshWalletAssignments`, `calculateStatementSummaries`.
+- **Duplicate handling:** Plaid identity is `transaction_id` (upsert conflict target). CSV identity is deterministic `csv_<sha256-prefix>` based on account, post/transaction dates, signed cents, normalized merchant, and normalized type. CSV duplicate checks compare absolute cents, dates within one day, and merchant similarity; matched DB IDs are tracked so one DB transaction cannot absorb multiple CSV rows.
+- **Card display names:** `savePlaidCreditAccounts` preserves an existing `display_name` across syncs and only maps known source names when no display name exists. `updateCreditCardDisplayName` writes `plaid_credit_accounts.display_name` directly from the client, then `AccountsNotifier` reloads statement cycles.
+
+### Supabase Edge Functions and database changes
+
+- **Router:** `supabase/functions/api/index.ts` is the only function entry point in the repo. Add routes there and keep the client path strings in sync. Path handling strips `/functions/v1/<name>`, `/api`, and `api/`, so `.../functions/v1/api/api/plaid-transactions` reaches the `plaid-transactions` block.
+- **Shared modules:** `_shared/auth.ts`, `_shared/plaid.ts`, `_shared/reconcile.ts`, `_shared/csv_import.ts`, `_shared/supabase.ts`, `_shared/types.ts`.
+- **Function config:** `supabase/config.toml` sets `[functions.api] verify_jwt = false`; the function performs its own auth. It also contains entries for `functions.card-events`, `functions.cron`, and `functions.test-health`; only `functions/api` exists in the inspected tree, so do not assume those other functions are deployed.
+- **Schema workflow:** Base schema is `card-events-api/card_events.sql`; incremental changes are in `supabase/migrations/`. A fresh environment that only applies migrations may lack the base tables. When changing tables/grants/policies, update both the base schema and a migration if the project expects reproducibility.
+
+### Tests and verification
+
+- Unit/widget tests live in `mobile_app/test/`; see "Tests and Commands" below.
+- Backend has no Deno test files or test task in the inspected tree. Validate Edge Function behavior against a deployed/local Supabase project with the required secrets.
+- Android notification parser tests are under `mobile_app/android/app/src/androidTest/` (both `com.plaidtest.cardsemble` and legacy `com.plaidtest.card_household_app` copies). They are instrumented tests, not run by `flutter test`.
+
+## Architecture and Data Flows
+
+### 1. Startup, configuration, and session
+
+1. `main.dart` runs `CardsembleApp`.
+2. `CardsembleApp._initialize` calls `GET {apiBaseUrl}/api/public-config` with `http` (no app auth).
+3. The Edge Function `public-config` returns `supabase_url` and `supabase_publishable_key` from function secrets.
+4. `ServiceLocator.initialize` calls `AppSupabaseClient.initialize`, creates `ApiClient` with a session-token provider, and registers repositories, notifiers, and split use cases.
+5. `MultiProvider` exposes `AuthNotifier`, `HouseholdNotifier`, `TransactionsNotifier`, `CardEventsNotifier`, `AccountsNotifier`, and `DeviceCaptureNotifier`.
+6. `AuthWrapper` calls `AuthNotifier.initialize()`; `AuthNotifier` consumes the Supabase `onAuthStateChange` stream. Signed-out users see `SignInScreen`; signed-in users see `MainTabs`.
+7. `MainTabs.initState` post-frame calls `DeviceCaptureNotifier.loadPeople`, `checkStatus`, and `TransactionsNotifier.loadAll()` (the single startup ledger fetch).
+
+Data direction: Flutter -> Edge Function `public-config` -> Supabase config; Flutter auth -> Supabase Auth -> `AuthNotifier` -> `AuthWrapper`.
+
+### 2. Shell navigation and shared UI state
+
+1. `MainTabs` builds a `PageView` with Summary, Transactions, Events, People and a custom `_AnimatedTabBar`.
+2. Summary's "Link a card" pushes `AccountsScreen`; Summary's settings icon calls `_openSettings` to show the capture setup overlay.
+3. Summary and Transactions both read the same `TransactionsNotifier`. Summary calls `loadSummaryTransactions` for its date range; Transactions calls `loadTransactions` for the list.
+4. On first launch, `_showFirstRunSettings` reads `capture_settings_reviewed` from `SharedPreferences`; if unset, the full-screen capture setup gate requires `isConfigured && hasNotificationAccess` before "Continue".
+5. `didChangeAppLifecycleState(resumed)` rechecks capture status after returning from Android notification settings.
+
+### 3. Ledger load, filtering, and summary drilldown
+
+1. `TransactionsNotifier.loadAll` coalesces concurrent calls, hydrates `TransactionCache`, then loads people and accounts in parallel and calls `loadTransactions(reset: true)`.
+2. `loadTransactions` calls `TransactionRepositoryImpl.loadTransactions`, which calls `GET /api/plaid-transactions` with `TransactionQuery`.
+3. The Edge Function verifies auth, resolves owned credit accounts, queries `plaid_transactions` with `is_removed = false`, optionally filters by account/date/visibility, joins page-scoped `transaction_assignments`, and enriches each row with account display fields, default-person fallback, and `has_splits`.
+4. The notifier stores the list and writes the cache. `filteredTransactions` applies client-side payment/account/person/date filters for the UI.
+5. Summary calls `loadSummaryTransactions(range)` (all pages for that date range) and computes `totalsByCurrency`, `totalsByCard`, and `totalsByPersonAndCurrency` locally from positive, posted, non-payment charges.
+6. Summary drilldown sets account/person/date filters on the shared notifier and calls `MainTabs._showTransactionsTab`.
+
+### 4. Assignment and split persistence
+
+1. Assignment tap -> `_runAssignment` -> `TransactionsNotifier.assignTransaction` -> repository `POST /assignment`.
+2. Backend validates transaction ownership and optional person ownership, deletes prior assignments, inserts one manual assignment with `amount = NULL`, or deletes and reports the default person when `person_id` is null.
+3. `calculateStatementSummaries` is invoked after assignment changes.
+4. Split expansion -> `_SplitSection` -> `loadSplitDraft` -> `GET /splits`; existing split amounts are converted to percentages and backfilled to all displayed participants.
+5. Save -> `_UnifiedSplitSliderBuilder._saveSplit` -> `percentagesToCents` (largest-remainder cent allocation) -> `_runSplit` -> `TransactionsNotifier.saveTransactionSplit` -> `SaveTransactionSplit` validation -> `POST /assignment-split`.
+6. Backend validates each person, requires the split total in cents to equal the absolute transaction amount in cents, deletes prior assignments, inserts one `amount > 0` row per split, and recomputes statement summaries.
+7. The notifier reloads the ledger and summary after a successful split and rewrites the split-draft cache.
+
+### 5. Summary, card names, and statement cycles
+
+1. `SummaryScreen.initState` sets `_summaryRange` from `TransactionsNotifier.dateRange` (current month by default), loads summary transactions, and loads Plaid connections/statement cycles via `AccountsNotifier`.
+2. Card rename -> `_editCardName` -> `AccountsNotifier.updateDisplayName` -> direct Supabase update of `plaid_credit_accounts.display_name` -> `loadStatementCycles`; summary refresh reloads transactions.
+3. Statement cycles -> `GET /api/owed/statement-cycles` -> reads `card_statement_summaries`, `plaid_credit_accounts`, `household_people`, and `plaid_liability_sync_state`; returns per-account summaries, `credit_accounts`, `current_total_owed`, `totals_by_currency`, and `total_status`.
+4. `calculateStatementSummaries` writes `card_statement_summaries` after Plaid sync and assignment changes. It requires a prior statement date, counts positive posted charges assigned to the primary person, excludes payments/credits/pending, and marks review counts. A total is only returned when all accounts are ready and a single currency is present.
+
+### 6. CSV import
+
+1. Summary "Import CSV" -> `_importCsv` selects an account from `AccountsNotifier.statementSummary.accounts`, picks a `.csv` with `file_picker`, and decodes UTF-8.
+2. `TransactionsNotifier.previewCsvImport` -> repository `POST /api/csv-import/preview` -> `generateCsvPreview` parses Chase columns, validates the account/last-4, fetches existing transactions, and classifies rows as `new`/`duplicate`/`error`.
+3. `_showImportPreviewDialog` displays new/duplicate/error counts and a table; "Import" sends only `new` rows to `confirmCsvImport`.
+4. `TransactionsNotifier.confirmCsvImport` -> repository `POST /api/csv-import/confirm` -> `confirmCsvImport` rechecks duplicates, inserts into `plaid_transactions` with `source = 'csv_import'`, writes `csv_import_history`, and returns `inserted`, `duplicates`, `errors`.
+5. On success the notifier reloads the ledger and summary; Summary also calls `refresh()`.
+
+### 7. Plaid connection, sync, and reconciliation
+
+1. `AccountsScreen` loads `plaid_items` directly from Supabase and statement cycles from the Edge Function.
+2. "Link Account" -> `AccountsNotifier.createLinkToken` -> `POST /api/plaid/items/link-token` -> Plaid `/link/token/create`. Current UI displays the token only; there is no Plaid Link launch or public-token exchange call in the inspected screens.
+3. Manual sync -> `POST /api/plaid/items/sync` -> `syncPlaidItemsForUser`.
+4. For each connected item, transactions are pulled cursor-first, upserted by `transaction_id`, and removals are soft-deleted. Credit accounts and liabilities are refreshed; liability snapshots are upserted by `(user_id, account_id, statement_issue_date)`.
+5. After sync, `reconcileUserCardEvents` scores Wallet events against transactions by amount, merchant similarity, and date (with 10–25% tip detection), writing `HIGH`/`MEDIUM`/`AMBIGUOUS`/`REVIEW`/`UNMATCHED`/`PENDING` reconciliations.
+6. `refreshWalletAssignments` converts unique HIGH/MEDIUM matches into `assignment_source = 'wallet_event'` rows, preserves manual assignments, and deletes stale wallet assignments. `calculateStatementSummaries` then rebuilds statement summaries.
+7. Scheduled sync: `cron/plaid-sync` requires `CRON_SECRET` and uses `PLAID_USER_ID`; it is single-user by design in the inspected code.
+
+### 8. Card-event capture
+
+1. Android `MainActivity` exposes the `com.plaidtest.cardsemble/google_pay_capture` MethodChannel (`configure`, `clear`, `isConfigured`, `deviceId`, `hasNotificationAccess`, `openNotificationAccessSettings`, `sendTestNotification`).
+2. Settings overlay -> `_autoConfigureStep1` -> `DeviceCaptureNotifier.createDeviceToken` -> `DeviceCaptureRepositoryImpl.createGooglePayDeviceToken` generates a random token, stores only its SHA-256 hash in `device_tokens` via Supabase, then `configureCapture` stores the API URL/token/device ID in `CaptureCredentialStore` (AES/GCM + Android Keystore).
+3. `_autoConfigureStep1` currently hardcodes `https://creditcards-beige.vercel.app` as the API URL for the native listener; this is independent of `CARD_EVENTS_API_URL`.
+4. `GooglePayNotificationListenerService.onNotificationPosted` filters Google Wallet notifications, parses merchant/amount/currency/card, deduplicates by fingerprint, and POSTs to `{apiUrl}/api/card-events` with `Authorization: Bearer <deviceToken>`.
+5. Edge Function `POST card-events` authenticates the token (or Supabase session), resolves the token's `person_id`/`platform`, sets `source`, and upserts `card_events`.
+6. The Events tab reads `card_events` and `card_event_reconciliations` directly via Supabase (`limit 200`) and displays source/reconciliation badges.
+7. iOS has no notification listener; the documented path is an external iPhone Shortcut posting to the same `/api/card-events` endpoint.
+
+### 9. Household membership (current implementation)
+
+1. `PeopleScreen` loads `/api/household/people`; `GET` ensures a default person exists and returns the caller's `household_people` rows.
+2. Create/delete use `/api/household/people`; the repository also exposes `updatePerson` (PATCH) and member methods.
+3. `MembersScreen`/`InviteScreen` are not routed. The People QR flow tries `addMember` then `joinByInviteCode`.
+4. `household_members` stores owner/member links and invite codes. However, transaction/person/statement queries remain scoped to the authenticated `user_id`; see the caution section.
+
+## Cross-File Dependencies and Invariants
+
+### Shared models and consumers
+
+- `CardTransaction` is consumed by `TransactionRepositoryImpl`, `TransactionsNotifier`, `TransactionCache`, `SummaryScreen`, `TransactionsScreen`, and tests. Adding/renaming a JSON field requires updating `CardTransaction.fromJson/toJson`, the Edge Function projection in `GET /plaid-transactions`, and cache compatibility.
+- `TransactionSplit` flows through `split_math.dart`, both split use cases, `TransactionRepositoryImpl`, `TransactionsNotifier`, the split UI, and tests. The persisted contract is `person_id` + positive `amount`.
+- `HouseholdPerson` is used by `TransactionsNotifier`, `HouseholdNotifier`, `DeviceCaptureNotifier`, Summary, Transactions, and People. These are three independent people lists; a mutation in one does not automatically refresh the others.
+- `StatementAccount`/`StatementCycleSummary` are used by `TransactionRepositoryImpl.loadAccounts`, `TransactionsNotifier`, `AccountsNotifier`, `AccountsScreen`, and Summary CSV import. The server returns `credit_accounts` and `accounts`; parsers accept both.
+
+### State ownership and refresh behavior
+
+- `TransactionsNotifier` owns the authoritative ledger list, summary list, date range, account/person filters, people/accounts snapshots, and split-draft cache. `SummaryScreen` keeps its own `_summaryRange` initialized from `notifier.dateRange`.
+- `TransactionsScreen._refresh` calls `loadAll()` (ledger/people/accounts only). `SummaryScreen._refresh` calls `notifier.refresh()` (which also reloads the current summary range) and `AccountsNotifier.loadStatementCycles()`.
+- `TransactionsNotifier.loadAll` coalesces concurrent calls via `_activeLoadAll`. `loadTransactions` and `loadSummaryTransactions` use generation counters so older responses cannot overwrite newer ones.
+- `TransactionsNotifier.loadTransactions` drains all remaining pages in one `while` loop. Although `loadMoreTransactions` and a scroll trigger exist, the initial load normally ends with `_hasMore = false`; do not assume true page-by-page lazy loading without changing this loop.
+- `TransactionsNotifier.setHouseholdVisible` is optimistic with rollback. Assignment updates both the ledger and summary copies through `_replaceTransaction`; split save and CSV confirm explicitly reload both.
+- `HouseholdNotifier` owns people/members for the People tab; `DeviceCaptureNotifier` owns its own people list for the setup overlay; `AccountsNotifier` owns connections/statement summary. There is no shared invalidation bus, so cross-feature freshness is manual.
+
+### Persistence, identity, and integrity
+
+- Plaid transaction identity is `transaction_id` (primary key). Pending/posted transitions arrive through `/transactions/sync`; removed transactions are soft-deleted with `is_removed = true`, not hard-deleted.
+- CSV identity is deterministic `csv_<sha256-prefix>` derived from account, dates, signed cents, normalized merchant, and type. This prevents duplicate inserts for the same CSV row.
+- `transaction_assignments` has a `(transaction_id, person_id)` primary key. A single/default assignment has `amount IS NULL`; split rows have `amount > 0`. `has_splits` is true when more than one assignment row exists for a transaction.
+- Unassigning deletes the assignment and the server returns the household default person; the effective `assignedPersonId` is never the source of truth for "unassigned." Persisted `transaction_assignments.assignment_source` values are `manual` and `wallet_event`; the API also reports synthetic `default` when no row exists.
+- `SaveTransactionSplit` enforces at least two unique participants, a 100% sum (tolerance 0.01), positive total, and exact cent totals. `percentagesToCents` uses largest-remainder allocation and omits zero-cent participants; the server independently revalidates the cent sum.
+- The UI limits splits to the first four people (`take(4)` in `_SplitSection`/`_runSplit`); the server accepts any number. Changing the UI limit without changing tests/UX may surprise users with larger households.
+- CSV duplicate matching allows one day of date difference, exact absolute cents, and merchant similarity thresholds (0.6 same-day / 0.7 adjacent-day in the current implementation). It tracks matched DB IDs to avoid one existing transaction matching multiple CSV rows.
+- Reconciliation statuses are `HIGH`, `MEDIUM`, `AMBIGUOUS`, `REVIEW`, `UNMATCHED`, `PENDING` (no `household_visible`/`ignored`). `refreshWalletAssignments` only auto-assigns HIGH/MEDIUM matches and never overwrites `assignment_source = 'manual'`.
+- Statement summaries count positive posted charges only; pending, card payments, refunds, and other credits are excluded. Candidate transactions tied to `AMBIGUOUS`/`REVIEW`/`PENDING` reconciliations are excluded unless a manual assignment exists. A cycle needs a prior statement date; a total is withheld until all accounts are ready and one currency is present.
+
+### Database, RLS, and household isolation
+
+- The transaction/event/account tables carry `user_id`. Base RLS policies and backend queries for those tables scope access to `auth.uid() = user_id` (`profiles` uses `id` instead). `transaction_assignments` and `plaid_credit_accounts` also use own-row policies; `plaid_items` exposes metadata but not the access token.
+- `household_members` is a separate membership table. The inspected schema/migrations do **not** add cross-member SELECT policies to `plaid_transactions`, `household_people`, `transaction_assignments`, `card_events`, or statement tables, and the backend queries use `auth.userId` rather than resolving a household owner. Treat "household shared data" as an unresolved requirement, not implemented behavior.
+- `household_visible` flags are per-row, default true, and updatable only by the row owner. The client does not pass `household_visible` when loading the ledger, so hidden rows are still returned to the owning user and shared visibility does not expose them to other users.
+- `plaid_transactions` and `card_events` are written by the Edge Function using the service-role client, bypassing RLS. Client-side direct writes exist for `device_tokens` and `plaid_credit_accounts.display_name`; keep grants and policies aligned with those paths.
+- `card-events-api/card_events.sql` is the full base schema; migrations alter it incrementally. Fresh-project setup must account for this ordering.
+
+### Error handling and concurrency
+
+- Repositories return `Result<T>`; UI/notifiers inspect `isFailure` or `fold`. `ApiClient` converts non-2xx responses to `NetworkException` with the JSON `detail` text; `safe*` methods convert to `FailureResult`.
+- `ApiClient` requires a non-empty bearer token and throws `AuthException` otherwise. A missing/expired session therefore surfaces as an auth failure, not an empty data set.
+- Do not swallow parse failures in repositories: `loadTransactions` intentionally converts malformed rows into a failure rather than returning partial data.
+- `TransactionsNotifier` has two independent generation counters (`_transactionsGeneration`, `_summaryGeneration`) and a microtask reload flag. Preserve them when adding asynchronous loads.
+- `loadAll` shares one in-flight future; concurrent tab builds should not trigger duplicate multi-page fetches.
+
+### Verified current-state cautions
+
+The following are observed in the current source and are useful before editing; they are not necessarily intended requirements.
+
+- **Plaid Link is not launched by the UI.** `AccountsScreen._linkNewAccount` creates a link token and displays it in a dialog. `AccountsNotifier.exchangePublicToken` has no caller, and `plaid_flutter` is unused. The README describes a complete Link flow, but the current screen does not implement it.
+- **Household sharing is not end-to-end.** Membership/invite code plumbing exists, but transactions/people remain user-scoped. `GET /api/household/members` filters `household_id = auth.userId`; `POST /api/household/members/join` uses `.eq("household_id", "user_id")`, which appears to compare against the literal string rather than the `user_id` column. Verify/fix the join before relying on it.
+- **Household visibility UI is inconsistent.** `CardEventsScreen` treats `reconciliationStatus == 'household_visible'` as visible, but backend reconciliation statuses are HIGH/MEDIUM/AMBIGUOUS/REVIEW/UNMATCHED/PENDING. `CardEventsNotifier.setHouseholdVisible` rebuilds the record without changing any field. Do not assume the visibility toggle reflects server state.
+- **The ledger "load more" path is effectively one full drain.** `loadTransactions` loops until `has_more` is false; `_hasMore` normally becomes false on the first load.
+- **Cache keys are not user-scoped.** `TransactionCache` uses constant `SharedPreferences` keys, so signing into a different account on the same device can hydrate the previous account's cached people/transactions until the network load replaces them.
+- **Plaid token exchange calls the exchange endpoint twice.** `_shared/plaid.ts` `exchangePublicToken` performs one `/item/public_token/exchange` call in the outer `Promise.all` and another inside the nested item lookup. Fix cautiously if touching Plaid linking.
+- **Capture URL is hardcoded.** `app_router.dart` `_autoConfigureStep1` configures the native listener with `https://creditcards-beige.vercel.app`, not the `CARD_EVENTS_API_URL`/Edge Function base.
+- **Function config references missing functions.** `supabase/config.toml` mentions `functions.card-events`, `functions.cron`, and `functions.test-health`; only `functions/api` exists in the tree. Do not assume those endpoints are deployed.
+- **Unused/stale UI files exist.** `device_capture_screen.dart`, `members_screen.dart`, `invite_screen.dart`, and `summary_screen.dart.bak` are not part of the active navigation/build. `go_router` is declared but unused.
+- **Android package naming is split.** The active Gradle namespace/application ID is `com.plaidtest.cardsemble`; source copies and older docs also use `com.plaidtest.card_household_app`. Register the active ID with Plaid. Release builds currently use the debug signing config.
+
+## Tests and Commands
+
+### Flutter (working directory: `mobile_app`)
+
+| Command | Purpose / status |
+|---|---|
+| `flutter pub get` | Install dependencies. |
+| `flutter analyze` | Static analysis. Verified on 2026-10-18: **No issues found**. |
+| `flutter test` | Run all unit/widget tests. Verified on 2026-10-18: **50 tests passed**. |
+| `flutter test test/features/transactions/domain/split_math_test.dart` | Run one test file; substitute any path under `test/`. |
+| `adb devices` | List Android devices for phone deployment. |
+| `flutter run -d <DEVICE_ID>` | Build/run on the selected phone. The API base can be overridden with `--dart-define=CARD_EVENTS_API_URL=...`. |
+| `flutter build apk` / `flutter build appbundle` | Release artifacts; inspect signing config first. |
+
+### Test coverage by file
+
+| Test file | Covers |
+|---|---|
+| `mobile_app/test/features/transactions/data/transaction_repository_impl_test.dart` | Transaction page parsing/failure behavior, assignment response shapes (default vs nested manual), split parsing/filtering of null/zero/negative/invalid rows, HTTP failure propagation. |
+| `mobile_app/test/features/transactions/presentation/transactions_notifier_test.dart` | `loadAll` coalescing, stale-response protection, server-default assignment on unassign, split save reload, split-draft cache hit/rewrite, optimistic visibility rollback, default current-month date filter. |
+| `mobile_app/test/features/transactions/presentation/transactions_screen_test.dart` | Long assignee-name layout/overflow, 3- and 4-participant horizontal split layout, unified slider presence, current-month date chip. |
+| `mobile_app/test/features/transactions/domain/split_math_test.dart` | Equal split remainders, guideline snapping, boundary movement/minimums, cent-exact allocation and no negative/zero shares, serialized split payload, normalization/backfill. |
+| `mobile_app/test/features/household/presentation/people_screen_test.dart` | People screen add buttons and QR scanner dialog behavior. |
+
+### Android instrumented tests
+
+- Files: `mobile_app/android/app/src/androidTest/kotlin/com/plaidtest/cardsemble/GooglePayNotificationParserTest.kt` and a legacy `com.plaidtest.card_household_app` copy.
+- They exercise amount/currency/card parsing for USD/EUR/Mastercard/Visa-style notifications.
+- They are **not** run by `flutter test`. The inspected `mobile_app/android/app/build.gradle.kts` does not declare AndroidX test dependencies, so treat the Gradle connected-test command as unverified/not configured; do not claim those tests pass without running them on a device.
+
+### Backend verification
+
+- No Deno test files or test task are present under `supabase/`.
+- `supabase/config.toml` only provides local function configuration; deployment/secrets (`PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_USER_ID`, `PLAID_ACCESS_TOKEN`, `PLAID_ENV`, `CRON_SECRET`, `CARD_EVENTS_API_TOKEN`, Supabase service-role/anon keys) are environment concerns, not committed configuration.
+- For backend changes, inspect `supabase/functions/api/index.ts` route blocks and the relevant `_shared` module, then verify against a deployed/local Supabase project. The repo does not commit a runnable backend test harness.
+
+## Best Starting Points for Common Changes
+
+- **Transaction tile, filters, assignment, split UI:** `transactions_screen.dart` + `transactions_notifier.dart` + `transaction.dart`; run `transactions_screen_test.dart`, `transactions_notifier_test.dart`, `split_math_test.dart`.
+- **Ledger API or duplicate/CSV behavior:** `transaction_repository_impl.dart`, `supabase/functions/api/index.ts`, `_shared/csv_import.ts`; update `transaction_repository_impl_test.dart` for wire-format changes.
+- **Summary totals/date range/drilldown:** `summary_screen.dart` + `transactions_notifier.dart`; remember the shared date range and the current-month default.
+- **Household people/members/invites:** `people_screen.dart` / `household_notifier.dart` / `household_repository_impl.dart` + `index.ts` household routes + `household_members` migrations/RLS.
+- **Plaid linking/sync/statements:** `accounts_screen.dart`, `accounts_notifier.dart`, `account_repository_impl.dart`, `_shared/plaid.ts`, `_shared/reconcile.ts`, `index.ts` routes, and the Plaid-related migrations.
+- **Android capture:** `app_router.dart` setup overlay, `device_capture_notifier.dart`, `device_capture_repository_impl.dart`, `MainActivity.kt`, `GooglePayNotificationListenerService.kt`, `CaptureCredentialStore.kt`, and the `card-events` backend route.
+- **Auth/session:** `auth_wrapper.dart`, `auth_notifier.dart`, `auth_repository_impl.dart`, `app.dart`, Android manifest/iOS `Info.plist` redirect configuration.
+
+## Maintaining This Guide
+
+- When a code change materially affects documented file responsibilities, important symbols, architecture, data flows, dependencies, or verification commands, update the relevant sections of this guide in the same task.
+- Update only affected sections. Do not rewrite the guide or document routine implementation details that do not improve future code navigation.
+- Verify documented paths, symbols, and behavior against the resulting code. Remove obsolete references and correct outdated descriptions.
+- The implementing agent is responsible for necessary updates. Read-only agents should report inaccuracies or missing updates without editing files.
+- If no documented information changes, leave this guide untouched.

@@ -92,7 +92,7 @@ class FakeTransactionRepository implements TransactionRepository {
     List<CsvImportRow> rows,
     String filename,
   ) async {
-    return const Success(CsvImportResult(inserted: 0, errors: []));
+    return const Success(CsvImportResult(inserted: 0, duplicates: 0, errors: []));
   }
 
   @override

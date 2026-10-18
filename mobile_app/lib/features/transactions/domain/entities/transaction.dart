@@ -402,15 +402,18 @@ class CsvImportPreview {
 class CsvImportResult {
   const CsvImportResult({
     required this.inserted,
+    required this.duplicates,
     required this.errors,
   });
 
   final int inserted;
+  final int duplicates;
   final List<String> errors;
 
   factory CsvImportResult.fromJson(Map<String, dynamic> json) {
     return CsvImportResult(
       inserted: json['inserted'] as int,
+      duplicates: json['duplicates'] as int? ?? 0,
       errors: (json['errors'] as List).map((e) => e.toString()).toList(growable: false),
     );
   }

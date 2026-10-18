@@ -25,6 +25,8 @@ export interface PreviewRow {
   match?: Record<string, unknown>;
   matchScore?: number;
   error?: string;
+  /** If present, indicates this is a duplicate within the same CSV import */
+  duplicateReason?: "intra_csv";
 }
 
 export interface CsvPreviewResult {
@@ -152,6 +154,52 @@ function normalizeDate(dateStr: string): string {
   return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
 }
 
+const DATE_TOLERANCE_DAYS = 1;
+
+function parseIsoDate(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+}
+
+function dateDistanceDays(a: unknown, b: unknown): number | null {
+  if (typeof a !== "string" || typeof b !== "string") return null;
+  const da = parseIsoDate(a), db = parseIsoDate(b);
+  if (da === null || db === null) return null;
+  return Math.abs((da - db) / 86_400_000);
+}
+
+const PAGE_SIZE = 500;
+
+interface ExistingTxn {
+  transaction_id: string;
+  account_id: string;
+  amount: number;
+  date: string;
+  authorized_date: string | null;
+  merchant_name: string | null;
+  name: string | null;
+  original_description: string | null;
+  is_removed: boolean | null;
+}
+
+async function fetchExistingTransactions(userId: string, accountId: string): Promise<ExistingTxn[]> {
+  const all: ExistingTxn[] = [];
+  for (let from = 0; from < 50_000; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("plaid_transactions")
+      .select("transaction_id, account_id, amount, date, authorized_date, merchant_name, name, original_description, is_removed")
+      .eq("account_id", accountId)
+      .eq("user_id", userId)
+      .order("transaction_id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(`Failed to load existing transactions: ${error.message}`);
+    all.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
 export async function generateCsvPreview(
   userId: string,
   accountId: string,
@@ -182,23 +230,21 @@ export async function generateCsvPreview(
     }
   }
 
-  const { data: existingTxns } = await supabase
-    .from("plaid_transactions")
-    .select("transaction_id, account_id, amount, date, authorized_date, merchant_name, name, original_description")
-    .eq("account_id", accountId)
-    .eq("user_id", userId)
-    .eq("is_removed", false);
+  const existingTxns = await fetchExistingTransactions(userId, accountId);
 
-  console.log(`[CSV Import] Found ${existingTxns?.length ?? 0} existing Plaid transactions for account ${accountId}`);
+  console.log(`[CSV Import] Found ${existingTxns.length} existing Plaid transactions for account ${accountId}`);
   
   // Log first few existing transactions for debugging
   let count = 0;
-  for (const tx of existingTxns ?? []) {
+  for (const tx of existingTxns) {
     if (count < 5) {
-      console.log(`[CSV Import] Existing: ${tx.account_id}|${tx.date}|${Math.round(Math.abs(Number(tx.amount)) * 100)}|${normalizeMerchant(tx.merchant_name) || normalizeMerchant(tx.name)} | merchant: ${tx.merchant_name || tx.name} | amount: ${tx.amount} | date: ${tx.date} | auth_date: ${tx.authorized_date}`);
+      console.log(`[CSV Import] Existing: ${tx.account_id}|${tx.date}|${Math.round(Math.abs(Number(tx.amount)) * 100)}|${normalizeMerchant(tx.merchant_name) || normalizeMerchant(tx.name as string)} | merchant: ${tx.merchant_name || tx.name} | amount: ${tx.amount} | date: ${tx.date} | auth_date: ${tx.authorized_date}`);
       count++;
     }
   }
+
+  // Track matched DB transaction IDs to prevent multiple CSV rows matching same DB txn
+  const matchedTxIds = new Set<string>();
 
   const preview: PreviewRow[] = [];
   for (const row of parsed.rows) {
@@ -208,16 +254,18 @@ export async function generateCsvPreview(
     const normPostDate = normalizeDate(row.postDate);
     const normTransDate = normalizeDate(row.transactionDate);
     
-    // Try exact match on date + amount (merchant fuzzy)
-    // First try posted date
-    let match = findBestMatchForDateAmount(existingTxns ?? [], normPostDate, amountCents, normMerchant, 'posted');
-    let matchDateType = 'posted';
-    
-    // If no match, try transaction date
-    if (!match && normTransDate) {
-      match = findBestMatchForDateAmount(existingTxns ?? [], normTransDate, amountCents, normMerchant, 'authorized');
-      matchDateType = 'authorized';
+    // Try all date combinations: CSV postDate/transDate vs DB date/authorized_date
+    const allCandidates: DateCandidate[] = [];
+    if (normPostDate) {
+      allCandidates.push({ csvDate: normPostDate, dateType: 'posted' });
+      allCandidates.push({ csvDate: normPostDate, dateType: 'authorized' });
     }
+    if (normTransDate) {
+      allCandidates.push({ csvDate: normTransDate, dateType: 'posted' });
+      allCandidates.push({ csvDate: normTransDate, dateType: 'authorized' });
+    }
+
+    let match = findBestMatchForDateAmount(existingTxns, normMerchant, amountCents, allCandidates, matchedTxIds);
     
     console.log(`[CSV Import] CSV row key (posted): ${accountId}|${normPostDate}|${amountCents}|${normMerchant} | merchant: ${row.description} | amount: ${row.amount} | postDate: ${row.postDate} -> norm: ${normPostDate}`);
     if (normTransDate) {
@@ -225,8 +273,9 @@ export async function generateCsvPreview(
     }
 
     if (match) {
+      matchedTxIds.add((match.match.transaction_id as string));
       preview.push({ row, status: "duplicate", match: match.match, matchScore: match.matchScore });
-      console.log(`[CSV Import] MATCH (${matchDateType} date) score=${match.matchScore} | CSV merchant: ${normMerchant} | Plaid merchant: ${normalizeMerchant((match.match.merchant_name as string) || (match.match.name as string) || "")}`);
+      console.log(`[CSV Import] MATCH score=${match.matchScore} dateDist=${match.dateDistance} | CSV merchant: ${normMerchant} | Plaid merchant: ${normalizeMerchant((match.match.merchant_name as string) || (match.match.name as string) || "")} | CSV date: ${match.csvDate} | DB date: ${match.dbDate}`);
       continue;
     }
 
@@ -246,38 +295,77 @@ export async function generateCsvPreview(
   return { preview, summary, accountValidation };
 }
 
+interface DateCandidate {
+  csvDate: string;
+  dateType: 'posted' | 'authorized';
+}
+
 function findBestMatchForDateAmount(
-  existingTxns: Record<string, unknown>[],
-  targetDate: string,
-  targetAmountCents: number,
+  existingTxns: ExistingTxn[],
   targetMerchant: string,
-  dateType: 'posted' | 'authorized'
-): { match: Record<string, unknown>; matchScore: number } | null {
-  let bestMatch: Record<string, unknown> | null = null;
+  targetAmountCents: number,
+  candidates: DateCandidate[],
+  matchedTxIds: Set<string>,
+): { match: ExistingTxn; matchScore: number; dateDistance: number; csvDate: string; dbDate: string } | null {
+  let bestMatch: ExistingTxn | null = null;
   let bestScore = 0;
+  let bestDateDist = 0;
+  let bestCsvDate = "";
+  let bestDbDate = "";
 
   for (const tx of existingTxns) {
-    const txDate = dateType === 'posted' ? (tx.date as string) : (tx.authorized_date as string);
-    if (txDate !== targetDate) continue;
+    // Skip already matched transactions
+    if (matchedTxIds.has(tx.transaction_id)) continue;
 
-    const txAmountCents = Math.round(Math.abs(Number(tx.amount)) * 100);
-    if (txAmountCents !== targetAmountCents) continue;
+    for (const cand of candidates) {
+      const txDate = cand.dateType === 'posted' ? tx.date : tx.authorized_date;
+      if (!txDate) continue;
 
-    const txMerchant = normalizeMerchant((tx.merchant_name as string) || (tx.name as string) || "");
-    if (!txMerchant || !targetMerchant) continue;
+      // Allow date tolerance for matching
+      const dateDist = dateDistanceDays(txDate, cand.csvDate);
+      if (dateDist === null || dateDist > DATE_TOLERANCE_DAYS) continue;
 
-    const score = sequenceMatcherRatio(targetMerchant, txMerchant);
-    // Lower threshold for fuzzy matching after exact date+amount match
-    if (score > bestScore && score >= 0.6) {
-      bestScore = score;
-      bestMatch = tx;
+      const txAmountCents = Math.round(Math.abs(Number(tx.amount)) * 100);
+      if (txAmountCents !== targetAmountCents) continue;
+
+      const txMerchant = normalizeMerchant(tx.merchant_name || tx.name || "");
+      if (!txMerchant || !targetMerchant) continue;
+
+      const score = sequenceMatcherRatio(targetMerchant, txMerchant);
+      // Higher threshold for closer dates; require >=0.6 minimum
+      const minScore = dateDist === 0 ? 0.6 : 0.7;
+      if (score > bestScore && score >= minScore) {
+        bestScore = score;
+        bestDateDist = dateDist;
+        bestMatch = tx;
+        bestCsvDate = cand.csvDate;
+        bestDbDate = txDate;
+      }
     }
   }
 
   if (bestMatch) {
-    return { match: bestMatch, matchScore: bestScore };
+    return { match: bestMatch, matchScore: bestScore, dateDistance: bestDateDist, csvDate: bestCsvDate, dbDate: bestDbDate };
   }
   return null;
+}
+
+async function csvTransactionId(accountId: string, row: CsvRow): Promise<string> {
+  const key = [
+    accountId,
+    normalizeDate(row.postDate),
+    normalizeDate(row.transactionDate),
+    Math.round(row.amount * 100), // signed cents
+    normalizeMerchant(row.description),
+    normalizeType(row.type),
+  ].join("|");
+  // Use a simple hash for deterministic ID (Deno has crypto available)
+  const encoder = new TextEncoder();
+  const data = encoder.encode(key);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+  return `csv_${hashHex.slice(0, 32)}`;
 }
 
 export async function confirmCsvImport(
@@ -285,7 +373,7 @@ export async function confirmCsvImport(
   accountId: string,
   rows: CsvRow[],
   filename: string,
-): Promise<{ inserted: number; errors: string[] }> {
+): Promise<{ inserted: number; duplicates: number; errors: string[] }> {
   const { data: account } = await supabase
     .from("plaid_credit_accounts")
     .select("account_id, item_id, user_id")
@@ -295,18 +383,52 @@ export async function confirmCsvImport(
 
   if (!account) throw new Error("Account not found");
 
+  // Fetch existing transactions for duplicate checking
+  const existingTxns = await fetchExistingTransactions(userId, accountId);
+  const existingTxIdSet = new Set(existingTxns.map(t => t.transaction_id));
+
+  // Track matched DB transaction IDs to prevent multiple CSV rows matching same DB txn
+  const matchedTxIds = new Set<string>();
+
   const records: Record<string, unknown>[] = [];
   const errors: string[] = [];
+  let duplicates = 0;
 
   for (const row of rows) {
     try {
       const plaidAmount = -row.amount;
-      const transactionId = `csv_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const amountCents = Math.round(Math.abs(plaidAmount) * 100);
+      const normMerchant = normalizeMerchant(row.description);
       const normPostDate = normalizeDate(row.postDate);
       const normTransDate = normalizeDate(row.transactionDate);
 
+      // Check for duplicate using date + amount + merchant matching (catches Plaid-synced txns)
+      const allCandidates: DateCandidate[] = [];
+      if (normPostDate) {
+        allCandidates.push({ csvDate: normPostDate, dateType: 'posted' });
+        allCandidates.push({ csvDate: normPostDate, dateType: 'authorized' });
+      }
+      if (normTransDate) {
+        allCandidates.push({ csvDate: normTransDate, dateType: 'posted' });
+        allCandidates.push({ csvDate: normTransDate, dateType: 'authorized' });
+      }
+
+      const match = findBestMatchForDateAmount(existingTxns, normMerchant, amountCents, allCandidates, matchedTxIds);
+      if (match) {
+        matchedTxIds.add((match.match.transaction_id as string));
+        duplicates++;
+        continue;
+      }
+
+      // Also check by deterministic ID (for previously CSV-imported transactions with csv_<hash> IDs)
+      const detId = await csvTransactionId(accountId, row);
+      if (existingTxIdSet.has(detId)) {
+        duplicates++;
+        continue;
+      }
+
       records.push({
-        transaction_id: transactionId,
+        transaction_id: detId,
         account_id: accountId,
         amount: plaidAmount,
         iso_currency_code: "USD",
@@ -330,6 +452,7 @@ export async function confirmCsvImport(
   }
 
   if (records.length > 0) {
+    // Use upsert with conflict handling to prevent duplicates from race conditions
     const { error } = await supabase
       .from("plaid_transactions")
       .upsert(records, { onConflict: "transaction_id" });
@@ -342,11 +465,11 @@ export async function confirmCsvImport(
     filename,
     total_rows: rows.length,
     new_count: records.length,
-    duplicate_count: 0,
+    duplicate_count: duplicates,
     error_count: errors.length,
   });
 
-  return { inserted: records.length, errors };
+  return { inserted: records.length, duplicates, errors };
 }
 
 function mapChaseCategory(chaseCat: string): string {

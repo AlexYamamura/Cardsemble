@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:cardsemble/core/utils/currency.dart';
 import 'package:cardsemble/core/core.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_screen.dart';
@@ -380,21 +379,29 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
                        });
                        return;
                      }
-                     confirmResult.fold(
-                       (result) {
-                         setState(() {
-                           _isImporting = false;
-                         });
-                         if (mounted) {
-                           ScaffoldMessenger.of(context).showSnackBar(
-                             SnackBar(
-                                 content: Text(
-                                     'Imported ${result.inserted} transactions, ${result.errors.length} errors.')),
-                           );
-                         }
-                         // Refresh transactions
-                         context.read<TransactionsNotifier>().refresh();
-                       },
+confirmResult.fold(
+                        (result) {
+                          setState(() {
+                            _isImporting = false;
+                          });
+                          if (mounted) {
+                            final parts = [
+                              'Imported ${result.inserted} transactions',
+                            ];
+                            if (result.duplicates > 0) {
+                              parts.add('${result.duplicates} duplicates skipped');
+                            }
+                            if (result.errors.isNotEmpty) {
+                              parts.add('${result.errors.length} errors');
+                            }
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                  content: Text(parts.join(', '))),
+                            );
+                          }
+                          // Refresh transactions
+                          context.read<TransactionsNotifier>().refresh();
+                        },
                        (failure) {
                          setState(() {
                            _isImporting = false;
