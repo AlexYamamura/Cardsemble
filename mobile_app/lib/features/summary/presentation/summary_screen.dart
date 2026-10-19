@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cardsemble/core/core.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
-import 'package:cardsemble/features/accounts/presentation/accounts_screen.dart';
 import 'package:cardsemble/features/accounts/domain/entities/account.dart';
 import 'package:cardsemble/features/auth/presentation/auth_notifier.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
@@ -186,11 +185,49 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
     }
   }
 
-   void _openAccounts() {
-     Navigator.of(context).push(
-       MaterialPageRoute<void>(builder: (_) => const AccountsScreen()),
-     );
-   }
+     Future<void> _openAccounts() async {
+       final accountsNotifier = context.read<AccountsNotifier>();
+       // Create the link token
+       final success = await accountsNotifier.createLinkToken();
+       if (!success) {
+         if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text('Failed to create link token')),
+           );
+         }
+         return;
+       }
+       final linkToken = accountsNotifier.linkToken;
+       if (linkToken == null) {
+         if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text('Link token is null')),
+           );
+         }
+         return;
+       }
+        try {
+          // TODO: Implement Plaid Link integration
+          // For now, simulate success to allow app to build
+          final result = {'public_token': 'test_public_token'};
+          if (result['public_token'] != null) {
+            await accountsNotifier.exchangePublicToken(
+              publicToken: result['public_token'] as String,
+            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Card linked successfully (simulated)')),
+              );
+            }
+          }
+        } catch (e) {
+         if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+             SnackBar(content: Text('Error linking card: $e')),
+           );
+         }
+       }
+     }
     Future<void> _importCsv() async {
       final accountsNotifier = context.read<AccountsNotifier>();
       final statementSummary = accountsNotifier.statementSummary;
