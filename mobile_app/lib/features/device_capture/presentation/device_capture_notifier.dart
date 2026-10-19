@@ -21,6 +21,7 @@ class DeviceCaptureNotifier extends ChangeNotifier {
   bool _isConfigured = false;
   bool _hasNotificationAccess = false;
   String? _deviceId;
+  bool _step1AutoConfigured = false;
 
   List<HouseholdPerson> get people => _people;
   bool get isLoading => _isLoading;
@@ -29,6 +30,12 @@ class DeviceCaptureNotifier extends ChangeNotifier {
   bool get isConfigured => _isConfigured;
   bool get hasNotificationAccess => _hasNotificationAccess;
   String? get deviceId => _deviceId;
+  bool get step1AutoConfigured => _step1AutoConfigured;
+
+  void setStep1AutoConfigured(bool value) {
+    _step1AutoConfigured = value;
+    notifyListeners();
+  }
 
   Future<void> loadPeople() async {
     try {
