@@ -64,9 +64,14 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
     if (mounted) setState(() {});
   }
 
-  bool get _accountReady {
-    final summary = _accountsNotifier?.statementSummary;
-    return summary != null && summary.accounts.isNotEmpty;
+  /// True while the statement-cycle account list has not settled yet.
+  /// Do not use AccountsNotifier.isLoading: it is shared with loadConnections,
+  /// so it can flip false while statement cycles are still in flight.
+  bool get _accountsLoading {
+    final accounts = _accountsNotifier;
+    return accounts != null &&
+        accounts.statementSummary == null &&
+        accounts.error == null;
   }
 
   DateTimeRange _currentMonthRange() {
@@ -192,7 +197,13 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
       if (statementSummary == null || statementSummary.accounts.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No accounts available. Please link a card first.')),
+            SnackBar(
+              content: Text(
+                _accountsLoading
+                    ? 'Accounts are still loading. Please try again in a moment.'
+                    : 'No accounts available. Please link a card first.',
+              ),
+            ),
           );
         }
         return;
@@ -650,8 +661,10 @@ confirmResult.fold(
         }).toList(),
       ),
       const SizedBox(height: 8),
-       Row(
-         mainAxisAlignment: MainAxisAlignment.center,
+       Wrap(
+         alignment: WrapAlignment.center,
+         spacing: 12,
+         runSpacing: 8,
          children: [
            FilledButton.icon(
              onPressed: _openAccounts,
@@ -663,11 +676,16 @@ confirmResult.fold(
                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
              ),
            ),
-           const SizedBox(width: 12),
            FilledButton.icon(
-             onPressed: _isImporting || !_accountReady ? null : _importCsv,
+             onPressed: _isImporting ? null : _importCsv,
              icon: const Icon(Icons.upload_file, size: 18),
-             label: Text(_isImporting ? 'Importing...' : 'Import CSV'),
+             label: Text(
+               _isImporting
+                   ? 'Importing...'
+                   : _accountsLoading
+                       ? 'Loading accounts...'
+                       : 'Import CSV',
+             ),
              style: FilledButton.styleFrom(
                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                textStyle:
