@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/device_capture/presentation/device_capture_notifier.dart';
 import 'package:cardsemble/features/device_capture/presentation/settings_step.dart';
 import 'package:cardsemble/features/household/domain/entities/household.dart';
@@ -57,6 +58,7 @@ class _CaptureSettingsScreenState extends State<CaptureSettingsScreen> {
         }
       },
       child: Scaffold(
+        backgroundColor: AppColors.cream,
         appBar: AppBar(
           leading: widget.firstRun
               ? null

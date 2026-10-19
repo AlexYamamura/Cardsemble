@@ -1,14 +1,16 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cardsemble/theme/app_colors.dart';
+import 'package:cardsemble/features/card_events/presentation/card_events_screen.dart';
 import 'package:cardsemble/features/device_capture/presentation/device_capture_notifier.dart';
 import 'package:cardsemble/features/device_capture/presentation/capture_settings_screen.dart';
+import 'package:cardsemble/features/household/presentation/people_screen.dart';
+import 'package:cardsemble/features/research/presentation/research_screen.dart';
 import 'package:cardsemble/features/summary/presentation/summary_screen.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_screen.dart';
-import 'package:cardsemble/features/card_events/presentation/card_events_screen.dart';
-import 'package:cardsemble/features/household/presentation/people_screen.dart';
 
 class _TabInfo {
   const _TabInfo({
@@ -42,7 +44,7 @@ class _MainTabsState extends State<MainTabs>
       GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _eventsNavigatorKey =
       GlobalKey<NavigatorState>();
-  final GlobalKey<NavigatorState> _peopleNavigatorKey =
+  final GlobalKey<NavigatorState> _researchNavigatorKey =
       GlobalKey<NavigatorState>();
   static const _settingsReviewedKey = 'capture_settings_reviewed';
   static const List<_TabInfo> _tabs = [
@@ -62,9 +64,9 @@ class _MainTabsState extends State<MainTabs>
       label: 'Events',
     ),
     _TabInfo(
-      icon: Icons.people_outline,
-      selectedIcon: Icons.people,
-      label: 'People',
+      icon: Icons.travel_explore_outlined,
+      selectedIcon: Icons.travel_explore,
+      label: 'Research',
     ),
   ];
 
@@ -179,28 +181,37 @@ class _MainTabsState extends State<MainTabs>
 
   Future<void> _openSettings() async {
     if (!mounted) return;
-    await Navigator.of(context, rootNavigator: true).push<void>(
-      PageRouteBuilder<void>(
-        transitionDuration: const Duration(milliseconds: 300),
-        reverseTransitionDuration: const Duration(milliseconds: 250),
-        pageBuilder: (_, __, ___) => const CaptureSettingsScreen(firstRun: false),
-        transitionsBuilder: (_, animation, __, child) {
-          final curved = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-          );
-          return FadeTransition(
-            opacity: curved,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.1),
-                end: Offset.zero,
-              ).animate(curved),
-              child: child,
-            ),
-          );
-        },
-      ),
+    await Navigator.of(context, rootNavigator: true)
+        .push<void>(_slideFadeRoute(const CaptureSettingsScreen(firstRun: false)));
+  }
+
+  Future<void> _openManageHousehold() async {
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true)
+        .push<void>(_slideFadeRoute(const PeopleScreen()));
+  }
+
+  PageRouteBuilder<void> _slideFadeRoute(Widget page) {
+    return PageRouteBuilder<void>(
+      transitionDuration: const Duration(milliseconds: 300),
+      reverseTransitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (_, __, ___) => page,
+      transitionsBuilder: (_, animation, __, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.1),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      },
     );
   }
 
@@ -232,66 +243,84 @@ class _MainTabsState extends State<MainTabs>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [
-              Color(0xFFDDD1BD),
-              Color(0xFFD5CFC2),
-            ],
-          ),
-        ),
-        child: PageView(
-          controller: _pageController,
-          physics: const _SensitiveTabPhysics(),
-          onPageChanged: (index) {
-            if (_activeTabIndex != index) {
-              setState(() => _activeTabIndex = index);
-            }
-            if (_tabController.index != index) {
-              _tabController.index = index;
-            }
-          },
-          children: [
-            _buildTabNavigator(
-              index: 0,
-              navigatorKey: _summaryNavigatorKey,
-              rootBuilder: (_) => SummaryScreen(
-                onShowTransactions: _showTransactionsTab,
-                onOpenSettings: _openSettings,
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Color(0xFFDDD1BD),
+                    Color(0xFFD5CFC2),
+                  ],
+                ),
               ),
             ),
-            _buildTabNavigator(
-              index: 1,
-              navigatorKey: _transactionsNavigatorKey,
-              rootBuilder: (_) => const TransactionsScreen(),
-            ),
-            _buildTabNavigator(
-              index: 2,
-              navigatorKey: _eventsNavigatorKey,
-              rootBuilder: (_) => const CardEventsScreen(),
-            ),
-            _buildTabNavigator(
-              index: 3,
-              navigatorKey: _peopleNavigatorKey,
-              rootBuilder: (_) => const PeopleScreen(),
-            ),
-          ],
+          ),
+          PageView(
+            controller: _pageController,
+            physics: const _SensitiveTabPhysics(),
+            onPageChanged: (index) {
+              if (_activeTabIndex != index) {
+                setState(() => _activeTabIndex = index);
+              }
+              if (_tabController.index != index) {
+                _tabController.index = index;
+              }
+            },
+            children: [
+              _buildTabNavigator(
+                index: 0,
+                navigatorKey: _summaryNavigatorKey,
+                rootBuilder: (_) => SummaryScreen(
+                  onShowTransactions: _showTransactionsTab,
+                  onOpenSettings: _openSettings,
+                  onOpenManageHousehold: _openManageHousehold,
+                ),
+              ),
+              _buildTabNavigator(
+                index: 1,
+                navigatorKey: _transactionsNavigatorKey,
+                rootBuilder: (_) => TransactionsScreen(
+                  onOpenSettings: _openSettings,
+                  onOpenManageHousehold: _openManageHousehold,
+                ),
+              ),
+              _buildTabNavigator(
+                index: 2,
+                navigatorKey: _eventsNavigatorKey,
+                rootBuilder: (_) => CardEventsScreen(
+                  onOpenSettings: _openSettings,
+                  onOpenManageHousehold: _openManageHousehold,
+                ),
+              ),
+              _buildTabNavigator(
+                index: 3,
+                navigatorKey: _researchNavigatorKey,
+                rootBuilder: (_) => ResearchScreen(
+                  onOpenSettings: _openSettings,
+                  onOpenManageHousehold: _openManageHousehold,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      bottomNavigationBar: ColoredBox(
+        color: AppColors.surface,
+        child: ValueListenableBuilder<int>(
+          valueListenable: _tabIndexNotifier,
+          builder: (context, value, _) => _AnimatedTabBar(
+            tabs: _tabs,
+            selectedIndex: value.toDouble(),
+            pageController: _pageController,
+            onSelected: _selectTab,
+          ),
         ),
       ),
-       bottomNavigationBar: ValueListenableBuilder<int>(
-         valueListenable: _tabIndexNotifier,
-         builder: (context, value, _) => _AnimatedTabBar(
-           tabs: _tabs,
-           selectedIndex: value.toDouble(),
-           fractionalIndex: _pageController.hasClients
-               ? _pageController.page ?? value.toDouble()
-               : value.toDouble(),
-           onSelected: _selectTab,
-         ),
-       ),
     );
   }
 
@@ -365,13 +394,13 @@ class _AnimatedTabBar extends StatefulWidget {
   const _AnimatedTabBar({
     required this.tabs,
     required this.selectedIndex,
-    required this.fractionalIndex,
+    required this.pageController,
     required this.onSelected,
   });
 
   final List<_TabInfo> tabs;
   final double selectedIndex;
-  final double fractionalIndex;
+  final PageController pageController;
   final ValueChanged<int> onSelected;
 
   @override
@@ -381,59 +410,69 @@ class _AnimatedTabBar extends StatefulWidget {
 class _AnimatedTabBarState extends State<_AnimatedTabBar> {
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final n = widget.tabs.length;
 
-    return ColoredBox(
-      color: theme.colorScheme.surface,
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          // A bounded height is essential: a Scaffold bottomNavigationBar is
-          // laid out with an unbounded/loose height, so an unconstrained
-          // Stack would expand to the full screen and hide the body.
-          height: _kNavBarHeight,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final itemWidth = constraints.maxWidth / n;
-              // Drive the pill from the fractional page position so the
-              // highlight follows the finger during a swipe and tracks a
-              // programmatic tab animation.
-              final left = widget.fractionalIndex * itemWidth +
-                  (itemWidth - _kNavIndicatorWidth) / 2;
+    return SafeArea(
+      top: false,
+      child: SizedBox(
+        // A bounded height is essential: a Scaffold bottomNavigationBar is
+        // laid out with an unbounded/loose height, so an unconstrained
+        // Stack would expand to the full screen and hide the body.
+        height: _kNavBarHeight,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final itemWidth = constraints.maxWidth / n;
+            return AnimatedBuilder(
+              animation: widget.pageController,
+              builder: (context, _) {
+                // Drive the pill from the live fractional page position so it
+                // follows the finger during a swipe and tracks programmatic
+                // tab animations. Derive width/position from tab count so the
+                // pill stays centered under each tab regardless of count.
+                final page = widget.pageController.hasClients
+                    ? widget.pageController.page ?? widget.selectedIndex
+                    : widget.selectedIndex;
+                final index = page.clamp(0.0, n - 1.0);
+                final pillWidth = max(
+                  16.0,
+                  min(_kNavIndicatorWidth.toDouble(), itemWidth - 8.0),
+                );
+                final left = ((index + 0.5) * itemWidth - pillWidth / 2)
+                    .clamp(0.0, constraints.maxWidth - pillWidth);
 
-              return Stack(
-                fit: StackFit.expand,
-                children: [
-                  Positioned(
-                    top: _kNavIndicatorTop,
-                    left: left,
-                    width: _kNavIndicatorWidth,
-                    height: _kNavIndicatorHeight,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(16),
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Positioned(
+                      top: _kNavIndicatorTop,
+                      left: left,
+                      width: pillWidth,
+                      height: _kNavIndicatorHeight,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                       ),
                     ),
-                  ),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (int i = 0; i < n; i++)
-                        Expanded(
-                          child: _Destination(
-                            tab: widget.tabs[i],
-                            selected: (i - widget.selectedIndex).abs() < 0.5,
-                            onTap: () => widget.onSelected(i),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (int i = 0; i < n; i++)
+                          Expanded(
+                            child: _Destination(
+                              tab: widget.tabs[i],
+                              selected: (i - widget.selectedIndex).abs() < 0.5,
+                              onTap: () => widget.onSelected(i),
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
-                ],
-              );
-            },
-          ),
+                      ],
+                    ),
+                  ],
+                );
+              },
+            );
+          },
         ),
       ),
     );

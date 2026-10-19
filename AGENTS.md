@@ -106,8 +106,9 @@ Flutter dependencies declared in `mobile_app/pubspec.yaml` include `provider`, `
 
 ### Screens, widgets, navigation, and UI state
 
-- **App shell/navigation:** `mobile_app/lib/app/router/app_router.dart` (`MainTabs`). Tabs are Summary (0), Transactions (1), Events (2), People (3) in a `PageView`; `_showTransactionsTab` animates to index 1. There is no `go_router` route table despite the dependency.
-- **Settings/capture overlay:** `app_router.dart` (MainTabs now uses per-tab navigators and routes Settings via `CaptureSettingsScreen`) plus `features/device_capture/presentation/capture_settings_screen.dart`. The Summary app-bar settings icon opens the Settings route.
+- **App shell/navigation:** `mobile_app/lib/app/router/app_router.dart` (`MainTabs`). Tabs are Summary (0), Transactions (1), Events (2), Research (3) in a `PageView`; `_showTransactionsTab` animates to index 1. The People tab was removed; household people management is reachable from the gear menu as "Manage Household", which pushes `PeopleScreen` as a route. There is no `go_router` route table despite the dependency.
+- **Settings/capture overlay:** `app_router.dart` (MainTabs now uses per-tab navigators and routes Settings via `CaptureSettingsScreen`) plus `features/device_capture/presentation/capture_settings_screen.dart`. The Summary app-bar gear icon opens a dropdown menu with "Settings", "Manage Household", and "Sign out"; "Settings" opens the `CaptureSettingsScreen` route, "Manage Household" pushes `PeopleScreen`, and "Sign out" signs out via `AuthNotifier`.
+- **Research tab:** `mobile_app/lib/features/research/presentation/research_screen.dart` (`ResearchScreen`). Placeholder tab listing the currently connected credit cards from `AccountsNotifier.connections` above a local search filter; intended to be backed by a repository list of all credit cards.
 - **Bank/account screen:** `features/summary/presentation/summary_screen.dart` (`_openAccounts`) pushes `features/accounts/presentation/accounts_screen.dart` via `MaterialPageRoute`. Accounts screen also has a "Link Account" FAB.
 - **Transactions UI:** `features/transactions/presentation/transactions_screen.dart` and widgets under `presentation/widgets/`.
 - **Summary UI:** `features/summary/presentation/summary_screen.dart`.
@@ -182,8 +183,8 @@ Data direction: Flutter -> Edge Function `public-config` -> Supabase config; Flu
 
 ### 2. Shell navigation and shared UI state
 
-1. `MainTabs` builds a `PageView` with Summary, Transactions, Events, People and a custom `_AnimatedTabBar`.
-2. Summary's "Link a card" pushes `AccountsScreen`; Summary's settings icon calls `_openSettings` to show the capture setup overlay.
+1. `MainTabs` builds a `PageView` with Summary, Transactions, Events, Research and a custom `_AnimatedTabBar`.
+2. Summary's "Link a card" pushes `AccountsScreen`; Summary's gear icon opens a dropdown menu ("Settings", "Manage Household", "Sign out"); "Settings" calls `_openSettings` to show the capture setup overlay, "Manage Household" pushes `PeopleScreen`, "Sign out" signs out.
 3. Summary and Transactions both read the same `TransactionsNotifier`. Summary calls `loadSummaryTransactions` for its date range; Transactions calls `loadTransactions` for the list.
 4. On first launch, MainTabs checks for unreviewed settings and routes to `CaptureSettingsScreen(firstRun: true)` as a modal route. The screen uses `PopScope` to prevent going back until setup is complete, requiring `isConfigured && hasNotificationAccess` before allowing exit via the Continue button.
 5. `didChangeAppLifecycleState(resumed)` rechecks capture status after returning from Android notification settings.

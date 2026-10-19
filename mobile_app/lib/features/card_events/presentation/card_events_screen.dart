@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
 import 'package:cardsemble/features/card_events/presentation/card_events_notifier.dart';
 import 'package:cardsemble/features/card_events/domain/card_events_domain.dart';
 import 'package:cardsemble/core/utils/currency.dart';
 
 class CardEventsScreen extends StatefulWidget {
-  const CardEventsScreen({super.key});
+  const CardEventsScreen({
+    super.key,
+    this.onOpenSettings,
+    this.onOpenManageHousehold,
+  });
+
+  final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenManageHousehold;
 
   @override
   State<CardEventsScreen> createState() => _CardEventsScreenState();
@@ -31,6 +39,10 @@ class _CardEventsScreenState extends State<CardEventsScreen> with AutomaticKeepA
       appBar: AppBar(
         title: const Text('Card Events'),
         actions: [
+          SettingsGearMenu(
+            onOpenSettings: widget.onOpenSettings,
+            onOpenManageHousehold: widget.onOpenManageHousehold,
+          ),
           IconButton(
             icon: const Icon(Icons.sync),
             onPressed: () => _refresh(context),

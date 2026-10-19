@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:cardsemble/core/error/failure.dart';
+import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
 import 'package:cardsemble/core/utils/date_utils.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
@@ -29,7 +30,14 @@ Color _personColor(String personId, List<HouseholdPerson> people) {
 }
 
 class TransactionsScreen extends StatefulWidget {
-  const TransactionsScreen({super.key});
+  const TransactionsScreen({
+    super.key,
+    this.onOpenSettings,
+    this.onOpenManageHousehold,
+  });
+
+  final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenManageHousehold;
 
   @override
   State<TransactionsScreen> createState() => _TransactionsScreenState();
@@ -71,6 +79,10 @@ class _TransactionsScreenState extends State<TransactionsScreen>
       appBar: AppBar(
         title: const Text('Transactions'),
         actions: [
+          SettingsGearMenu(
+            onOpenSettings: widget.onOpenSettings,
+            onOpenManageHousehold: widget.onOpenManageHousehold,
+          ),
           IconButton(
             icon: const Icon(Icons.sync),
             onPressed: () => _refresh(context),

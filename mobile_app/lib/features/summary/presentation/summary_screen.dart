@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cardsemble/core/core.dart';
+import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/accounts/domain/entities/account.dart';
-import 'package:cardsemble/features/auth/presentation/auth_notifier.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
@@ -17,10 +17,12 @@ class SummaryScreen extends StatefulWidget {
     super.key,
     required this.onShowTransactions,
     this.onOpenSettings,
+    this.onOpenManageHousehold,
   });
 
   final VoidCallback onShowTransactions;
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenManageHousehold;
 
   @override
   State<SummaryScreen> createState() => _SummaryScreenState();
@@ -481,26 +483,9 @@ confirmResult.fold(
       appBar: AppBar(
         title: const Text('Monthly summary'),
         actions: [
-          if (widget.onOpenSettings != null)
-            IconButton(
-              tooltip: 'Settings',
-              onPressed: widget.onOpenSettings,
-              icon: const Icon(Icons.settings_outlined),
-            ),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh),
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'Account',
-            onSelected: (value) async {
-              if (value != 'sign-out') return;
-              await context.read<AuthNotifier>().signOut();
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'sign-out', child: Text('Sign out')),
-            ],
+          SettingsGearMenu(
+            onOpenSettings: widget.onOpenSettings,
+            onOpenManageHousehold: widget.onOpenManageHousehold,
           ),
         ],
       ),
