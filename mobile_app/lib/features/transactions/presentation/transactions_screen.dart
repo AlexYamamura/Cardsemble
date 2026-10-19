@@ -163,30 +163,29 @@ class _TransactionsScreenState extends State<TransactionsScreen>
       ),
     );
 
-    if (displayTransactions.isEmpty) {
-      return CustomScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          filterHeader,
-          if (notifier.hasActiveFilters)
-            const SliverToBoxAdapter(child: SizedBox(height: 12)),
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const SizedBox(height: 72),
-                _EmptyState(
-                  hasFilters: notifier.hasActiveFilters,
-                  hasAnyTransactions: notifier.transactions.isNotEmpty,
-                ),
-              ],
-            ),
-          ),
-        ],
-      );
-    }
+            if (displayTransactions.isEmpty) {
+              return CustomScrollView(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  filterHeader,
+                  const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 72),
+                        _EmptyState(
+                          hasFilters: notifier.hasActiveFilters,
+                          hasAnyTransactions: notifier.transactions.isNotEmpty,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }
 
     final itemCount = displayTransactions.length + (notifier.hasMore ? 1 : 0);
     return CustomScrollView(
@@ -194,8 +193,7 @@ class _TransactionsScreenState extends State<TransactionsScreen>
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
         filterHeader,
-        if (notifier.hasActiveFilters)
-          const SliverToBoxAdapter(child: SizedBox(height: 12)),
+        const SliverToBoxAdapter(child: SizedBox(height: 12)),
         SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           sliver: SliverList(
@@ -597,43 +595,48 @@ class _TransactionFilterBar extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _FilterMenuButton(
-              label: 'Credit card',
-              selectedValue: selectedAccountId,
-              items: [
-                const _FilterMenuItem(value: null, label: 'All cards'),
-                ...accounts.map(
-                  (a) => _FilterMenuItem(
-                    value: a.accountId,
-                    label: a.displayName ?? a.accountName,
+        // Horizontal scroll container for filter dropdowns
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _FilterMenuButton(
+                label: 'Credit card',
+                selectedValue: selectedAccountId,
+                items: [
+                  const _FilterMenuItem(value: null, label: 'All cards'),
+                  ...accounts.map(
+                    (a) => _FilterMenuItem(
+                      value: a.accountId,
+                      label: a.displayName ?? a.accountName,
+                    ),
                   ),
-                ),
-              ],
-              onChanged: onAccountChanged,
-            ),
-            _FilterMenuButton(
-              label: 'Assigned to',
-              selectedValue: selectedPersonId,
-              items: [
-                const _FilterMenuItem(value: null, label: 'Everyone'),
-                ...people.map(
-                  (p) => _FilterMenuItem(value: p.id, label: p.displayName),
-                ),
-              ],
-              onChanged: onPersonChanged,
-            ),
-            _DateRangeFilterButton(
-              label: 'Date range',
-              selectedRange: selectedDateRange,
-              onChanged: onDateRangeChanged,
-              onPressed: () => _showDateRangeMenu(context),
-            ),
-          ],
+                ],
+                onChanged: onAccountChanged,
+              ),
+              const SizedBox(width: 8),
+              _FilterMenuButton(
+                label: 'Assigned to',
+                selectedValue: selectedPersonId,
+                items: [
+                  const _FilterMenuItem(value: null, label: 'Everyone'),
+                  ...people.map(
+                    (p) => _FilterMenuItem(value: p.id, label: p.displayName),
+                  ),
+                ],
+                onChanged: onPersonChanged,
+              ),
+              const SizedBox(width: 8),
+              _DateRangeFilterButton(
+                label: 'Date range',
+                selectedRange: selectedDateRange,
+                onChanged: onDateRangeChanged,
+                onPressed: () => _showDateRangeMenu(context),
+              ),
+            ],
+          ),
         ),
         if (hasActiveFilters)
           _ActiveFilterChipsCard(
@@ -777,10 +780,11 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-/// Sentinel value used by filter menu buttons so the "All" / "Everyone" /
-/// reset option is a real, non-null `PopupMenuItem` value. `null` is treated
-/// as a menu cancel by `PopupMenuButton.showButtonMenu` and never reaches
-/// `onSelected`, so a non-null improbable constant is used instead.
+
+// Sentinel value used by filter menu buttons so the "All" / "Everyone" /
+// reset option is a real, non-null `PopupMenuItem` value. `null` is treated
+// as a menu cancel by `PopupMenuButton.showButtonMenu` and never reaches
+// `onSelected`, so a non-null improbable constant is used instead.
 const String _kAllFilter = '__cardsemble_all__';
 
 class _FilterMenuButton extends StatelessWidget {
@@ -908,6 +912,8 @@ class _DateRangeFilterButton extends StatelessWidget {
     );
   }
 }
+
+
 
 class _TransactionTile extends StatelessWidget {
   const _TransactionTile({

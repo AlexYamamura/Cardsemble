@@ -195,26 +195,14 @@ class TransactionsNotifier extends ChangeNotifier {
   }
 
   void setAccountFilter(String? accountId) {
-    // Re-selecting the same account (including clearing an already-null one)
-    // must not wipe the date filter or trigger a redundant reload.
     if (_selectedAccountId == accountId) return;
-    // Switching the account chip must not compound with a stale date filter
-    // (e.g. one synced from the summary tab). Clear the date range so the new
-    // chip applies fresh from the main list for the current month.
-    _dateRange = null;
     _selectedAccountId = accountId;
     notifyListeners();
     _scheduleListReload();
   }
 
   void setPersonFilter(String? personId) {
-    // Re-selecting the same person (including clearing an already-null one)
-    // must not wipe the date filter or trigger a redundant reload.
     if (_selectedPersonId == personId) return;
-    // Switching the person chip must not compound with a stale date filter
-    // (e.g. one synced from the summary tab). Clear the date range so the new
-    // chip applies fresh from the main list for the current month.
-    _dateRange = null;
     _selectedPersonId = personId;
     notifyListeners();
     _scheduleListReload();

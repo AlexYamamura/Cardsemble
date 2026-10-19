@@ -665,34 +665,34 @@ confirmResult.fold(
          alignment: WrapAlignment.center,
          spacing: 12,
          runSpacing: 8,
-         children: [
-           FilledButton.icon(
-             onPressed: _openAccounts,
-             icon: const Icon(Icons.add, size: 18),
-             label: const Text('Link a card'),
-             style: FilledButton.styleFrom(
-               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-               textStyle:
-                   const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-             ),
-           ),
-           FilledButton.icon(
-             onPressed: _isImporting ? null : _importCsv,
-             icon: const Icon(Icons.upload_file, size: 18),
-             label: Text(
-               _isImporting
-                   ? 'Importing...'
-                   : _accountsLoading
-                       ? 'Loading accounts...'
-                       : 'Import CSV',
-             ),
-             style: FilledButton.styleFrom(
-               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-               textStyle:
-                   const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-             ),
-           ),
-         ],
+          children: [
+            FilledButton.icon(
+              onPressed: _openAccounts,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Link a card'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                textStyle:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: _isImporting ? null : _importCsv,
+              icon: _isImporting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.upload_file, size: 18),
+              label: const Text('Import CSV'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                textStyle:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+              ),
+            ),
+          ],
        ),
       const SizedBox(height: 12),
       _BreakdownCard(
