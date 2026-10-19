@@ -32,6 +32,11 @@ class AppColors {
 
   // Approved transaction tile background (soft sage green)
   static const Color sageGreen = Color(0xFF7C916F);
+
+  // Pay action sheet app shortcut brand colors
+  static const Color brandFidelity = Color(0xFF34C759); // brighter green
+  static const Color brandChase = Color(0xFF005A9C);    // slightly dark blue
+  static const Color brandVenmo = Color(0xFF9CCCFF);    // baby blue
 }
 
 extension AppColorsScheme on ColorScheme {

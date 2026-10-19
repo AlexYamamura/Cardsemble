@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cardsemble/core/core.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
+import 'package:cardsemble/theme/app_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -185,17 +186,27 @@ class _PayAppButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
      final bool isLogo = logo != _AppLogo.copy;
-     final Color backgroundColor = logo == _AppLogo.copy
-         ? theme.colorScheme.surfaceContainerHighest
-         : theme.colorScheme.primaryContainer;
-     final Color iconColor = logo == _AppLogo.copy
-         ? theme.colorScheme.onSurface
-         : theme.colorScheme.onPrimaryContainer;
-     return ElevatedButton(
+    final Color backgroundColor;
+    final Color foregroundColor;
+    switch (logo) {
+      case _AppLogo.fidelity:
+        backgroundColor = AppColors.brandFidelity;
+        foregroundColor = Colors.white;
+      case _AppLogo.chase:
+        backgroundColor = AppColors.brandChase;
+        foregroundColor = Colors.white;
+      case _AppLogo.venmo:
+        backgroundColor = AppColors.brandVenmo;
+        foregroundColor = AppColors.charcoal;
+      case _AppLogo.copy:
+        backgroundColor = theme.colorScheme.surfaceContainerHighest;
+        foregroundColor = theme.colorScheme.onSurface;
+    }
+    return ElevatedButton(
        onPressed: onPressed,
        style: ElevatedButton.styleFrom(
           backgroundColor: backgroundColor,
-          foregroundColor: iconColor,
+          foregroundColor: foregroundColor,
          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
          shape: RoundedRectangleBorder(
            borderRadius: BorderRadius.circular(12),
@@ -204,11 +215,12 @@ class _PayAppButton extends StatelessWidget {
        child: Row(
          mainAxisSize: MainAxisSize.min,
          children: [
-           if (isLogo) _LogoWidget(logo: logo, size: 24, color: iconColor),
+           if (isLogo) _LogoWidget(logo: logo, size: 24, color: foregroundColor),
            if (isLogo) const SizedBox(width: 12),
            Text(label,
                style: theme.textTheme.titleMedium?.copyWith(
                  fontWeight: FontWeight.w600,
+                 color: foregroundColor,
                )),
          ],
        ),
