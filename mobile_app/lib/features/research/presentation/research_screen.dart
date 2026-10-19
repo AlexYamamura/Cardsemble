@@ -71,20 +71,22 @@ class _ResearchScreenState extends State<ResearchScreen> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search connected cards',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              onChanged: (value) => setState(() => _query = value),
-            ),
-          ),
+           Padding(
+             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+             child: TextField(
+               controller: _searchController,
+               decoration: InputDecoration(
+                 hintText: 'Search connected cards',
+                 prefixIcon: const Icon(Icons.search),
+                 filled: true,
+                 fillColor: Colors.white,
+                 border: OutlineInputBorder(
+                   borderRadius: BorderRadius.circular(8),
+                 ),
+               ),
+               onChanged: (value) => setState(() => _query = value),
+             ),
+           ),
           Expanded(
             child: Consumer<AccountsNotifier>(
               builder: (context, accounts, _) {
