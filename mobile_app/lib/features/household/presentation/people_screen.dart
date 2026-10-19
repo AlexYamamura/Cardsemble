@@ -103,48 +103,35 @@ class _PeopleScreenState extends State<PeopleScreen>
                                 ),
                               ),
                               title: Text(person.displayName),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (!person.isDefault)
-                                    TextButton.icon(
-                                      icon: const Icon(Icons.star_outline,
-                                          size: 18),
-                                      label: const Text('Default'),
-                                      onPressed: () => _setDefault(
-                                          context, notifier, person),
-                                    ),
-                                  PopupMenuButton<String>(
-                                    onSelected: (value) => _handleMenuAction(
-                                        context, notifier, person, value),
-                                    itemBuilder: (context) => [
-                                      const PopupMenuItem(
-                                        value: 'edit',
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.edit, size: 18),
-                                            SizedBox(width: 8),
-                                            Text('Edit'),
-                                          ],
-                                        ),
-                                      ),
-                                      const PopupMenuItem(
-                                        value: 'delete',
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.delete,
-                                                size: 18, color: Colors.red),
-                                            SizedBox(width: 8),
-                                            Text('Delete',
-                                                style: TextStyle(
-                                                    color: Colors.red)),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
+                               trailing: PopupMenuButton<String>(
+                                 onSelected: (value) => _handleMenuAction(
+                                     context, notifier, person, value),
+                                 itemBuilder: (context) => [
+                                   const PopupMenuItem(
+                                     value: 'edit',
+                                     child: Row(
+                                       children: [
+                                         Icon(Icons.edit, size: 18),
+                                         SizedBox(width: 8),
+                                         Text('Edit'),
+                                       ],
+                                     ),
+                                   ),
+                                   const PopupMenuItem(
+                                     value: 'delete',
+                                     child: Row(
+                                       children: [
+                                         Icon(Icons.delete,
+                                             size: 18, color: Colors.red),
+                                         SizedBox(width: 8),
+                                         Text('Delete',
+                                             style: TextStyle(
+                                                 color: Colors.red)),
+                                       ],
+                                     ),
+                                   ),
+                                 ],
+                               ),
                               subtitle: person.isDefault
                                   ? const Text(
                                       'Default person',
@@ -299,16 +286,7 @@ class _PeopleScreenState extends State<PeopleScreen>
     );
   }
 
-  void _setDefault(BuildContext context, HouseholdNotifier notifier,
-      HouseholdPerson person) async {
-    final success = await notifier.updatePerson(person.id, person.displayName,
-        isDefault: true);
-    if (!success && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(notifier.error ?? 'Failed to set default')),
-      );
-    }
-  }
+
 
   void _handleMenuAction(BuildContext context, HouseholdNotifier notifier,
       HouseholdPerson person, String action) {

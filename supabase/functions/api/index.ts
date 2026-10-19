@@ -249,6 +249,58 @@ Deno.serve(async (req) => {
       return jsonResponse({ person: data?.[0] });
     }
 
+    if (method === "PATCH" && path.startsWith("household/people/")) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const personId = path.split("/")[2];
+      if (!personId) {
+        throw new ApiError(400, "Invalid person ID");
+      }
+      const body = await req.json().catch(() => ({}));
+      const displayName = body.display_name ? String(body.display_name).trim() : null;
+      const isDefault = body.is_default;
+
+      // Validate input
+      if (displayName === null && isDefault === null) {
+        throw new ApiError(400, "At least one of display_name or is_default must be provided");
+      }
+      if (displayName !== null && (displayName.length === 0 || displayName.length > 100)) {
+        throw new ApiError(400, "Invalid display_name");
+      }
+
+      await ensureDefaultPerson(auth.userId); // Ensure a default person exists
+
+      // If setting as default, ensure we don't create multiple defaults
+      if (isDefault === true) {
+        // First, unset any existing default for this user
+        await supabase
+          .from("household_people")
+          .update({ is_default: false })
+          .eq("user_id", auth.userId);
+      }
+
+      const updateData: any = {};
+      if (displayName !== null) {
+        updateData.display_name = displayName;
+      }
+      if (isDefault !== null) {
+        updateData.is_default = isDefault;
+      }
+
+      const { data, error } = await supabase
+        .from("household_people")
+        .update(updateData)
+        .eq("person_id", personId)
+        .eq("user_id", auth.userId)
+        .select();
+
+      if (error) throw new ApiError(502, error.message);
+      if (!data || data.length === 0) throw new ApiError(404, "Household person not found");
+      return jsonResponse({ person: data?.[0] });
+    }
+
     // --- Device tokens ---
     if (method === "POST" && path === "device-tokens") {
       const bearerToken = getBearerToken(authorization);

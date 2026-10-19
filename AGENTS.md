@@ -130,7 +130,7 @@ Flutter dependencies declared in `mobile_app/pubspec.yaml` include `provider`, `
 
 ### Household membership and shared visibility
 
-- **People CRUD:** `PeopleScreen` -> `HouseholdNotifier` -> `HouseholdRepositoryImpl` -> `/api/household/people` (`GET`, `POST`, `DELETE`; update is PATCH by person ID in the repository interface but no matching route was found in `index.ts` — verify before relying on rename/default PATCH).
+- **People CRUD:** `PeopleScreen` -> `HouseholdNotifier` -> `HouseholdRepositoryImpl` -> `/api/household/people` (`GET`, `POST`, `PATCH`, `DELETE`; update is PATCH by person ID in the repository interface and matching route exists in `index.ts`).
 - **Members/invites:** `HouseholdRepositoryImpl.loadMembers/addMember/joinByInviteCode` -> `/api/household/members`, `/api/household/members/join`. `MembersScreen` and `InviteScreen` are not routed; `PeopleScreen` QR scanning is the only in-app caller of `addMember`/`joinByInviteCode`.
 - **Household identity:** `household_members` stores `(household_id, user_id, role, invite_code)`; owners have `household_id = user_id`.
 - **Current data scoping:** `GET /api/household/people`, `/api/plaid-transactions`, `/api/owed/statement-cycles`, and all shared backend helpers query by `user_id = auth.userId` (or `getHouseholdPerson(userId, personId)`). The inspected RLS policies also compare `auth.uid() = user_id`. There is no inspected join from a member's `household_id` to the owner's transactions/people. See "Verified current-state cautions."
