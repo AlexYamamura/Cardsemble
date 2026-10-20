@@ -226,6 +226,15 @@ class _CaptureSettingsScreenState extends State<CaptureSettingsScreen> {
               ),
             ),
             const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.check),
+              label: const Text('Continue'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 56),
+              ),
+            ),
+            const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () async {
                 final deviceId = notifier.deviceId;
