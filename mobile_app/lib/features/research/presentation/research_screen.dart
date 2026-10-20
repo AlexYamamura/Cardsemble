@@ -343,6 +343,7 @@ class _ResearchScreenState extends State<ResearchScreen> {
       cards: _selectedCards,
     );
     if (saved == null || !mounted) return;
+    await repository.saveTypeMultipliers(saved);
     setState(() {});
   }
 

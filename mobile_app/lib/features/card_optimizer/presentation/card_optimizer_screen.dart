@@ -33,10 +33,17 @@ class _CardOptimizerScreenState extends State<CardOptimizerScreen> {
   Future<void> _loadResults() async {
     final cards = widget.selectedCards;
     if (cards.isEmpty) {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
       return;
     }
-    final results = widget.repository.optimize(cards: cards);
+    final multipliers = await widget.repository.loadTypeMultipliers();
+    if (!mounted) return;
+    final results = widget.repository.optimize(
+      cards: cards,
+      typeMultipliers: multipliers,
+    );
     setState(() {
       _results = results;
       _isLoading = false;
@@ -126,7 +133,8 @@ class _CardOptimizerScreenState extends State<CardOptimizerScreen> {
       cards: widget.selectedCards,
     );
     if (result == null || !mounted) return;
-    // Recompute results with the new multipliers.
+    // Persist new multipliers and recompute results.
+    await widget.repository.saveTypeMultipliers(result);
     final updated = widget.repository.optimize(
       cards: widget.selectedCards,
       typeMultipliers: result,
