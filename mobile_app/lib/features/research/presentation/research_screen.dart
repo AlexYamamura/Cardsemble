@@ -4,6 +4,8 @@ import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
 import 'package:cardsemble/features/card_catalog/data/card_catalog_repository.dart';
 import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
+import 'package:cardsemble/features/card_optimizer/data/card_optimizer_repository.dart';
+import 'package:cardsemble/features/card_optimizer/presentation/card_optimizer_screen.dart';
 
 /// Research surface for browsing credit cards.
 ///
@@ -249,9 +251,10 @@ class _ResearchScreenState extends State<ResearchScreen> {
   /// White-background table of the cards the user has selected.
   Widget _buildSelectedTable() {
     return SizedBox(
-      height: 200,
+      height: 260,
       child: Column(
         children: [
+          _buildOptimizerButton(),
           _buildSelectedTableHeader(),
           Expanded(
             child: _selectedCards.isEmpty
@@ -289,6 +292,60 @@ class _ResearchScreenState extends State<ResearchScreen> {
     );
   }
 
+  /// Button row above the selected-cards table.
+  ///
+  /// "Card Optimizer" opens the optimizer for the currently selected cards.
+  /// The tune icon opens the custom point multiplier settings.
+  Widget _buildOptimizerButton() {
+    return Container(
+      color: AppColors.surface,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: _selectedCards.isEmpty ? null : _openCardOptimizer,
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              label: const Text('Card Optimizer'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: _openMultiplierSettings,
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            child: const Icon(Icons.tune, size: 18),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openCardOptimizer() {
+    final cards = _selectedCards;
+    if (cards.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CardOptimizerScreen(
+          selectedCards: List<CardCatalogCard>.unmodifiable(cards),
+          repository: context.read<CardOptimizerRepository>(),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openMultiplierSettings() async {
+    final repository = context.read<CardOptimizerRepository>();
+    final saved = await showCardOptimizerSettings(
+      context: context,
+      repository: repository,
+      cards: _selectedCards,
+    );
+    if (saved == null || !mounted) return;
+    setState(() {});
+  }
+
   Widget _buildSelectedTableHeader() {
     return Container(
       color: AppColors.surface,
@@ -297,7 +354,10 @@ class _ResearchScreenState extends State<ResearchScreen> {
         children: const [
           Expanded(
             flex: 3,
-            child: Text('Card', style: TextStyle(fontWeight: FontWeight.w600)),
+            child: Text(
+              'Card Name',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
           ),
           Expanded(
             flex: 2,
@@ -309,11 +369,10 @@ class _ResearchScreenState extends State<ResearchScreen> {
           Expanded(
             flex: 2,
             child: Text(
-              'Network',
+              'Card Type',
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          SizedBox(width: 48),
         ],
       ),
     );
@@ -365,36 +424,44 @@ class _SelectedRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Material(
       color: AppColors.surface,
-      child: ListTile(
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: const Icon(Icons.credit_card),
-        title: Text(
-          card.name,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          '${card.issuer ?? ''} • ${card.network ?? ''}',
-          style: const TextStyle(fontSize: 13, color: Colors.grey),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.info_outline, color: AppColors.primary),
-              tooltip: 'View details',
-              onPressed: onTap,
-            ),
-            IconButton(
-              icon: const Icon(Icons.remove_circle_outline, color: Colors.grey),
-              tooltip: 'Remove',
-              onPressed: onRemove,
-            ),
-          ],
-        ),
+      child: InkWell(
         onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: Text(
+                  card.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  card.issuer ?? '—',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  card.type ?? '—',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -549,6 +616,138 @@ class _CardDetailSheet extends StatelessWidget {
         ? amount.toString()
         : amount.toStringAsFixed(2);
     return unit != null ? '$unit $formatted' : formatted;
+  }
+}
+
+/// Shared modal bottom sheet for editing type multipliers.
+///
+/// Loads current multipliers, derives keys from the supplied cards plus defaults,
+/// renders validated decimal fields, offers reset-to-1.0, and persists on Save.
+/// Returns the new [Map<String, double>] when Save is pressed, or `null` on
+/// Cancel or if the sheet is dismissed without saving.
+Future<Map<String, double>?> showCardOptimizerSettings({
+  required BuildContext context,
+  required CardOptimizerRepository repository,
+  required List<CardCatalogCard> cards,
+}) async {
+  final current = await repository.loadTypeMultipliers();
+  final types = <String>{};
+  for (final card in cards) {
+    types.add(repository.rewardTypeFor(card));
+  }
+  final allKeys = <String>{};
+  allKeys.addAll(current.keys);
+  allKeys.addAll(types);
+  final effective = Map<String, double>.from(current);
+  for (final k in allKeys) {
+    effective.putIfAbsent(k, () => 1.0);
+  }
+
+  final controllers = <String, TextEditingController>{};
+  for (final key in allKeys) {
+    final value = effective[key] ?? 1.0;
+    controllers[key] = TextEditingController(text: value.toStringAsFixed(2));
+  }
+
+  return showModalBottomSheet<Map<String, double>?>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (_) => Padding(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 12),
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Point Multipliers',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ...allKeys.map(
+              (key) => Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _typeLabel(key),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextFormField(
+                      controller: controllers[key],
+                      decoration: InputDecoration(
+                        border: const OutlineInputBorder(),
+                        suffixText: 'x',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(null),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: () {
+                    final result = <String, double>{};
+                    var valid = true;
+                    for (final key in allKeys) {
+                      final text = controllers[key]!.text;
+                      final parsed = double.tryParse(text);
+                      if (parsed == null || parsed <= 0) {
+                        valid = false;
+                        break;
+                      }
+                      result[key] = parsed;
+                    }
+                    if (!valid) return;
+                    Navigator.of(context).pop(result);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+String _typeLabel(String key) {
+  switch (key) {
+    case 'points':
+      return 'Points multiplier';
+    case 'cash':
+      return 'Cash multiplier';
+    case 'travel':
+      return 'Travel multiplier';
+    case 'other':
+      return 'Other multiplier';
+    default:
+      return 'Multiplier';
   }
 }
 

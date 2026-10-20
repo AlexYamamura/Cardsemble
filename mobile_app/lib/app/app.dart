@@ -12,6 +12,7 @@ import 'package:cardsemble/features/auth/presentation/auth_wrapper.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/card_events/presentation/card_events_notifier.dart';
 import 'package:cardsemble/features/card_catalog/data/card_catalog_repository.dart';
+import 'package:cardsemble/features/card_optimizer/data/card_optimizer_repository.dart';
 import 'package:cardsemble/features/device_capture/presentation/device_capture_notifier.dart';
 import 'package:cardsemble/features/household/presentation/household_notifier.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
@@ -101,6 +102,9 @@ class _CardsembleAppState extends State<CardsembleApp> {
             ),
             Provider<CardCatalogRepository>(
               create: (_) => sl.get<CardCatalogRepository>(),
+            ),
+            Provider<CardOptimizerRepository>(
+              create: (_) => sl.get<CardOptimizerRepository>(),
             ),
           ],
           child: MaterialApp(

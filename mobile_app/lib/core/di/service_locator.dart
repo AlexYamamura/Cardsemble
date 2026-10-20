@@ -24,6 +24,7 @@ import 'package:cardsemble/features/device_capture/presentation/device_capture_n
 import 'package:cardsemble/features/card_catalog/domain/card_catalog_source.dart';
 import 'package:cardsemble/features/card_catalog/data/card_catalog_source_impl.dart';
 import 'package:cardsemble/features/card_catalog/data/card_catalog_repository.dart';
+import 'package:cardsemble/features/card_optimizer/data/card_optimizer_repository.dart';
 
 class ServiceLocator {
   ServiceLocator._();
@@ -158,12 +159,14 @@ class ServiceLocator {
       registerFactory<CardCatalogSource>(() => CardCatalogSourceImpl(
             apiClient: sl.get<SupabaseApiClient>(),
           ));
-      registerFactory<CardCatalogRepository>(() => CardCatalogRepository(
+       registerFactory<CardCatalogRepository>(() => CardCatalogRepository(
             store: sl.get<CacheStore>(),
             source: sl.get<CardCatalogSource>(),
           ));
 
-     // Use cases
+      registerFactory<CardOptimizerRepository>(() => CardOptimizerRepository());
+
+      // Use cases
      registerFactory<LoadTransactionSplitDraft>(() => LoadTransactionSplitDraft(
            sl.get<TransactionRepository>(),
          ));
