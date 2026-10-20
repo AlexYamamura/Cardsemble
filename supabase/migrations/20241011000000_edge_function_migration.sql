@@ -164,47 +164,57 @@ create policy "Users can insert their own cycle start overrides"
 --   supabase db reset  (if using local)
 --   Or run in the SQL editor:
 --
+-- Daily Plaid sync: 12:00 UTC
 SELECT cron.schedule(
   'daily-plaid-sync',
   '0 12 * * *',
   $$
-  SELECT
-    net.http_post(
-      'https://' || current_setting('app.settings.supabase_url') || '.supabase.co/functions/v1/api',
-      json_build_object(
-        'path', 'cron/plaid-sync',
-        'method', 'GET',
-        'headers', json_build_object(
-          'Authorization', concat('Bearer ', current_setting('app.settings.cron_secret'))
+  SELECT net.http_post(
+    url := (
+      SELECT decrypted_secret
+      FROM vault.decrypted_secrets
+      WHERE name = 'supabase_url'
+    ) || '/functions/v1/api/cron/plaid-sync',
+    body := jsonb_build_object(
+      'path', 'cron/plaid-sync',
+      'method', 'GET',
+      'headers', jsonb_build_object(
+        'Authorization',
+        'Bearer ' || (
+          SELECT decrypted_secret
+          FROM vault.decrypted_secrets
+          WHERE name = 'cron_secret'
         )
-      ),
-      '1'::text,
-      current_setting('app.settings.cron_secret')
-    )
+      )
+    ),
+    headers := '{"Content-Type": "application/json"}'::jsonb,
+    timeout_milliseconds := 30000
+  );
   $$
 );
 
--- Card catalog sync via pg_cron
--- This cron job runs daily at 02:00 UTC and calls the api edge function's
--- cron/card-catalog-sync route. The CRON_SECRET must be set as a function secret.
---
+-- Daily card catalog sync: 02:00 UTC
 SELECT cron.schedule(
   'daily-card-catalog-sync',
   '0 2 * * *',
   $$
-  SELECT
-    net.http_post(
-      'https://' || current_setting('app.settings.supabase_url') || '.supabase.co/functions/v1/api',
-      json_build_object(
-        'path', 'cron/card-catalog-sync',
-        'method', 'POST',
-        'headers', json_build_object(
-          'Authorization', concat('Bearer ', current_setting('app.settings.cron_secret'))
-        )
-      ),
-      '1'::text,
-      current_setting('app.settings.cron_secret')
-    )
+  SELECT net.http_post(
+    url := (
+      SELECT decrypted_secret
+      FROM vault.decrypted_secrets
+      WHERE name = 'supabase_url'
+    ) || '/functions/v1/api/cron/card-catalog-sync',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || (
+        SELECT decrypted_secret
+        FROM vault.decrypted_secrets
+        WHERE name = 'cron_secret'
+      )
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 30000
+  );
   $$
 );
 
