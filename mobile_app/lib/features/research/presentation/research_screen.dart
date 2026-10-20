@@ -112,6 +112,15 @@ class _ResearchScreenState extends State<ResearchScreen> {
       } else {
         _selectedIds.add(card.id);
       }
+      // Close the search dropdown after selection.
+      _searchController.clear();
+      _query = '';
+    });
+  }
+
+  void _removeSelectedCard(CardCatalogCard card) {
+    setState(() {
+      _selectedIds.remove(card.id);
     });
   }
 
@@ -216,33 +225,37 @@ class _ResearchScreenState extends State<ResearchScreen> {
     if (_query.isEmpty || results.isEmpty) {
       return const SizedBox.shrink();
     }
-    return SizedBox(
-      height: 220,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
         color: AppColors.surface,
         elevation: 4,
-        margin: const EdgeInsets.symmetric(horizontal: 16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: results.length,
-          itemBuilder: (context, index) {
-            final card = results[index];
-            final isSelected = _selectedIds.contains(card.id);
-            return ListTile(
-              dense: true,
-              leading: const Icon(Icons.credit_card, size: 20),
-              title: Text(card.name),
-              subtitle: Text(
-                '${card.issuer ?? ''} ${card.network ?? ''}'.trim(),
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-              trailing: isSelected
-                  ? const Icon(Icons.check_circle, color: AppColors.primary)
-                  : const Icon(Icons.add, color: AppColors.primary),
-              onTap: () => _toggleCard(card),
-            );
-          },
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 220),
+          child: ListView.builder(
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            itemCount: results.length,
+            itemBuilder: (context, index) {
+              final card = results[index];
+              final isSelected = _selectedIds.contains(card.id);
+              return ListTile(
+                dense: true,
+                leading: const Icon(Icons.credit_card, size: 20),
+                title: Text(card.name, overflow: TextOverflow.ellipsis),
+                subtitle: Text(
+                  '${card.issuer ?? ''} ${card.network ?? ''}'.trim(),
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: isSelected
+                    ? const Icon(Icons.check_circle, color: AppColors.primary)
+                    : const Icon(Icons.add, color: AppColors.primary),
+                onTap: () => _toggleCard(card),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -278,11 +291,11 @@ class _ResearchScreenState extends State<ResearchScreen> {
                     itemCount: _selectedCards.length,
                     itemBuilder: (context, index) {
                       final card = _selectedCards[index];
-                      return _SelectedRow(
-                        card: card,
-                        onTap: () => _showCardDetail(card),
-                        onRemove: () => _toggleCard(card),
-                      );
+                       return _SelectedRow(
+                         card: card,
+                         onTap: () => _showCardDetail(card),
+                         onRemove: () => _removeSelectedCard(card),
+                       );
                     },
                   ),
           ),
@@ -426,6 +439,14 @@ class _SelectedRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 13, color: Colors.grey),
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                color: Colors.grey,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                onPressed: onRemove,
+                tooltip: 'Remove',
               ),
             ],
           ),
