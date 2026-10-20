@@ -28,7 +28,8 @@ class CardOptimizerRepository {
   ///   3. Fall back to `card.type` (`credit` / `charge`) → `other`
   String rewardTypeFor(CardCatalogCard card) {
     final type = card.type?.toLowerCase();
-    if (type != null && (type == 'points' || type == 'cash' || type == 'travel')) {
+    if (type != null &&
+        (type == 'points' || type == 'cash' || type == 'travel')) {
       return type;
     }
 

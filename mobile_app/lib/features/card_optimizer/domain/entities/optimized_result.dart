@@ -53,7 +53,8 @@ class OptimizedResult {
 
   /// True when a tie-break was needed to pick [bestCard] over another card
   /// with the same effective rate.
-  bool get hasTieBreak => candidates.length > 1 &&
+  bool get hasTieBreak =>
+      candidates.length > 1 &&
       candidates[0].effectivePointsPerDollar ==
           candidates[1].effectivePointsPerDollar;
 

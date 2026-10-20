@@ -116,9 +116,7 @@ class _CardOptimizerScreenState extends State<CardOptimizerScreen> {
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            ..._results.map(
-              (result) => _OptimizedResultCard(result: result),
-            ),
+            ..._results.map((result) => _OptimizedResultCard(result: result)),
             const SizedBox(height: 24),
           ],
         ),
@@ -167,7 +165,9 @@ class _OptimizedResultCard extends StatelessWidget {
     final effective = result.effectivePointsPerDollar;
     final base = result.basePointsPerDollar;
     final multiplier = result.multiplier;
-    final capText = result.isUncapped ? 'Uncapped' : result.capDescription ?? '—';
+    final capText = result.isUncapped
+        ? 'Uncapped'
+        : result.capDescription ?? '—';
     final rateUnit = _rateUnit(result.rewardType);
     final rateSuffix = '$rateUnit/dollar';
     final effectiveRate = base * multiplier;

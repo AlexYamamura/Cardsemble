@@ -56,123 +56,142 @@ class ServiceLocator {
     throw StateError('No registration found for $T');
   }
 
-  bool isRegistered<T>() => _singletons.containsKey(T) || _factories.containsKey(T);
+  bool isRegistered<T>() =>
+      _singletons.containsKey(T) || _factories.containsKey(T);
 
   void reset() {
     _singletons.clear();
     _factories.clear();
   }
 
-   Future<void> initialize({
-     required String supabaseBaseUrl,
-     required String supabaseUrl,
-     required String supabasePublishableKey,
-   }) async {
+  Future<void> initialize({
+    required String supabaseBaseUrl,
+    required String supabaseUrl,
+    required String supabasePublishableKey,
+  }) async {
     await AppSupabaseClient.initialize(
       url: supabaseUrl,
       publishableKey: supabasePublishableKey,
     );
     final supabaseClient = AppSupabaseClient.instance.client;
-      final supabaseApiClient = SupabaseApiClient(
-        baseUrl: supabaseBaseUrl,
-        accessTokenProvider: () => supabaseClient.auth.currentSession?.accessToken,
-      );
-     registerSingleton<SupabaseApiClient>(supabaseApiClient);
+    final supabaseApiClient = SupabaseApiClient(
+      baseUrl: supabaseBaseUrl,
+      accessTokenProvider: () =>
+          supabaseClient.auth.currentSession?.accessToken,
+    );
+    registerSingleton<SupabaseApiClient>(supabaseApiClient);
     registerSingleton<AppSupabaseClient>(AppSupabaseClient.instance);
 
     final cacheStore = SharedPreferencesCacheStore();
     registerSingleton<CacheStore>(cacheStore);
 
-    registerFactory<AuthRepository>(() => AuthRepositoryImpl(
-          supabase: supabaseClient,
-        ));
+    registerFactory<AuthRepository>(
+      () => AuthRepositoryImpl(supabase: supabaseClient),
+    );
 
-    registerFactory<AuthNotifier>(() => AuthNotifier(
-          authRepository: sl.get<AuthRepository>(),
-          onBeforeSignOut: (previousUserId) async {
-            if (previousUserId == null) return;
-            await sl.get<TransactionCache>().clearScope(previousUserId);
-          },
-          onUserIdChanged: (previousUserId, nextUserId) {
-            if (previousUserId == nextUserId) return;
-            // Scoped keys already isolate users; this erases the old session's
-            // snapshot as soon as the auth stream reports the change.
-            sl.get<TransactionCache>().clearScope(previousUserId);
-          },
-        ));
+    registerFactory<AuthNotifier>(
+      () => AuthNotifier(
+        authRepository: sl.get<AuthRepository>(),
+        onBeforeSignOut: (previousUserId) async {
+          if (previousUserId == null) return;
+          await sl.get<TransactionCache>().clearScope(previousUserId);
+        },
+        onUserIdChanged: (previousUserId, nextUserId) {
+          if (previousUserId == nextUserId) return;
+          // Scoped keys already isolate users; this erases the old session's
+          // snapshot as soon as the auth stream reports the change.
+          sl.get<TransactionCache>().clearScope(previousUserId);
+        },
+      ),
+    );
 
-     registerFactory<HouseholdRepository>(() => HouseholdRepositoryImpl(
-           apiClient: supabaseApiClient,
-         ));
+    registerFactory<HouseholdRepository>(
+      () => HouseholdRepositoryImpl(apiClient: supabaseApiClient),
+    );
 
-    registerFactory<HouseholdNotifier>(() => HouseholdNotifier(
-          householdRepository: sl.get<HouseholdRepository>(),
-        ));
+    registerFactory<HouseholdNotifier>(
+      () =>
+          HouseholdNotifier(householdRepository: sl.get<HouseholdRepository>()),
+    );
 
-     registerFactory<TransactionRepository>(() => TransactionRepositoryImpl(
-           apiClient: supabaseApiClient,
-         ));
+    registerFactory<TransactionRepository>(
+      () => TransactionRepositoryImpl(apiClient: supabaseApiClient),
+    );
 
-    registerFactory<TransactionCache>(() => TransactionCache(
-          store: cacheStore,
-          scopeProvider: () => supabaseClient.auth.currentUser?.id,
-        ));
+    registerFactory<TransactionCache>(
+      () => TransactionCache(
+        store: cacheStore,
+        scopeProvider: () => supabaseClient.auth.currentUser?.id,
+      ),
+    );
     // Old keys were not user-scoped and cannot be attributed safely.
     await sl.get<TransactionCache>().purgeLegacyKeys();
 
-     registerFactory<TransactionsNotifier>(() => TransactionsNotifier(
-           transactionRepository: sl.get<TransactionRepository>(),
-           loadTransactionSplitDraft: sl.get<LoadTransactionSplitDraft>(),
-           saveTransactionSplit: sl.get<SaveTransactionSplit>(),
-           householdRepository: sl.get<HouseholdRepository>(),
-           cache: sl.get<TransactionCache>(),
-         ));
+    registerFactory<TransactionsNotifier>(
+      () => TransactionsNotifier(
+        transactionRepository: sl.get<TransactionRepository>(),
+        loadTransactionSplitDraft: sl.get<LoadTransactionSplitDraft>(),
+        saveTransactionSplit: sl.get<SaveTransactionSplit>(),
+        householdRepository: sl.get<HouseholdRepository>(),
+        cache: sl.get<TransactionCache>(),
+      ),
+    );
 
-     registerFactory<CardEventRepository>(() => CardEventRepositoryImpl(
-           apiClient: supabaseApiClient,
-           supabase: supabaseClient,
-         ));
+    registerFactory<CardEventRepository>(
+      () => CardEventRepositoryImpl(
+        apiClient: supabaseApiClient,
+        supabase: supabaseClient,
+      ),
+    );
 
-    registerFactory<CardEventsNotifier>(() => CardEventsNotifier(
-          cardEventRepository: sl.get<CardEventRepository>(),
-        ));
+    registerFactory<CardEventsNotifier>(
+      () => CardEventsNotifier(
+        cardEventRepository: sl.get<CardEventRepository>(),
+      ),
+    );
 
-     registerFactory<AccountRepository>(() => AccountRepositoryImpl(
-           apiClient: supabaseApiClient,
-           supabase: supabaseClient,
-         ));
+    registerFactory<AccountRepository>(
+      () => AccountRepositoryImpl(
+        apiClient: supabaseApiClient,
+        supabase: supabaseClient,
+      ),
+    );
 
-    registerFactory<AccountsNotifier>(() => AccountsNotifier(
-          accountRepository: sl.get<AccountRepository>(),
-        ));
+    registerFactory<AccountsNotifier>(
+      () => AccountsNotifier(accountRepository: sl.get<AccountRepository>()),
+    );
 
-    registerFactory<DeviceCaptureRepository>(() => DeviceCaptureRepositoryImpl(
-          supabase: supabaseClient,
-        ));
+    registerFactory<DeviceCaptureRepository>(
+      () => DeviceCaptureRepositoryImpl(supabase: supabaseClient),
+    );
 
-      registerFactory<DeviceCaptureNotifier>(() => DeviceCaptureNotifier(
-            deviceCaptureRepository: sl.get<DeviceCaptureRepository>(),
-            householdRepository: sl.get<HouseholdRepository>(),
-          ));
+    registerFactory<DeviceCaptureNotifier>(
+      () => DeviceCaptureNotifier(
+        deviceCaptureRepository: sl.get<DeviceCaptureRepository>(),
+        householdRepository: sl.get<HouseholdRepository>(),
+      ),
+    );
 
-      // Card catalog
-      registerFactory<CardCatalogSource>(() => CardCatalogSourceImpl(
-            apiClient: sl.get<SupabaseApiClient>(),
-          ));
-       registerFactory<CardCatalogRepository>(() => CardCatalogRepository(
-            store: sl.get<CacheStore>(),
-            source: sl.get<CardCatalogSource>(),
-          ));
+    // Card catalog
+    registerFactory<CardCatalogSource>(
+      () => CardCatalogSourceImpl(apiClient: sl.get<SupabaseApiClient>()),
+    );
+    registerFactory<CardCatalogRepository>(
+      () => CardCatalogRepository(
+        store: sl.get<CacheStore>(),
+        source: sl.get<CardCatalogSource>(),
+      ),
+    );
 
-      registerFactory<CardOptimizerRepository>(() => CardOptimizerRepository());
+    registerFactory<CardOptimizerRepository>(() => CardOptimizerRepository());
 
-      // Use cases
-     registerFactory<LoadTransactionSplitDraft>(() => LoadTransactionSplitDraft(
-           sl.get<TransactionRepository>(),
-         ));
-     registerFactory<SaveTransactionSplit>(() => SaveTransactionSplit(
-           sl.get<TransactionRepository>(),
-         ));
+    // Use cases
+    registerFactory<LoadTransactionSplitDraft>(
+      () => LoadTransactionSplitDraft(sl.get<TransactionRepository>()),
+    );
+    registerFactory<SaveTransactionSplit>(
+      () => SaveTransactionSplit(sl.get<TransactionRepository>()),
+    );
   }
 }
 

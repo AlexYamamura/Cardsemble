@@ -35,7 +35,9 @@ class _CardsembleAppState extends State<CardsembleApp> {
 
   Future<void> _initialize() async {
     try {
-       final response = await http.get(Uri.parse('$supabaseBaseUrl/api/public-config'));
+      final response = await http.get(
+        Uri.parse('$supabaseBaseUrl/api/public-config'),
+      );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
           'Could not load app configuration (HTTP ${response.statusCode}).',
@@ -44,10 +46,11 @@ class _CardsembleAppState extends State<CardsembleApp> {
 
       final config = jsonDecode(response.body) as Map<String, dynamic>;
       final supabaseUrl = config['supabase_url'] as String;
-      final supabasePublishableKey = config['supabase_publishable_key'] as String;
+      final supabasePublishableKey =
+          config['supabase_publishable_key'] as String;
 
       await sl.initialize(
-         supabaseBaseUrl: supabaseBaseUrl,
+        supabaseBaseUrl: supabaseBaseUrl,
         supabaseUrl: supabaseUrl,
         supabasePublishableKey: supabasePublishableKey,
       );
@@ -117,39 +120,42 @@ class _CardsembleAppState extends State<CardsembleApp> {
     );
   }
 
-   ThemeData _theme() {
-     return ThemeData(
-       useMaterial3: true,
-       colorScheme: ColorScheme.light(
-         primary: AppColors.primary,
-         primaryContainer: AppColors.primaryDark,
-         secondary: AppColors.sand,
-         secondaryContainer: AppColors.cream,
-         surface: AppColors.surface,
-         error: AppColors.error,
-         onPrimary: AppColors.onPrimary,
-         onSecondary: AppColors.charcoal,
-         onSurface: AppColors.onSurface,
-         onError: AppColors.onError,
-         outline: AppColors.outline,
-       ),
-       datePickerTheme: DatePickerThemeData(
-         rangeSelectionBackgroundColor: Color.alphaBlend(AppColors.primary.withValues(alpha: 0.24), AppColors.surface),
-       ),
-       scaffoldBackgroundColor: AppColors.background,
-       appBarTheme: AppBarTheme(
-         backgroundColor: AppColors.primary,
-         foregroundColor: AppColors.onPrimary,
-         elevation: 0,
-         centerTitle: true,
-         titleTextStyle: const TextStyle(
-           color: Colors.white,
-           fontSize: 20,
-           fontWeight: FontWeight.w600,
-         ),
-       ),
-     );
-   }
+  ThemeData _theme() {
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.light(
+        primary: AppColors.primary,
+        primaryContainer: AppColors.primaryDark,
+        secondary: AppColors.sand,
+        secondaryContainer: AppColors.cream,
+        surface: AppColors.surface,
+        error: AppColors.error,
+        onPrimary: AppColors.onPrimary,
+        onSecondary: AppColors.charcoal,
+        onSurface: AppColors.onSurface,
+        onError: AppColors.onError,
+        outline: AppColors.outline,
+      ),
+      datePickerTheme: DatePickerThemeData(
+        rangeSelectionBackgroundColor: Color.alphaBlend(
+          AppColors.primary.withValues(alpha: 0.24),
+          AppColors.surface,
+        ),
+      ),
+      scaffoldBackgroundColor: AppColors.background,
+      appBarTheme: AppBarTheme(
+        backgroundColor: AppColors.primary,
+        foregroundColor: AppColors.onPrimary,
+        elevation: 0,
+        centerTitle: true,
+        titleTextStyle: const TextStyle(
+          color: Colors.white,
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
 }
 
 class _LoadingScreen extends StatelessWidget {

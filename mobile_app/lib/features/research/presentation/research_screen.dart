@@ -658,7 +658,12 @@ Future<Map<String, double>?> showCardOptimizerSettings({
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
     ),
     builder: (_) => Padding(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 12),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        20,
+        20,
+        MediaQuery.of(context).viewInsets.bottom + 12,
+      ),
       child: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         child: Column(
@@ -667,10 +672,7 @@ Future<Map<String, double>?> showCardOptimizerSettings({
           children: [
             const Text(
               'Point Multipliers',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             ...allKeys.map(
