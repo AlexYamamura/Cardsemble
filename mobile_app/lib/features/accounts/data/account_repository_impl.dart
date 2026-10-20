@@ -4,12 +4,12 @@ import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
 
 class AccountRepositoryImpl implements AccountRepository {
   AccountRepositoryImpl({
-    required ApiClient apiClient,
+    required SupabaseApiClient apiClient,
     required SupabaseClient supabase,
   })  : _apiClient = apiClient,
         _supabase = supabase;
 
-  final ApiClient _apiClient;
+  final SupabaseApiClient _apiClient;
   final SupabaseClient _supabase;
 
   String get _currentUserId {

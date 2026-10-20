@@ -53,17 +53,4 @@ class CardCatalogRepository extends CachedRepository<String, CardCatalogCard> {
       return byId;
     });
   }
-
-  /// Searches the catalog and writes returned cards through to the per-card
-  /// cache.
-  ///
-  /// The query result list itself is not cached: searches can be unbounded and
-  /// selection combinations must not become cache keys.
-  Future<Result<List<CardCatalogCard>>> search(String query) async {
-    final result = await _source.searchCards(query);
-    if (result.isSuccess) {
-      await putAll(result.value);
-    }
-    return result;
-  }
 }

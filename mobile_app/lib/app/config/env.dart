@@ -1,4 +1,4 @@
-const String apiBaseUrl = String.fromEnvironment(
+const String supabaseBaseUrl = String.fromEnvironment(
   'CARD_EVENTS_API_URL',
   defaultValue: 'https://ebawvkiabuhcyvyzegfn.supabase.co/functions/v1/api',
 );

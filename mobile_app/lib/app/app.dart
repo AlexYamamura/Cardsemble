@@ -33,7 +33,7 @@ class _CardsembleAppState extends State<CardsembleApp> {
 
   Future<void> _initialize() async {
     try {
-      final response = await http.get(Uri.parse('$apiBaseUrl/api/public-config'));
+       final response = await http.get(Uri.parse('$supabaseBaseUrl/api/public-config'));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
           'Could not load app configuration (HTTP ${response.statusCode}).',
@@ -45,7 +45,7 @@ class _CardsembleAppState extends State<CardsembleApp> {
       final supabasePublishableKey = config['supabase_publishable_key'] as String;
 
       await sl.initialize(
-        apiBaseUrl: apiBaseUrl,
+         supabaseBaseUrl: supabaseBaseUrl,
         supabaseUrl: supabaseUrl,
         supabasePublishableKey: supabasePublishableKey,
       );

@@ -3,8 +3,8 @@ import 'package:http/http.dart' as http;
 import '../error/app_exception.dart';
 import '../error/failure.dart';
 
-class ApiClient {
-  ApiClient({
+class SupabaseApiClient {
+  SupabaseApiClient({
     required String baseUrl,
     required String? Function() accessTokenProvider,
     http.Client? client,

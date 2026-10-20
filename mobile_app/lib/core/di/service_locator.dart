@@ -1,6 +1,6 @@
 import '../cache/cache_store.dart';
 import '../cache/shared_preferences_cache_store.dart';
-import '../../core/network/api_client.dart';
+import '../../core/network/supabase_api_client.dart';
 import '../../core/database/supabase_client.dart';
 import '../../features/auth/data/auth_repository_impl.dart';
 import '../../features/auth/domain/auth_repository.dart';
@@ -59,21 +59,21 @@ class ServiceLocator {
     _factories.clear();
   }
 
-  Future<void> initialize({
-    required String apiBaseUrl,
-    required String supabaseUrl,
-    required String supabasePublishableKey,
-  }) async {
+   Future<void> initialize({
+     required String supabaseBaseUrl,
+     required String supabaseUrl,
+     required String supabasePublishableKey,
+   }) async {
     await AppSupabaseClient.initialize(
       url: supabaseUrl,
       publishableKey: supabasePublishableKey,
     );
     final supabaseClient = AppSupabaseClient.instance.client;
-    final apiClient = ApiClient(
-      baseUrl: apiBaseUrl,
-      accessTokenProvider: () => supabaseClient.auth.currentSession?.accessToken,
-    );
-    registerSingleton<ApiClient>(apiClient);
+      final supabaseApiClient = SupabaseApiClient(
+        baseUrl: supabaseBaseUrl,
+        accessTokenProvider: () => supabaseClient.auth.currentSession?.accessToken,
+      );
+     registerSingleton<SupabaseApiClient>(supabaseApiClient);
     registerSingleton<AppSupabaseClient>(AppSupabaseClient.instance);
 
     final cacheStore = SharedPreferencesCacheStore();
@@ -97,17 +97,17 @@ class ServiceLocator {
           },
         ));
 
-    registerFactory<HouseholdRepository>(() => HouseholdRepositoryImpl(
-          apiClient: apiClient,
-        ));
+     registerFactory<HouseholdRepository>(() => HouseholdRepositoryImpl(
+           apiClient: supabaseApiClient,
+         ));
 
     registerFactory<HouseholdNotifier>(() => HouseholdNotifier(
           householdRepository: sl.get<HouseholdRepository>(),
         ));
 
-    registerFactory<TransactionRepository>(() => TransactionRepositoryImpl(
-          apiClient: apiClient,
-        ));
+     registerFactory<TransactionRepository>(() => TransactionRepositoryImpl(
+           apiClient: supabaseApiClient,
+         ));
 
     registerFactory<TransactionCache>(() => TransactionCache(
           store: cacheStore,
@@ -124,19 +124,19 @@ class ServiceLocator {
            cache: sl.get<TransactionCache>(),
          ));
 
-    registerFactory<CardEventRepository>(() => CardEventRepositoryImpl(
-          apiClient: apiClient,
-          supabase: supabaseClient,
-        ));
+     registerFactory<CardEventRepository>(() => CardEventRepositoryImpl(
+           apiClient: supabaseApiClient,
+           supabase: supabaseClient,
+         ));
 
     registerFactory<CardEventsNotifier>(() => CardEventsNotifier(
           cardEventRepository: sl.get<CardEventRepository>(),
         ));
 
-    registerFactory<AccountRepository>(() => AccountRepositoryImpl(
-          apiClient: apiClient,
-          supabase: supabaseClient,
-        ));
+     registerFactory<AccountRepository>(() => AccountRepositoryImpl(
+           apiClient: supabaseApiClient,
+           supabase: supabaseClient,
+         ));
 
     registerFactory<AccountsNotifier>(() => AccountsNotifier(
           accountRepository: sl.get<AccountRepository>(),

@@ -4,10 +4,10 @@ import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
 
 class TransactionRepositoryImpl implements TransactionRepository {
   TransactionRepositoryImpl({
-    required ApiClient apiClient,
+    required SupabaseApiClient apiClient,
   }) : _apiClient = apiClient;
 
-  final ApiClient _apiClient;
+  final SupabaseApiClient _apiClient;
 
   @override
   Future<Result<TransactionPage>> loadTransactions(TransactionQuery query) async {

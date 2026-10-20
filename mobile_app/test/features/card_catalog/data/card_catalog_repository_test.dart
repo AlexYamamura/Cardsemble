@@ -112,23 +112,6 @@ void main() {
     expect(store.entries.length, 2);
   });
 
-  test('search caches individual cards but not the query result', () async {
-    source.searchResult = Success(<CardCatalogCard>[_card('a')]);
-    final repo = repository();
-
-    final result = await repo.search('chase');
-
-    expect(result.value.single.id, 'a');
-    expect(source.searchCalls, 1);
-    expect(store.entries.length, 1);
-
-    await repo.get('a');
-    expect(source.fetchCalls, 0);
-
-    await repo.search('chase');
-    expect(source.searchCalls, 2);
-  });
-
   test('a custom TTL controls catalog refresh', () async {
     final repo = repository(ttl: const Duration(hours: 1));
     await repo.get('a');

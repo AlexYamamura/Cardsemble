@@ -10,7 +10,7 @@ import 'package:cardsemble/features/transactions/domain/transactions_domain.dart
 
 TransactionRepositoryImpl buildRepository(MockClient client) {
   return TransactionRepositoryImpl(
-    apiClient: ApiClient(
+    apiClient: SupabaseApiClient(
       baseUrl: 'https://example.test',
       accessTokenProvider: () => 'token',
       client: client,

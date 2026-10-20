@@ -4,12 +4,12 @@ import 'package:cardsemble/features/card_events/domain/card_events_domain.dart';
 
 class CardEventRepositoryImpl implements CardEventRepository {
   CardEventRepositoryImpl({
-    required ApiClient apiClient,
+    required SupabaseApiClient apiClient,
     required SupabaseClient supabase,
   })  : _apiClient = apiClient,
         _supabase = supabase;
 
-  final ApiClient _apiClient;
+  final SupabaseApiClient _apiClient;
   final SupabaseClient _supabase;
 
   @override

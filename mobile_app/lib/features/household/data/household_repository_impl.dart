@@ -3,10 +3,10 @@ import 'package:cardsemble/features/household/domain/household_domain.dart';
 
 class HouseholdRepositoryImpl implements HouseholdRepository {
   HouseholdRepositoryImpl({
-    required ApiClient apiClient,
+    required SupabaseApiClient apiClient,
   }) : _apiClient = apiClient;
 
-  final ApiClient _apiClient;
+  final SupabaseApiClient _apiClient;
 
   @override
   Future<Result<List<HouseholdPerson>>> loadPeople() async {
