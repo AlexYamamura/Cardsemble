@@ -164,26 +164,50 @@ create policy "Users can insert their own cycle start overrides"
 --   supabase db reset  (if using local)
 --   Or run in the SQL editor:
 --
--- SELECT cron.schedule(
---   'daily-plaid-sync',
---   '0 12 * * *',
---   $$
---   SELECT
---     net.http_post(
---       'https://YOUR-PROJECT.supabase.co/functions/v1/api',
---       json_build_object(
---         'path', 'cron/plaid-sync',
---         'method', 'GET',
---           'headers', json_build_object(
---             'Authorization', concat('Bearer ', current_setting('app.settings.cron_secret'))
---           )
---       ),
---       '1'::text,
---       current_setting('app.settings.cron_secret')
---     )
---   $$
--- );
+SELECT cron.schedule(
+  'daily-plaid-sync',
+  '0 12 * * *',
+  $$
+  SELECT
+    net.http_post(
+      'https://' || current_setting('app.settings.supabase_url') || '.supabase.co/functions/v1/api',
+      json_build_object(
+        'path', 'cron/plaid-sync',
+        'method', 'GET',
+        'headers', json_build_object(
+          'Authorization', concat('Bearer ', current_setting('app.settings.cron_secret'))
+        )
+      ),
+      '1'::text,
+      current_setting('app.settings.cron_secret')
+    )
+  $$
+);
+
+-- Card catalog sync via pg_cron
+-- This cron job runs daily at 02:00 UTC and calls the api edge function's
+-- cron/card-catalog-sync route. The CRON_SECRET must be set as a function secret.
 --
+SELECT cron.schedule(
+  'daily-card-catalog-sync',
+  '0 2 * * *',
+  $$
+  SELECT
+    net.http_post(
+      'https://' || current_setting('app.settings.supabase_url') || '.supabase.co/functions/v1/api',
+      json_build_object(
+        'path', 'cron/card-catalog-sync',
+        'method', 'POST',
+        'headers', json_build_object(
+          'Authorization', concat('Bearer ', current_setting('app.settings.cron_secret'))
+        )
+      ),
+      '1'::text,
+      current_setting('app.settings.cron_secret')
+    )
+  $$
+);
+
 -- Note: pg_cron must be enabled. In Supabase, it is available in the
 -- dedicated database instance. Enable it with:
---   CREATE EXTENSION IF NOT EXISTS cron;
+CREATE EXTENSION IF NOT EXISTS cron;

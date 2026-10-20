@@ -5,6 +5,7 @@ enabled = true
 port = 5432
 db_schema = "public"
 max_connections = 200
+supabase_url = "ebawvkiabuhcyvyzegfn"
 
 [db]
 port = 5432
