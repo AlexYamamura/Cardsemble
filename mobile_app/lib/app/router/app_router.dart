@@ -452,19 +452,20 @@ class _AnimatedTabBarState extends State<_AnimatedTabBar> {
                         ),
                       ),
                     ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (int i = 0; i < n; i++)
-                          Expanded(
-                            child: _Destination(
-                              tab: widget.tabs[i],
-                              selected: (i - widget.selectedIndex).abs() < 0.5,
-                              onTap: () => widget.onSelected(i),
-                            ),
-                          ),
-                      ],
-                    ),
+                     Row(
+                       crossAxisAlignment: CrossAxisAlignment.stretch,
+                       children: [
+                         for (int i = 0; i < n; i++)
+                           Expanded(
+                             child: _Destination(
+                               tab: widget.tabs[i],
+                               currentPage: page,
+                               tabIndex: i,
+                               onTap: () => widget.onSelected(i),
+                             ),
+                           ),
+                       ],
+                     ),
                   ],
                 );
               },
@@ -479,25 +480,35 @@ class _AnimatedTabBarState extends State<_AnimatedTabBar> {
 class _Destination extends StatelessWidget {
   const _Destination({
     required this.tab,
-    required this.selected,
+    required this.currentPage,
+    required this.tabIndex,
     required this.onTap,
   });
 
   final _TabInfo tab;
-  final bool selected;
+  final double currentPage;
+  final int tabIndex;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final distance = (tabIndex - currentPage).abs();
+    final t = (1.0 - distance / 0.5).clamp(0.0, 1.0);
+    final showSelectedIcon = distance < 0.5;
+
     // The icon sits on top of the (primary-coloured) selection pill when
     // selected, so it uses the on-primary colour. The label sits below the
     // pill on the surface, so it uses the primary colour instead — otherwise
     // it would be invisible (light on light).
-    final iconColor =
-        selected ? AppColors.onPrimary : theme.colorScheme.onSurfaceVariant;
-    final labelColor =
-        selected ? AppColors.primary : theme.colorScheme.onSurfaceVariant;
+    final iconColor = ColorTween(
+      begin: theme.colorScheme.onSurfaceVariant,
+      end: AppColors.onPrimary,
+    ).transform(t);
+    final labelColor = ColorTween(
+      begin: theme.colorScheme.onSurfaceVariant,
+      end: AppColors.primary,
+    ).transform(t);
 
     return InkResponse(
       onTap: onTap,
@@ -513,7 +524,7 @@ class _Destination extends StatelessWidget {
               height: _kNavIndicatorHeight,
               child: Center(
                 child: Icon(
-                  selected ? tab.selectedIcon : tab.icon,
+                  showSelectedIcon ? tab.selectedIcon : tab.icon,
                   color: iconColor,
                   size: 24,
                 ),
@@ -525,7 +536,7 @@ class _Destination extends StatelessWidget {
               style: TextStyle(
                 color: labelColor,
                 fontSize: 12,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                fontWeight: showSelectedIcon ? FontWeight.w600 : FontWeight.normal,
               ),
               textAlign: TextAlign.center,
             ),
