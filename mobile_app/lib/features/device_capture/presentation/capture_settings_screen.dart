@@ -195,7 +195,7 @@ class _CaptureSettingsScreenState extends State<CaptureSettingsScreen> {
               Text(notifier.error!,
                   style: TextStyle(color: theme.colorScheme.error)),
             ],
-          ] else if (notifier.isConfigured && notifier.hasNotificationAccess) ...[
+          ] else if ((defaultPerson != null && notifier.credentials != null) && notifier.hasNotificationAccess) ...[
             Card(
               color: Colors.green.shade50,
               child: Padding(
