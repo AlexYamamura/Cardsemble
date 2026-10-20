@@ -632,6 +632,7 @@ Future<Map<String, double>?> showCardOptimizerSettings({
   required List<CardCatalogCard> cards,
 }) async {
   final current = await repository.loadTypeMultipliers();
+  if (!context.mounted) return null;
   final types = <String>{};
   for (final card in cards) {
     types.add(repository.rewardTypeFor(card));
