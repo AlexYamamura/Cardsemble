@@ -255,7 +255,6 @@ class _ResearchScreenState extends State<ResearchScreen> {
       child: Column(
         children: [
           _buildOptimizerButton(),
-          _buildSelectedTableHeader(),
           Expanded(
             child: _selectedCards.isEmpty
                 ? Center(
@@ -345,38 +344,6 @@ class _ResearchScreenState extends State<ResearchScreen> {
     if (saved == null || !mounted) return;
     await repository.saveTypeMultipliers(saved);
     setState(() {});
-  }
-
-  Widget _buildSelectedTableHeader() {
-    return Container(
-      color: AppColors.surface,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: const [
-          Expanded(
-            flex: 3,
-            child: Text(
-              'Card Name',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              'Issuer',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              'Card Type',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   /// Full available catalog list (previous commit behavior).
