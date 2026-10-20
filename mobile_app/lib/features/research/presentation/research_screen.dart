@@ -155,22 +155,22 @@ class _ResearchScreenState extends State<ResearchScreen> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(_error!),
-                            const SizedBox(height: 12),
-                            FilledButton(
-                              onPressed: _loadCards,
-                              child: const Text('Retry'),
-                            ),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_error!),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: _loadCards,
+                          child: const Text('Retry'),
                         ),
-                      )
-                    : _allCards.isEmpty
-                        ? const Center(child: Text('No credit cards available'))
-                        : _buildAvailableList(),
+                      ],
+                    ),
+                  )
+                : _allCards.isEmpty
+                ? const Center(child: Text('No credit cards available'))
+                : _buildAvailableList(),
           ),
         ],
       ),
@@ -259,8 +259,11 @@ class _ResearchScreenState extends State<ResearchScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.credit_card_outlined,
-                            size: 48, color: Colors.grey),
+                        const Icon(
+                          Icons.credit_card_outlined,
+                          size: 48,
+                          color: Colors.grey,
+                        ),
                         const SizedBox(height: 12),
                         Text(
                           'Select a card from the dropdown above',
@@ -293,14 +296,23 @@ class _ResearchScreenState extends State<ResearchScreen> {
       child: Row(
         children: const [
           Expanded(
-              flex: 3,
-              child: Text('Card', style: TextStyle(fontWeight: FontWeight.w600))),
+            flex: 3,
+            child: Text('Card', style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
           Expanded(
-              flex: 2,
-              child: Text('Issuer', style: TextStyle(fontWeight: FontWeight.w600))),
+            flex: 2,
+            child: Text(
+              'Issuer',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
           Expanded(
-              flex: 2,
-              child: Text('Network', style: TextStyle(fontWeight: FontWeight.w600))),
+            flex: 2,
+            child: Text(
+              'Network',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
           SizedBox(width: 48),
         ],
       ),
@@ -359,8 +371,10 @@ class _SelectedRow extends StatelessWidget {
         dense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: const Icon(Icons.credit_card),
-        title: Text(card.name,
-            style: const TextStyle(fontWeight: FontWeight.w600)),
+        title: Text(
+          card.name,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
         subtitle: Text(
           '${card.issuer ?? ''} • ${card.network ?? ''}',
           style: const TextStyle(fontSize: 13, color: Colors.grey),
@@ -396,112 +410,177 @@ class _CardDetailSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.credit_card, color: AppColors.primary),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  card.name,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.credit_card, color: AppColors.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    card.name,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _DetailRow(label: 'Issuer', value: card.issuer ?? '—'),
+            _DetailRow(label: 'Network', value: card.network ?? '—'),
+            _DetailRow(label: 'Type', value: card.type ?? '—'),
+            _DetailRow(label: 'Segment', value: card.segment ?? '—'),
+            _DetailRow(label: 'Country', value: card.country ?? '—'),
+            if (card.annualFee != null)
+              _DetailRow(
+                label: 'Annual fee',
+                value: _formatMoney(
+                  card.annualFee!.amount,
+                  card.annualFee!.currency,
+                ),
+              ),
+            if (card.fxFee != null)
+              _DetailRow(
+                label: 'FX fee',
+                value: '${card.fxFee!.percent?.toStringAsFixed(2) ?? '—'}%',
+              ),
+            if (card.creditRequired?.scoreBand != null)
+              _DetailRow(
+                label: 'Credit required',
+                value: card.creditRequired!.scoreBand!,
+              ),
+            if (card.rewards != null && card.rewards!.currency != null)
+              _DetailRow(
+                label: 'Rewards currency',
+                value: card.rewards!.currency!,
+              ),
+            const Divider(height: 24),
+            if (card.benefits.isNotEmpty) ...[
+              const Text(
+                'Benefits',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+              ),
+              const SizedBox(height: 8),
+              ...card.benefits.map(
+                (benefit) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '• ${benefit.title ?? benefit.id ?? 'Benefit'}',
+                    style: const TextStyle(fontSize: 13),
                   ),
                 ),
               ),
+              const SizedBox(height: 12),
             ],
-          ),
-          const SizedBox(height: 16),
-          _DetailRow(label: 'Issuer', value: card.issuer ?? '—'),
-          _DetailRow(label: 'Network', value: card.network ?? '—'),
-          _DetailRow(label: 'Type', value: card.type ?? '—'),
-          _DetailRow(label: 'Segment', value: card.segment ?? '—'),
-          _DetailRow(label: 'Country', value: card.country ?? '—'),
-          if (card.annualFee != null)
-            _DetailRow(
-              label: 'Annual fee',
-              value: _formatMoney(card.annualFee!.amount, card.annualFee!.currency),
-            ),
-          if (card.fxFee != null)
-            _DetailRow(
-              label: 'FX fee',
-              value: '${card.fxFee!.percent?.toStringAsFixed(2) ?? '—'}%',
-            ),
-          if (card.creditRequired?.scoreBand != null)
-            _DetailRow(
-              label: 'Credit required',
-              value: card.creditRequired!.scoreBand!,
-            ),
-          if (card.rewards != null && card.rewards!.currency != null)
-            _DetailRow(label: 'Rewards currency', value: card.rewards!.currency!),
-          const Divider(height: 24),
-          if (card.benefits.isNotEmpty) ...[
-            const Text('Benefits',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-            const SizedBox(height: 8),
-            ...card.benefits.map(
-              (benefit) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  '• ${benefit.title ?? benefit.id ?? 'Benefit'}',
-                  style: const TextStyle(fontSize: 13),
+            if (card.rewards != null &&
+                card.rewards!.categories.isNotEmpty) ...[
+              const Text(
+                'Elevated category spending',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+              ),
+              const SizedBox(height: 8),
+              ...card.rewards!.categories.map(
+                (category) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: _ElevatedCategoryRow(category: category),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-          ],
-          if (card.signupBonus != null) ...[
-            const Text('Signup bonus',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-            const SizedBox(height: 8),
-            _DetailRow(label: 'Amount', value: _formatMoney(card.signupBonus!.amount, card.signupBonus!.unit)),
-            if (card.signupBonus!.spendRequired != null)
-              _DetailRow(
-                label: 'Spend required',
-                value: _formatMoney(card.signupBonus!.spendRequired, card.signupBonus!.spendCurrency),
+              const SizedBox(height: 12),
+            ],
+            if (card.signupBonus != null) ...[
+              const Text(
+                'Signup bonus',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
               ),
-            if (card.signupBonus!.months != null)
+              const SizedBox(height: 8),
               _DetailRow(
-                label: 'Within',
-                value: '${card.signupBonus!.months} months',
+                label: 'Amount',
+                value: _formatMoney(
+                  card.signupBonus!.amount,
+                  card.signupBonus!.unit,
+                ),
               ),
-            const SizedBox(height: 12),
-          ],
-          if (card.notes != null) ...[
-            const Text('Notes',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+              if (card.signupBonus!.spendRequired != null)
+                _DetailRow(
+                  label: 'Spend required',
+                  value: _formatMoney(
+                    card.signupBonus!.spendRequired,
+                    card.signupBonus!.spendCurrency,
+                  ),
+                ),
+              if (card.signupBonus!.months != null)
+                _DetailRow(
+                  label: 'Within',
+                  value: '${card.signupBonus!.months} months',
+                ),
+              const SizedBox(height: 12),
+            ],
+            // Notes section removed per user request
+            if (card.officialUrl != null) ...[
+              ListTile(
+                leading: const Icon(Icons.open_in_new),
+                title: const Text('Official site'),
+                onTap: () {},
+              ),
+            ],
             const SizedBox(height: 8),
-            Text(card.notes!, style: const TextStyle(fontSize: 13)),
-            const SizedBox(height: 12),
-          ],
-          if (card.officialUrl != null) ...[
-            ListTile(
-              leading: const Icon(Icons.open_in_new),
-              title: const Text('Official site'),
-              onTap: () {},
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
             ),
           ],
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 
   String _formatMoney(num? amount, String? unit) {
     if (amount == null) return '—';
-    final formatted = amount is int ? amount.toString() : amount.toStringAsFixed(2);
+    final formatted = amount is int
+        ? amount.toString()
+        : amount.toStringAsFixed(2);
     return unit != null ? '$unit $formatted' : formatted;
+  }
+}
+
+/// A detail row showing an elevated reward category with its points per dollar.
+class _ElevatedCategoryRow extends StatelessWidget {
+  const _ElevatedCategoryRow({required this.category});
+
+  final CardRewardCategory category;
+
+  @override
+  Widget build(BuildContext context) {
+    final points = category.pointsPerDollar;
+    return Row(
+      children: [
+        const SizedBox(width: 110),
+        Expanded(
+          child: Text(
+            category.label ?? 'Unnamed category',
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+        if (points != null)
+          Text(
+            '${points.toStringAsFixed(1)}x',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+      ],
+    );
   }
 }
 
