@@ -1,3 +1,5 @@
+import '../cache/cache_store.dart';
+import '../cache/shared_preferences_cache_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/database/supabase_client.dart';
 import '../../features/auth/data/auth_repository_impl.dart';
@@ -74,12 +76,25 @@ class ServiceLocator {
     registerSingleton<ApiClient>(apiClient);
     registerSingleton<AppSupabaseClient>(AppSupabaseClient.instance);
 
+    final cacheStore = SharedPreferencesCacheStore();
+    registerSingleton<CacheStore>(cacheStore);
+
     registerFactory<AuthRepository>(() => AuthRepositoryImpl(
           supabase: supabaseClient,
         ));
 
     registerFactory<AuthNotifier>(() => AuthNotifier(
           authRepository: sl.get<AuthRepository>(),
+          onBeforeSignOut: (previousUserId) async {
+            if (previousUserId == null) return;
+            await sl.get<TransactionCache>().clearScope(previousUserId);
+          },
+          onUserIdChanged: (previousUserId, nextUserId) {
+            if (previousUserId == nextUserId) return;
+            // Scoped keys already isolate users; this erases the old session's
+            // snapshot as soon as the auth stream reports the change.
+            sl.get<TransactionCache>().clearScope(previousUserId);
+          },
         ));
 
     registerFactory<HouseholdRepository>(() => HouseholdRepositoryImpl(
@@ -94,7 +109,12 @@ class ServiceLocator {
           apiClient: apiClient,
         ));
 
-    registerFactory<TransactionCache>(() => TransactionCache());
+    registerFactory<TransactionCache>(() => TransactionCache(
+          store: cacheStore,
+          scopeProvider: () => supabaseClient.auth.currentUser?.id,
+        ));
+    // Old keys were not user-scoped and cannot be attributed safely.
+    await sl.get<TransactionCache>().purgeLegacyKeys();
 
      registerFactory<TransactionsNotifier>(() => TransactionsNotifier(
            transactionRepository: sl.get<TransactionRepository>(),

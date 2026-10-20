@@ -227,6 +227,18 @@ class DeviceCaptureNotifier extends ChangeNotifier {
     }
   }
 
+  /// Drops in-memory user-owned state when the authenticated identity changes.
+  ///
+  /// Native capture credentials are intentionally left in place: revoking them
+  /// is a separate device-security action, not part of a UI session reset.
+  void resetSessionData() {
+    _people = [];
+    _credentials = null;
+    _error = null;
+    _step1AutoConfigured = false;
+    notifyListeners();
+  }
+
   void clearError() {
     _error = null;
     notifyListeners();

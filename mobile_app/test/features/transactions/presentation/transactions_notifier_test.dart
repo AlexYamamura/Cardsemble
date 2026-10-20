@@ -5,8 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:cardsemble/core/core.dart';
 import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
+import 'package:cardsemble/features/transactions/data/transaction_cache.dart';
 import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
+
+import '../../../core/cache/fake_cache_store.dart';
 
 
 CardTransaction _tx(String id, {String? assignedPersonId}) {
@@ -336,6 +339,313 @@ void main() {
     expect(notifier.dateRange!.start, DateTime(today.year, today.month));
     expect(notifier.dateRange!.end, today);
     expect(notifier.hasActiveFilters, isTrue);
+  });
+
+  test('hydrates a fresh transaction snapshot before the network completes', () async {
+    final store = FakeCacheStore();
+    final now = DateTime(2026, 1, 2, 12);
+    final cache = TransactionCache(
+      store: store,
+      clock: () => now,
+      scopeProvider: () => 'user-a',
+    );
+    await cache.write(
+      scope: 'user-a',
+      transactions: [_tx('cached')],
+    );
+    final completer = Completer<Result<TransactionPage>>();
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) => completer.future,
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+
+    final load = notifier.loadAll();
+    await pumpEventQueue();
+
+    expect(notifier.transactions.single.id, 'cached');
+
+    completer.complete(
+      const Success(TransactionPage(items: [], hasMore: false)),
+    );
+    await load;
+
+    expect(notifier.transactions, isEmpty);
+  });
+
+  test('assignment works on a freshly hydrated snapshot', () async {
+    final store = FakeCacheStore();
+    final cache = TransactionCache(
+      store: store,
+      clock: () => DateTime(2026, 1, 2, 12),
+      scopeProvider: () => 'user-a',
+    );
+    await cache.write(scope: 'user-a', transactions: [_tx('cached')]);
+    final completer = Completer<Result<TransactionPage>>();
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) => completer.future,
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+
+    final load = notifier.loadAll();
+    await pumpEventQueue();
+    expect(notifier.transactions.single.id, 'cached');
+
+    final assigned = await notifier.assignTransaction('cached', 'person-9');
+
+    expect(assigned, isTrue);
+    expect(notifier.transactions.single.assignedPersonId, 'person-9');
+
+    completer.complete(
+      const Success(TransactionPage(items: [], hasMore: false)),
+    );
+    await load;
+  });
+
+  test('visibility works on a freshly hydrated snapshot', () async {
+    final store = FakeCacheStore();
+    final cache = TransactionCache(
+      store: store,
+      clock: () => DateTime(2026, 1, 2, 12),
+      scopeProvider: () => 'user-a',
+    );
+    await cache.write(scope: 'user-a', transactions: [_tx('cached')]);
+    final completer = Completer<Result<TransactionPage>>();
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) => completer.future,
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+
+    final load = notifier.loadAll();
+    await pumpEventQueue();
+    expect(notifier.transactions.single.id, 'cached');
+
+    final updated = await notifier.setHouseholdVisible('cached', false);
+
+    expect(updated, isTrue);
+    expect(notifier.transactions.single.householdVisible, isFalse);
+
+    completer.complete(
+      const Success(TransactionPage(items: [], hasMore: false)),
+    );
+    await load;
+  });
+
+  test('does not hydrate a transaction snapshot older than the TTL', () async {
+    final store = FakeCacheStore();
+    final writtenAt = DateTime(2026, 1, 1, 12);
+    var now = writtenAt;
+    final cache = TransactionCache(
+      store: store,
+      clock: () => now,
+      scopeProvider: () => 'user-a',
+    );
+    await cache.write(scope: 'user-a', transactions: [_tx('cached')]);
+    now = writtenAt.add(kDefaultCacheTtl + const Duration(hours: 1));
+
+    final completer = Completer<Result<TransactionPage>>();
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) => completer.future,
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+
+    final load = notifier.loadAll();
+    await pumpEventQueue();
+
+    expect(notifier.transactions, isEmpty);
+
+    completer.complete(
+      const Success(TransactionPage(items: [], hasMore: false)),
+    );
+    await load;
+  });
+
+  test('serves an expired snapshot on refresh failure without re-stamping it', () async {
+    final store = FakeCacheStore();
+    final writtenAt = DateTime(2026, 1, 1, 12);
+    var now = writtenAt;
+    final cache = TransactionCache(
+      store: store,
+      clock: () => now,
+      scopeProvider: () => 'user-a',
+    );
+    await cache.write(scope: 'user-a', transactions: [_tx('cached')]);
+    now = writtenAt.add(kDefaultCacheTtl + const Duration(hours: 1));
+
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) async =>
+          const FailureResult(NetworkFailure('offline')),
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+
+    await notifier.loadAll();
+
+    expect(notifier.transactions.single.id, 'cached');
+    expect(notifier.isShowingStaleData, isTrue);
+
+    // A successful local edit must not make the old snapshot look fresh.
+    final assigned = await notifier.assignTransaction('cached', 'person-9');
+    expect(assigned, isTrue);
+    expect(notifier.transactions.single.assignedPersonId, 'person-9');
+    final snapshot = await cache.read();
+
+    expect(snapshot.transactions.items.single.id, 'cached');
+    expect(snapshot.transactions.savedAt!.isAtSameMomentAs(writtenAt), isTrue);
+    expect(snapshot.transactions.isFresh(now, cache.ttl), isFalse);
+  });
+
+  test('a successful empty load replaces the stale fallback', () async {
+    final store = FakeCacheStore();
+    final cache = TransactionCache(
+      store: store,
+      clock: () => DateTime(2026, 1, 2, 12),
+      scopeProvider: () => 'user-a',
+    );
+    await cache.write(scope: 'user-a', transactions: [_tx('cached')]);
+
+    var fail = false;
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) async {
+        if (fail) {
+          return const FailureResult(NetworkFailure('offline'));
+        }
+        return const Success(TransactionPage(items: [], hasMore: false));
+      },
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+
+    await notifier.loadAll();
+    expect(notifier.transactions, isEmpty);
+
+    fail = true;
+    await notifier.loadTransactions(reset: true);
+
+    // Stale fallback must point at the latest known-good (empty) response.
+    expect(notifier.transactions, isEmpty);
+  });
+
+  test('resetForSessionChange clears user data and filters', () async {
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) async =>
+          const Success(TransactionPage(items: [], hasMore: false)),
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+    );
+    await notifier.loadTransactions(reset: true);
+    notifier.setAccountFilter('a1');
+
+    notifier.resetForSessionChange();
+
+    expect(notifier.transactions, isEmpty);
+    expect(notifier.people, isEmpty);
+    expect(notifier.accounts, isEmpty);
+    expect(notifier.selectedAccountId, isNull);
+    expect(notifier.selectedPersonId, isNull);
+    expect(notifier.isShowingStaleData, isFalse);
+    expect(notifier.dateRange, isNotNull);
+  });
+
+  test('assignment writes through to the transaction cache', () async {
+    final store = FakeCacheStore();
+    final cache = TransactionCache(
+      store: store,
+      scopeProvider: () => 'user-a',
+      clock: () => DateTime(2026, 1, 2),
+    );
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) async =>
+          Success(TransactionPage(items: [_tx('t1')], hasMore: false)),
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+    await notifier.loadTransactions(reset: true);
+
+    final ok = await notifier.assignTransaction('t1', 'person-9');
+
+    expect(ok, isTrue);
+    final snapshot = await cache.read();
+    expect(snapshot.transactions.items.single.assignedPersonId, 'person-9');
+  });
+
+  test('visibility success writes through to the transaction cache', () async {
+    final store = FakeCacheStore();
+    final cache = TransactionCache(
+      store: store,
+      scopeProvider: () => 'user-a',
+      clock: () => DateTime(2026, 1, 2),
+    );
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) async =>
+          Success(TransactionPage(items: [_tx('t1')], hasMore: false)),
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+    await notifier.loadTransactions(reset: true);
+
+    expect(await notifier.setHouseholdVisible('t1', false), isTrue);
+    final snapshot = await cache.read();
+    expect(snapshot.transactions.items.single.householdVisible, isFalse);
+  });
+
+  test('discards a late response after the cache scope changes', () async {
+    final store = FakeCacheStore();
+    var scope = 'user-a';
+    final cache = TransactionCache(
+      store: store,
+      scopeProvider: () => scope,
+      clock: () => DateTime(2026, 1, 2),
+    );
+    final completer = Completer<Result<TransactionPage>>();
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) => completer.future,
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+
+    final load = notifier.loadTransactions(reset: true);
+    await pumpEventQueue();
+    scope = 'user-b';
+    completer.complete(
+      Success(TransactionPage(items: [_tx('late')], hasMore: false)),
+    );
+    await load;
+
+    expect(notifier.transactions, isEmpty);
+    expect(store.entries, isEmpty);
   });
 }
 

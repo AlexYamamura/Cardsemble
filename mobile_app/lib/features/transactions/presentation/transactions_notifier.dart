@@ -97,6 +97,10 @@ class TransactionsNotifier extends ChangeNotifier {
   int _transactionsGeneration = 0;
   bool _reloadScheduled = false;
   bool _hydrated = false;
+  String? _hydratedScope;
+  TransactionCacheSnapshot? _staleSnapshot;
+  final Set<String> _staleSections = {};
+  bool _summaryLoaded = false;
 
   // In-memory cache of split draft percentages keyed by transaction id. Keeps
   // the split dropdown from re-hitting the network on every open/close of the
@@ -119,6 +123,11 @@ class TransactionsNotifier extends ChangeNotifier {
 
   String? get selectedAccountId => _selectedAccountId;
   String? get selectedPersonId => _selectedPersonId;
+
+  /// True when at least one section was restored from an expired cache after a
+  /// failed refresh. The UI can use this to disclose staleness without
+  /// blocking first-frame rendering.
+  bool get isShowingStaleData => _staleSections.isNotEmpty;
 
   List<CardTransaction> get filteredTransactions {
     final effectiveDateRange = _dateRange;
@@ -322,8 +331,9 @@ class TransactionsNotifier extends ChangeNotifier {
     if (!reset && !_hasMore) return;
     if (!reset && (_isLoading || _isLoadingMore)) return;
 
+    _syncCacheScope();
+    final scope = _cache?.currentScope;
     final generation = ++_transactionsGeneration;
-
 
     if (reset) {
       _isLoading = true;
@@ -340,9 +350,12 @@ class TransactionsNotifier extends ChangeNotifier {
 
       while (true) {
         final result = await _transactionRepository.loadTransactions(_queryFor(offset: offset));
-        if (generation != _transactionsGeneration) return;
+        if (generation != _transactionsGeneration || !_scopeStillValid(scope)) {
+          return;
+        }
         if (result.isFailure) {
           _error = result.failure.message;
+          _applyStaleSection(transactions: true);
           _isLoading = false;
           _isLoadingMore = false;
           notifyListeners();
@@ -357,16 +370,23 @@ class TransactionsNotifier extends ChangeNotifier {
          }
       }
 
-      if (generation != _transactionsGeneration) return;
+      if (generation != _transactionsGeneration || !_scopeStillValid(scope)) {
+        return;
+      }
       _transactions = reset ? collected : [..._transactions, ...collected];
       _offset = offset;
       _hasMore = hasMore;
+      _staleSections.remove('transactions');
+      _rememberGoodSection(transactions: _transactions);
       _lastUpdated = DateTime.now();
-      _writeCache();
+      _writeCache(scope: scope, transactions: true);
     } catch (e) {
-      if (generation == _transactionsGeneration) _error = e.toString();
+      if (generation == _transactionsGeneration && _scopeStillValid(scope)) {
+        _error = e.toString();
+        _applyStaleSection(transactions: true);
+      }
     } finally {
-      if (generation == _transactionsGeneration) {
+      if (generation == _transactionsGeneration && _scopeStillValid(scope)) {
         _isLoading = false;
         _isLoadingMore = false;
         notifyListeners();
@@ -382,6 +402,8 @@ class TransactionsNotifier extends ChangeNotifier {
   /// Loads every page of transactions within [range] for the summary tab. The
   /// server applies the date bounds, so this never downloads the whole ledger.
   Future<void> loadSummaryTransactions(DateTimeRange range) async {
+    _syncCacheScope();
+    final scope = _cache?.currentScope;
     _summaryRange = range;
     final generation = ++_summaryGeneration;
     _isSummaryLoading = true;
@@ -399,9 +421,12 @@ class TransactionsNotifier extends ChangeNotifier {
             dateTo: range.end,
           ),
         );
-        if (generation != _summaryGeneration) return;
+        if (generation != _summaryGeneration || !_scopeStillValid(scope)) {
+          return;
+        }
         if (result.isFailure) {
           _error = result.failure.message;
+          _applyStaleSection(summary: true);
           _isSummaryLoading = false;
           notifyListeners();
           return;
@@ -412,14 +437,22 @@ class TransactionsNotifier extends ChangeNotifier {
         if (!page.hasMore || page.items.isEmpty) break;
       }
 
-      if (generation != _summaryGeneration) return;
+      if (generation != _summaryGeneration || !_scopeStillValid(scope)) {
+        return;
+      }
       _summaryTransactions = collected;
+      _summaryLoaded = true;
+      _staleSections.remove('summary');
+      _rememberGoodSection(summary: _summaryTransactions);
       _lastUpdated = DateTime.now();
-      _writeCache();
+      _writeCache(scope: scope, summary: true);
     } catch (e) {
-      if (generation == _summaryGeneration) _error = e.toString();
+      if (generation == _summaryGeneration && _scopeStillValid(scope)) {
+        _error = e.toString();
+        _applyStaleSection(summary: true);
+      }
     } finally {
-      if (generation == _summaryGeneration) {
+      if (generation == _summaryGeneration && _scopeStillValid(scope)) {
         _isSummaryLoading = false;
         notifyListeners();
       }
@@ -427,35 +460,55 @@ class TransactionsNotifier extends ChangeNotifier {
   }
 
   Future<void> loadAccounts() async {
+    _syncCacheScope();
+    final scope = _cache?.currentScope;
     try {
       final result = await _transactionRepository.loadAccounts();
+      if (!_scopeStillValid(scope)) return;
       result.fold(
         (accounts) {
           _accounts = accounts;
-          _writeCache();
+          _staleSections.remove('accounts');
+          _rememberGoodSection(accounts: accounts);
+          _writeCache(scope: scope, accounts: true);
         },
-        (failure) => _error = failure.message,
+        (failure) {
+          _error = failure.message;
+          _applyStaleSection(accounts: true);
+        },
       );
       notifyListeners();
     } catch (e) {
+      if (!_scopeStillValid(scope)) return;
       _error = e.toString();
+      _applyStaleSection(accounts: true);
       notifyListeners();
     }
   }
 
   Future<void> loadPeople() async {
+    _syncCacheScope();
+    final scope = _cache?.currentScope;
     try {
       final result = await _householdRepository.loadPeople();
+      if (!_scopeStillValid(scope)) return;
       result.fold(
         (people) {
           _people = people;
-          _writeCache();
+          _staleSections.remove('people');
+          _rememberGoodSection(people: people);
+          _writeCache(scope: scope, people: true);
         },
-        (failure) => _error = failure.message,
+        (failure) {
+          _error = failure.message;
+          _applyStaleSection(people: true);
+        },
       );
       notifyListeners();
     } catch (e) {
+      if (!_scopeStillValid(scope)) return;
       _error = e.toString();
+      _applyStaleSection(people: true);
       notifyListeners();
     }
   }
@@ -474,6 +527,7 @@ class TransactionsNotifier extends ChangeNotifier {
   }
 
   Future<void> _runLoadAll() async {
+    _syncCacheScope();
     await _hydrateFromCache();
     await Future.wait([loadPeople(), loadAccounts()]);
     await loadTransactions(reset: true);
@@ -482,6 +536,7 @@ class TransactionsNotifier extends ChangeNotifier {
   /// Reloads everything the user can see (used after mutations that change
   /// derived data such as card display names).
   Future<void> refresh() async {
+    _syncCacheScope();
     await Future.wait([loadPeople(), loadAccounts()]);
     await loadTransactions(reset: true);
     await _reloadSummary();
@@ -497,9 +552,11 @@ class TransactionsNotifier extends ChangeNotifier {
   Future<bool> assignTransaction(String transactionId, String? personId) async {
     _error = null;
     notifyListeners();
+    final scope = _cache?.currentScope;
 
     try {
       final result = await _transactionRepository.assignTransaction(transactionId, personId);
+      if (!_scopeStillValid(scope)) return false;
       if (result.isFailure) {
         _error = result.failure.message;
         notifyListeners();
@@ -509,9 +566,15 @@ class TransactionsNotifier extends ChangeNotifier {
       // transaction to the household default person rather than leaving it null.
       final assignment = result.value;
       _applyAssignment(transactionId, assignment.personId, assignment.assignmentSource);
+      _writeCache(
+        scope: scope,
+        transactions: true,
+        summary: _summaryLoaded,
+      );
       notifyListeners();
       return true;
     } catch (e) {
+      if (!_scopeStillValid(scope)) return false;
       _error = e.toString();
       notifyListeners();
       return false;
@@ -537,6 +600,7 @@ class TransactionsNotifier extends ChangeNotifier {
     }) async {
       _error = null;
       notifyListeners();
+      final scope = _cache?.currentScope;
 
       final outcome = await _saveTransactionSplit.call(
         transactionId: transactionId,
@@ -544,6 +608,8 @@ class TransactionsNotifier extends ChangeNotifier {
         percentages: percentages,
         orderedPersonIds: orderedPersonIds,
       );
+      if (!_scopeStillValid(scope)) return false;
+
        return outcome.fold(
           (splits) async {
             // Rewrite the split draft cache with the saved percentages so the
@@ -562,20 +628,28 @@ class TransactionsNotifier extends ChangeNotifier {
     }
 
   Future<bool> setHouseholdVisible(String transactionId, bool visible) async {
+    final scope = _cache?.currentScope;
     // Optimistic update with rollback on failure.
     _replaceTransaction(transactionId, (tx) => tx.copyWith(householdVisible: visible));
     notifyListeners();
 
     try {
       final result = await _transactionRepository.setHouseholdVisible(transactionId, visible);
+      if (!_scopeStillValid(scope)) return false;
       if (result.isFailure) {
         _replaceTransaction(transactionId, (tx) => tx.copyWith(householdVisible: !visible));
         _error = result.failure.message;
         notifyListeners();
         return false;
       }
+      _writeCache(
+        scope: scope,
+        transactions: true,
+        summary: _summaryLoaded,
+      );
       return true;
     } catch (e) {
+      if (!_scopeStillValid(scope)) return false;
       _replaceTransaction(transactionId, (tx) => tx.copyWith(householdVisible: !visible));
       _error = e.toString();
       notifyListeners();
@@ -587,13 +661,20 @@ class TransactionsNotifier extends ChangeNotifier {
     String transactionId,
     CardTransaction Function(CardTransaction) transform,
   ) {
+    // Snapshot hydration and stale fallback store unmodifiable lists. Rebuild
+    // instead of index-assigning so cached rows can still be edited.
     final index = _transactions.indexWhere((t) => t.id == transactionId);
     if (index != -1) {
-      _transactions[index] = transform(_transactions[index]);
+      final updated = List<CardTransaction>.of(_transactions);
+      updated[index] = transform(updated[index]);
+      _transactions = updated;
     }
-    final summaryIndex = _summaryTransactions.indexWhere((t) => t.id == transactionId);
+    final summaryIndex =
+        _summaryTransactions.indexWhere((t) => t.id == transactionId);
     if (summaryIndex != -1) {
-      _summaryTransactions[summaryIndex] = transform(_summaryTransactions[summaryIndex]);
+      final updated = List<CardTransaction>.of(_summaryTransactions);
+      updated[summaryIndex] = transform(updated[summaryIndex]);
+      _summaryTransactions = updated;
     }
   }
 
@@ -602,9 +683,16 @@ class TransactionsNotifier extends ChangeNotifier {
      _csvPreview = null;
      _error = null;
      notifyListeners();
+     final scope = _cache?.currentScope;
 
      try {
        final result = await _transactionRepository.previewCsvImport(accountId, csvText);
+       if (!_scopeStillValid(scope)) {
+         _isPreviewing = false;
+         return const FailureResult(
+           AuthFailure('The signed-in user changed during the import preview.'),
+         );
+       }
        return result.fold(
          (preview) {
            _csvPreview = preview;
@@ -620,6 +708,12 @@ class TransactionsNotifier extends ChangeNotifier {
          },
        );
      } catch (e) {
+       if (!_scopeStillValid(scope)) {
+         _isPreviewing = false;
+         return const FailureResult(
+           AuthFailure('The signed-in user changed during the import preview.'),
+         );
+       }
        _error = e.toString();
        _isPreviewing = false;
        notifyListeners();
@@ -630,9 +724,15 @@ class TransactionsNotifier extends ChangeNotifier {
    Future<Result<CsvImportResult>> confirmCsvImport(String accountId, List<CsvImportRow> rows, String filename) async {
      _error = null;
      notifyListeners();
+     final scope = _cache?.currentScope;
 
      try {
        final result = await _transactionRepository.confirmCsvImport(accountId, rows, filename);
+       if (!_scopeStillValid(scope)) {
+         return const FailureResult(
+           AuthFailure('The signed-in user changed during the import.'),
+         );
+       }
        if (result.isFailure) {
          _error = result.failure.message;
          notifyListeners();
@@ -642,6 +742,11 @@ class TransactionsNotifier extends ChangeNotifier {
        await _reloadSummary();
        return Success(result.value);
      } catch (e) {
+       if (!_scopeStillValid(scope)) {
+         return const FailureResult(
+           AuthFailure('The signed-in user changed during the import.'),
+         );
+       }
        _error = e.toString();
        notifyListeners();
        return FailureResult(UnknownFailure(e.toString()));
@@ -660,22 +765,179 @@ class TransactionsNotifier extends ChangeNotifier {
     }
   }
 
+  /// Clears all user-owned state. Called when the authenticated identity
+  /// changes so the next session cannot render the previous user's data.
+  void resetForSessionChange({bool clearFilters = true}) {
+    _transactions = [];
+    _summaryTransactions = [];
+    _people = [];
+    _accounts = [];
+    _splitDraftCache.clear();
+    _csvPreview = null;
+    _isPreviewing = false;
+    _error = null;
+    _lastUpdated = null;
+    _isLoading = false;
+    _isLoadingMore = false;
+    _isSummaryLoading = false;
+    _hasMore = true;
+    _offset = 0;
+    _summaryRange = null;
+    _summaryLoaded = false;
+    _staleSnapshot = null;
+    _staleSections.clear();
+    _hydrated = false;
+    _hydratedScope = null;
+    _activeLoadAll = null;
+    // Invalidate any in-flight response from the previous identity.
+    _transactionsGeneration++;
+    _summaryGeneration++;
+
+    if (clearFilters) {
+      _dateRange = monthRange(DateTime.now());
+      _selectedAccountId = null;
+      _selectedPersonId = null;
+    }
+    notifyListeners();
+  }
+
+  /// Aligns [hydratedScope] with the cache's current identity, clearing old
+  /// state when the signed-in user changes.
+  void _syncCacheScope() {
+    final cache = _cache;
+    if (cache == null) return;
+
+    final scope = cache.currentScope;
+    if (_hydratedScope == scope) return;
+    if (_hydrated || _hydratedScope != null) {
+      resetForSessionChange();
+    }
+    _hydratedScope = scope;
+  }
+
+  bool _scopeStillValid(String? scope) {
+    final cache = _cache;
+    if (cache == null) return true;
+    return cache.currentScope == scope;
+  }
+
+  void _applyStaleSection({
+    bool people = false,
+    bool accounts = false,
+    bool transactions = false,
+    bool summary = false,
+  }) {
+    final snapshot = _staleSnapshot;
+    if (snapshot == null) return;
+
+    if (people && _people.isEmpty && snapshot.people.hasData) {
+      _people = snapshot.people.items;
+      _staleSections.add('people');
+    }
+    if (accounts && _accounts.isEmpty && snapshot.accounts.hasData) {
+      _accounts = snapshot.accounts.items;
+      _staleSections.add('accounts');
+    }
+    if (transactions && _transactions.isEmpty && snapshot.transactions.hasData) {
+      _transactions = snapshot.transactions.items;
+      _hasMore = false;
+      _staleSections.add('transactions');
+    }
+    if (summary &&
+        _summaryTransactions.isEmpty &&
+        snapshot.summaryTransactions.hasData) {
+      _summaryTransactions = snapshot.summaryTransactions.items;
+      _summaryLoaded = true;
+      _staleSections.add('summary');
+    }
+  }
+
+  /// Advances the fallback snapshot after a successful remote load.
+  ///
+  /// Without this, a later refresh failure could restore data from app startup
+  /// instead of the most recent known-good response, including rows deleted
+  /// server-side.
+  void _rememberGoodSection({
+    List<HouseholdPerson>? people,
+    List<StatementAccount>? accounts,
+    List<CardTransaction>? transactions,
+    List<CardTransaction>? summary,
+  }) {
+    final cache = _cache;
+    if (cache == null) return;
+
+    final current = _staleSnapshot ?? const TransactionCacheSnapshot.empty();
+    final savedAt = cache.now();
+    _staleSnapshot = TransactionCacheSnapshot(
+      people: people != null
+          ? CachedSection<HouseholdPerson>(
+              items: List<HouseholdPerson>.unmodifiable(people),
+              savedAt: savedAt,
+            )
+          : current.people,
+      accounts: accounts != null
+          ? CachedSection<StatementAccount>(
+              items: List<StatementAccount>.unmodifiable(accounts),
+              savedAt: savedAt,
+            )
+          : current.accounts,
+      transactions: transactions != null
+          ? CachedSection<CardTransaction>(
+              items: List<CardTransaction>.unmodifiable(transactions),
+              savedAt: savedAt,
+            )
+          : current.transactions,
+      summaryTransactions: summary != null
+          ? CachedSection<CardTransaction>(
+              items: List<CardTransaction>.unmodifiable(summary),
+              savedAt: savedAt,
+            )
+          : current.summaryTransactions,
+    );
+  }
+
   Future<void> _hydrateFromCache() async {
     final cache = _cache;
-    if (cache == null || _hydrated) return;
-    _hydrated = true;
+    if (cache == null) return;
+
+    final scope = cache.currentScope;
+    if (scope == null) return;
+    if (_hydrated && _hydratedScope == scope) return;
+    if (_hydratedScope != null && _hydratedScope != scope) {
+      resetForSessionChange();
+    }
+
     try {
       final snapshot = await cache.read();
-      if (_people.isEmpty && snapshot.people.isNotEmpty) _people = snapshot.people;
-      if (_accounts.isEmpty && snapshot.accounts.isNotEmpty) _accounts = snapshot.accounts;
-      if (_transactions.isEmpty && snapshot.transactions.isNotEmpty) {
-        _transactions = snapshot.transactions;
+      if (!_scopeStillValid(scope)) return;
+
+      _staleSnapshot = snapshot;
+      final now = cache.now();
+      var hydratedAny = false;
+      if (_people.isEmpty && snapshot.people.isFresh(now, cache.ttl)) {
+        _people = snapshot.people.items;
+        hydratedAny = true;
+      }
+      if (_accounts.isEmpty && snapshot.accounts.isFresh(now, cache.ttl)) {
+        _accounts = snapshot.accounts.items;
+        hydratedAny = true;
+      }
+      if (_transactions.isEmpty &&
+          snapshot.transactions.isFresh(now, cache.ttl)) {
+        _transactions = snapshot.transactions.items;
         _hasMore = false;
+        hydratedAny = true;
       }
-      if (_summaryTransactions.isEmpty && snapshot.summaryTransactions.isNotEmpty) {
-        _summaryTransactions = snapshot.summaryTransactions;
+      if (_summaryTransactions.isEmpty &&
+          snapshot.summaryTransactions.isFresh(now, cache.ttl)) {
+        _summaryTransactions = snapshot.summaryTransactions.items;
+        _summaryLoaded = true;
+        hydratedAny = true;
       }
-      _lastUpdated = snapshot.savedAt;
+
+      if (hydratedAny) _lastUpdated = snapshot.latestSavedAt;
+      _hydrated = true;
+      _hydratedScope = scope;
       notifyListeners();
     } catch (_) {
       // Cache hydration is best-effort and must never block a network load.
@@ -687,39 +949,79 @@ class TransactionsNotifier extends ChangeNotifier {
       required double totalAmount,
       required List<String> participantIds,
     }) {
-      // Serve the split draft from the local cache so re-opening the split
-      // dropdown does not hit the network on every expand/collapse.
-      final cached = _splitDraftCache[transactionId];
-      if (cached != null) {
-        return Future.value(Success(cached));
-      }
-      return _loadTransactionSplitDraft.call(
-        transactionId: transactionId,
-        totalAmount: totalAmount,
-        participantIds: participantIds,
-      ).then((result) {
-        result.fold(
-          (percentages) => _splitDraftCache[transactionId] = Map<String, double>.from(percentages),
-          (_) => null,
-        );
-        return result;
-      });
+       // Serve the split draft from the local cache so re-opening the split
+       // dropdown does not hit the network on every expand/collapse.
+       final cached = _splitDraftCache[transactionId];
+       if (cached != null) {
+         return Future.value(Success(cached));
+       }
+       final scope = _cache?.currentScope;
+       return _loadTransactionSplitDraft.call(
+         transactionId: transactionId,
+         totalAmount: totalAmount,
+         participantIds: participantIds,
+       ).then((result) {
+         if (!_scopeStillValid(scope)) {
+           return const FailureResult<Map<String, double>>(
+             AuthFailure('The signed-in user changed while loading splits.'),
+           );
+         }
+         result.fold(
+           (percentages) => _splitDraftCache[transactionId] = Map<String, double>.from(percentages),
+           (_) => null,
+         );
+         return result;
+       });
     }
 
-   void _writeCache() {
+  /// Writes only the datasets that changed.
+  ///
+  /// The scope captured before the network call is passed explicitly so a late
+  /// response from a previous user cannot be written into the active cache.
+  void _writeCache({
+    required String? scope,
+    bool people = false,
+    bool accounts = false,
+    bool transactions = false,
+    bool summary = false,
+  }) {
     final cache = _cache;
-    if (cache == null) return;
+    if (cache == null || scope == null) return;
+    if (!_scopeStillValid(scope)) return;
+
+    // A section restored from an expired snapshot must keep its original
+    // timestamp. Re-stamping it after a successful local edit would make the
+    // next launch treat old financial data as freshly loaded.
+    final writePeople = people && !_staleSections.contains('people');
+    final writeAccounts = accounts && !_staleSections.contains('accounts');
+    final writeTransactions =
+        transactions && !_staleSections.contains('transactions');
+    final writeSummary = summary && !_staleSections.contains('summary');
+
+    if (!writePeople && !writeAccounts && !writeTransactions && !writeSummary) {
+      return;
+    }
+
     // Fire-and-forget: caching must not delay the UI or surface errors.
     cache.write(
-      people: _people,
-      accounts: _accounts,
-      transactions: _transactions,
-      summaryTransactions: _summaryTransactions,
-    ).catchError((_) {});
+      scope: scope,
+      people: writePeople
+          ? List<HouseholdPerson>.unmodifiable(_people)
+          : null,
+      accounts: writeAccounts
+          ? List<StatementAccount>.unmodifiable(_accounts)
+          : null,
+      transactions: writeTransactions
+          ? List<CardTransaction>.unmodifiable(_transactions)
+          : null,
+      summaryTransactions: writeSummary
+          ? List<CardTransaction>.unmodifiable(_summaryTransactions)
+          : null,
+    ).catchError((_) => false);
   }
 
   Future<void> clearCache() async {
-    await _cache?.clear();
+    await _cache?.clearCurrentScope();
   }
 
   void clearError() {

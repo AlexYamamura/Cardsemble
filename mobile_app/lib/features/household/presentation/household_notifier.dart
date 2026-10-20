@@ -229,8 +229,19 @@ class HouseholdNotifier extends ChangeNotifier {
      notifyListeners();
    }
 
+   /// Drops all user-owned state when the authenticated identity changes.
+   void reset() {
+     _people = [];
+     _members = [];
+     _isLoading = false;
+     _error = null;
+     _nameQuery = '';
+     _defaultFilter = null;
+     notifyListeners();
+   }
+
    void clearError() {
      _error = null;
      notifyListeners();
    }
-}
+ }

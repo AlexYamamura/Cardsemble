@@ -11,11 +11,13 @@ This file is a navigation map, not a specification. Verify behavior in the cited
 | `mobile_app/` | Flutter app. Run all Flutter commands from this directory. |
 | `mobile_app/lib/main.dart` | Minimal entry point; runs `CardsembleApp`. |
 | `mobile_app/lib/app/` | App bootstrap (`app.dart`), environment constants (`config/env.dart`), and the actual shell/navigation (`router/app_router.dart`, which contains `MainTabs`, not a `go_router` table). |
-| `mobile_app/lib/core/` | Cross-cutting layers: dependency injection, Supabase client, authenticated HTTP client, `Result`/`Failure` types, date/currency helpers, external-app launcher. |
+| `mobile_app/lib/core/` | Cross-cutting layers: dependency injection, Supabase client, authenticated HTTP client, `Result`/`Failure` types, cache primitives, date/currency helpers, external-app launcher. |
+| `mobile_app/lib/core/cache/` | Shared cache primitives: `CacheStore`/`SharedPreferencesCacheStore`, `CacheRecord`, `CachedRepository<K,V>`, TTL defaults, clock/scope injection. |
+| `mobile_app/lib/features/card_catalog/` | Card catalog reference model and `CachedRepository` child. `CardCatalogSource` is an unimplemented integration boundary; no backend table/route exists. |
 | `mobile_app/lib/features/<feature>/domain/` | Entities, repository interfaces, use cases, split arithmetic. Pure Dart; no Flutter UI except `DateTimeRange` in transaction queries. |
 | `mobile_app/lib/features/<feature>/data/` | Repository implementations, direct Supabase queries, and `SharedPreferences` cache. |
 | `mobile_app/lib/features/<feature>/presentation/` | `ChangeNotifier` state holders and screens/widgets. |
-| `mobile_app/lib/features/` | Features: `auth`, `household`, `transactions`, `summary`, `accounts`, `card_events`, `device_capture`. |
+| `mobile_app/lib/features/` | Features: `auth`, `household`, `transactions`, `summary`, `accounts`, `card_events`, `card_catalog`, `device_capture`. |
 | `mobile_app/test/` | Flutter unit/widget tests. No `integration_test/` directory exists. |
 | `mobile_app/android/` | Android host, notification-listener capture service, Gradle config, and instrumented parser tests. |
 | `mobile_app/ios/`, `web/`, `windows/`, etc. | Platform scaffolds. Native capture is implemented only for Android. |
@@ -49,7 +51,12 @@ Flutter dependencies declared in `mobile_app/pubspec.yaml` include `provider`, `
 | `mobile_app/lib/features/transactions/domain/split_math.dart` | `equalSplitPercentages`, `percentagesFromExistingSplits`, `moveBoundary`, `snapToGuideline`, `percentagesToCents` | Pure split arithmetic. `percentagesToCents` is the cent-exact authority used before persistence. | split use cases, `_SplitSection`, `split_math_test.dart` |
 | `mobile_app/lib/features/transactions/domain/use_cases/load_transaction_split_draft.dart` | `LoadTransactionSplitDraft.call` | Fetches existing splits; converts to normalized percentages, falling back to equal split when absent/invalid. | repo `fetchTransactionSplits`, `split_math.dart` |
 | `mobile_app/lib/features/transactions/domain/use_cases/save_transaction_split.dart` | `SaveTransactionSplit.call` | Validates participants, 100% sum, positive total, and exact cent totals, then persists splits. | repo `assignTransactionSplit`, `split_math.dart` |
-| `mobile_app/lib/features/transactions/data/transaction_cache.dart` | `TransactionCache`, `TransactionCacheSnapshot` | Persists people/accounts/ledger/summary to `SharedPreferences` for first-frame hydration. Keys are constant and not user-scoped. | notifier `_hydrateFromCache`/`_writeCache`, `clearCache` |
+| `mobile_app/lib/core/cache/cache_store.dart` | `CacheStore`, `CacheRecord`, `CacheClock`, `CacheScopeProvider`, `kDefaultCacheTtl` | Storage/freshness contract. `SharedPreferencesCacheStore` persists one versioned JSON envelope per key with scope and timestamp; corrupt or wrong-scope entries read as misses. | `cached_repository.dart`, `transaction_cache.dart`, tests |
+| `mobile_app/lib/core/cache/cached_repository.dart` | `CachedRepository<K,V>`, `CacheBatchResult` | Reusable cache-first parent: overridable TTL (24h default), batched missing/expired fetches, write-back, stale-on-error, partial-response handling, scoped invalidation, late-response rejection. | `CardCatalogRepository`, `cache_store.dart` |
+| `mobile_app/lib/features/transactions/data/transaction_cache.dart` | `TransactionCache`, `TransactionCacheSnapshot`, `CachedSection` | Per-user transaction snapshot in one SharedPreferences key. Four independently timestamped sections, serialized read-modify-write queue, corrupt-section isolation, 24h freshness metadata, legacy-key purge. | notifier `_hydrateFromCache`/`_writeCache`, `clearCache` |
+| `mobile_app/lib/features/card_catalog/domain/entities/card_catalog_card.dart` | `CardCatalogCard`, fee/APR/rewards/benefit/perk models | Typed reference-data model matching the supplied catalog JSON shape; unknown keys survive in `extra`. | `card_catalog_source.dart`, repository tests |
+| `mobile_app/lib/features/card_catalog/domain/card_catalog_source.dart` | `CardCatalogSource` | Integration boundary for the future catalog backend (`fetchCards`, `searchCards`). No table/route exists yet. | `card_catalog_repository.dart` |
+| `mobile_app/lib/features/card_catalog/data/card_catalog_repository.dart` | `CardCatalogRepository extends CachedRepository<String, CardCatalogCard>` | Per-card cache keyed by stable catalog id, global scope, 24h default TTL, batch fetch, search write-through. Does not cache selections or account-specific benefit usage. | `cached_repository.dart`, `card_catalog_source.dart` |
 | `mobile_app/lib/features/transactions/presentation/widgets/unified_split_slider.dart` | `UnifiedSplitSlider`, `ParticipantInfo`, `_handleDragUpdate` | Drag boundaries for 2-4 participants, snapping to 25/50/75 and keeping the total at 100%. | `split_math.dart`, `_SplitSection` |
 | `mobile_app/lib/features/transactions/presentation/widgets/pay_action_sheet.dart` | `PayButton`, `_showPayActionSheet`, `_handlePress`, `_handleCopy` | Opens Fidelity/Chase/Venmo apps with the filtered amount or copies the amount. No payment API is involved. | `TransactionsNotifier.filteredTotal`, `core/services/external_app_launcher.dart` |
 
@@ -126,7 +133,7 @@ Flutter dependencies declared in `mobile_app/pubspec.yaml` include `provider`, `
 - **Assignment:** UI `_runAssignment` -> `TransactionsNotifier.assignTransaction` -> `POST /api/plaid-transactions/{id}/assignment`. Backend deletes existing assignments and inserts a manual assignment (or deletes and reports the default person for unassign), then calls `calculateStatementSummaries`.
 - **Splits:** UI `_SplitSection` -> `TransactionsNotifier.loadSplitDraft` -> `LoadTransactionSplitDraft` -> `GET /api/plaid-transactions/{id}/splits`. Save path: slider -> `percentagesToCents` -> `_runSplit` -> `TransactionsNotifier.saveTransactionSplit` -> `SaveTransactionSplit` -> `POST /api/plaid-transactions/{id}/assignment-split`.
 - **Visibility:** UI `_runVisibility` -> `TransactionsNotifier.setHouseholdVisible` -> `PATCH /api/plaid-transactions/{id}/household-visible`. The notifier applies an optimistic update and rolls back on failure.
-- **Persistence/cache:** `TransactionCache` uses `SharedPreferences` keys `tx_cache_people_v1`, `tx_cache_accounts_v1`, `tx_cache_transactions_v1`, `tx_cache_summary_v1`, `tx_cache_saved_at_v1`. `_hydrateFromCache` runs before the first network load; `_writeCache` is fire-and-forget.
+- **Persistence/cache:** `TransactionCache` stores one scoped snapshot key per authenticated user (`cardsemble.cache.v2.transactions.<user>.snapshot`) with four independently timestamped sections (`people`, `accounts`, `transactions`, `summary_transactions`). Writes are queued read-modify-write operations so a partial dataset update cannot refresh unrelated timestamps. `TransactionsNotifier._hydrateFromCache` hydrates fresh sections only; expired sections are retained as a stale fallback if a refresh fails. `_writeCache` writes only changed sections and is fire-and-forget. Legacy `tx_cache_*_v1` keys are unscoped and are purged rather than migrated.
 
 ### Household membership and shared visibility
 
@@ -304,7 +311,7 @@ The following are observed in the current source and are useful before editing; 
 - **Household sharing is not end-to-end.** Membership/invite code plumbing exists, but transactions/people remain user-scoped. `GET /api/household/members` filters `household_id = auth.userId`; `POST /api/household/members/join` uses `.eq("household_id", "user_id")`, which appears to compare against the literal string rather than the `user_id` column. Verify/fix the join before relying on it.
 - **Household visibility UI is inconsistent.** `CardEventsScreen` treats `reconciliationStatus == 'household_visible'` as visible, but backend reconciliation statuses are HIGH/MEDIUM/AMBIGUOUS/REVIEW/UNMATCHED/PENDING. `CardEventsNotifier.setHouseholdVisible` rebuilds the record without changing any field. Do not assume the visibility toggle reflects server state.
 - **The ledger "load more" path is effectively one full drain.** `loadTransactions` loops until `has_more` is false; `_hasMore` normally becomes false on the first load.
-- **Cache keys are not user-scoped.** `TransactionCache` uses constant `SharedPreferences` keys, so signing into a different account on the same device can hydrate the previous account's cached people/transactions until the network load replaces them.
+- **Transaction cache is stale-while-revalidate.** Fresh sections hydrate the first frame, but `loadAll` still refreshes from the server. Sections older than 24 hours are not hydrated unless the corresponding remote load fails and the in-memory list is empty (`TransactionsNotifier.isShowingStaleData`). Legacy unscoped `tx_cache_*_v1` keys are intentionally discarded.
 - **Plaid token exchange calls the exchange endpoint twice.** `_shared/plaid.ts` `exchangePublicToken` performs one `/item/public_token/exchange` call in the outer `Promise.all` and another inside the nested item lookup. Fix cautiously if touching Plaid linking.
 - **Capture URL is hardcoded.** `features/device_capture/presentation/capture_settings_screen.dart` `_autoConfigureStep1` configures the native listener with `https://creditcards-beige.vercel.app`, not the `CARD_EVENTS_API_URL`/Edge Function base.
 - **Function config references missing functions.** `supabase/config.toml` mentions `functions.card-events`, `functions.cron`, and `functions.test-health`; only `functions/api` exists in the tree. Do not assume those endpoints are deployed.
@@ -318,8 +325,8 @@ The following are observed in the current source and are useful before editing; 
 | Command | Purpose / status |
 |---|---|
 | `flutter pub get` | Install dependencies. |
-| `flutter analyze` | Static analysis. Verified on 2026-10-18: **No issues found**. |
-| `flutter test` | Run all unit/widget tests. Verified on 2026-10-18: **50 tests passed**. |
+| `flutter analyze` | Static analysis. Verified on 2026-10-20: **No issues found**. |
+| `flutter test` | Run all unit/widget tests. Verified on 2026-10-20: **105 tests passed**. |
 | `flutter test test/features/transactions/domain/split_math_test.dart` | Run one test file; substitute any path under `test/`. |
 | `adb devices` | List Android devices for phone deployment. |
 | `flutter run -d <DEVICE_ID>` | Build/run on the selected phone. The API base can be overridden with `--dart-define=CARD_EVENTS_API_URL=...`. |
@@ -329,8 +336,13 @@ The following are observed in the current source and are useful before editing; 
 
 | Test file | Covers |
 |---|---|
+| `mobile_app/test/core/cache/cached_repository_test.dart` | Cache miss/fresh/expired reads, per-repository TTLs, batched missing keys, partial responses, stale-on-error, corrupt entries, write failures, invalidation, null scope, and late-response scope changes. |
+| `mobile_app/test/core/cache/shared_preferences_cache_store_test.dart` | Envelope round-trip, scope/schema/corruption rejection, timestamp preservation, key removal, encoding failure. |
+| `mobile_app/test/features/transactions/data/transaction_cache_test.dart` | Snapshot round-trip, per-section timestamps, TTL freshness, corrupt-section isolation, malformed-item invalidation, per-scope keys, concurrent merge, scoped clearing, stale-scope write rejection, legacy purge. |
+| `mobile_app/test/features/card_catalog/data/card_catalog_repository_test.dart` | Per-card caching, fresh-hit avoidance, batched missing cards, deselect/reselect reuse, search write-through, custom TTL, partial responses, stale-on-error. |
+| `mobile_app/test/features/card_catalog/domain/card_catalog_card_test.dart` | Supplied catalog JSON shape, scalar-tolerant parsing, unknown-key preservation, missing optional fields, stable-id validation. |
 | `mobile_app/test/features/transactions/data/transaction_repository_impl_test.dart` | Transaction page parsing/failure behavior, assignment response shapes (default vs nested manual), split parsing/filtering of null/zero/negative/invalid rows, HTTP failure propagation. |
-| `mobile_app/test/features/transactions/presentation/transactions_notifier_test.dart` | `loadAll` coalescing, stale-response protection, server-default assignment on unassign, split save reload, split-draft cache hit/rewrite, optimistic visibility rollback, default current-month date filter. |
+| `mobile_app/test/features/transactions/presentation/transactions_notifier_test.dart` | `loadAll` coalescing, stale-response protection, server-default assignment on unassign, split save reload, split-draft cache hit/rewrite, optimistic visibility rollback, default current-month date filter, fresh/expired cache hydration, session reset, assignment/visibility write-through, late-response scope rejection. |
 | `mobile_app/test/features/transactions/presentation/transactions_screen_test.dart` | Long assignee-name layout/overflow, 3- and 4-participant horizontal split layout, unified slider presence, current-month date chip. |
 | `mobile_app/test/features/transactions/domain/split_math_test.dart` | Equal split remainders, guideline snapping, boundary movement/minimums, cent-exact allocation and no negative/zero shares, serialized split payload, normalization/backfill. |
 | `mobile_app/test/features/household/presentation/people_screen_test.dart` | People screen add buttons and QR scanner dialog behavior. |
@@ -356,6 +368,7 @@ The following are observed in the current source and are useful before editing; 
 - **Plaid linking/sync/statements:** `accounts_screen.dart`, `accounts_notifier.dart`, `account_repository_impl.dart`, `_shared/plaid.ts`, `_shared/reconcile.ts`, `index.ts` routes, and the Plaid-related migrations.
 - **Android capture:** `app_router.dart` setup overlay, `device_capture_notifier.dart`, `device_capture_repository_impl.dart`, `MainActivity.kt`, `GooglePayNotificationListenerService.kt`, `CaptureCredentialStore.kt`, and the `card-events` backend route.
 - **Auth/session:** `auth_wrapper.dart`, `auth_notifier.dart`, `auth_repository_impl.dart`, `app.dart`, Android manifest/iOS `Info.plist` redirect configuration.
+- **Shared caching or card catalog:** `core/cache/cache_store.dart`, `core/cache/cached_repository.dart`, `features/transactions/data/transaction_cache.dart`, `features/card_catalog/`; run the cache, transaction-cache, notifier, and catalog tests. The card catalog has no backend/source yet, so keep it out of DI until `CardCatalogSource` is implemented.
 
 ## Maintaining This Guide
 

@@ -74,6 +74,14 @@ class CardEventsNotifier extends ChangeNotifier {
     }
   }
 
+  /// Drops all user-owned state when the authenticated identity changes.
+  void reset() {
+    _events = [];
+    _isLoading = false;
+    _error = null;
+    notifyListeners();
+  }
+
   void clearError() {
     _error = null;
     notifyListeners();

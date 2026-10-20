@@ -165,6 +165,16 @@ class AccountsNotifier extends ChangeNotifier {
     }
   }
 
+  /// Drops all user-owned state when the authenticated identity changes.
+  void reset() {
+    _connections = [];
+    _statementSummary = null;
+    _isLoading = false;
+    _error = null;
+    _linkToken = null;
+    notifyListeners();
+  }
+
   void clearError() {
     _error = null;
     notifyListeners();

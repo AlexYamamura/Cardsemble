@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/auth/presentation/auth_notifier.dart';
 import 'package:cardsemble/features/auth/presentation/sign_in_screen.dart';
+import 'package:cardsemble/features/card_events/presentation/card_events_notifier.dart';
+import 'package:cardsemble/features/device_capture/presentation/device_capture_notifier.dart';
+import 'package:cardsemble/features/household/presentation/household_notifier.dart';
+import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({
@@ -17,11 +22,13 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> {
   late final AuthNotifier _authNotifier;
+  String? _lastUserId;
 
   @override
   void initState() {
     super.initState();
     _authNotifier = context.read<AuthNotifier>();
+    _lastUserId = _authNotifier.userSession?.userId;
     _authNotifier.addListener(_onAuthStateChanged);
     // Initialize after the current frame to avoid calling notifyListeners during build.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -38,9 +45,27 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 
   void _onAuthStateChanged() {
-    if (mounted) {
-      setState(() {});
+    if (!mounted) return;
+
+    final nextUserId = _authNotifier.userSession?.userId;
+    if (_lastUserId != nextUserId) {
+      _lastUserId = nextUserId;
+      _resetSessionScopedState();
     }
+    setState(() {});
+  }
+
+  /// Clears in-memory state that belongs to the previous identity.
+  ///
+  /// Disk caches are already keyed by user id and the sign-out path clears the
+  /// session's snapshot. This prevents the new session from rendering old rows
+  /// during the first frame before its own loads complete.
+  void _resetSessionScopedState() {
+    context.read<TransactionsNotifier>().resetForSessionChange();
+    context.read<HouseholdNotifier>().reset();
+    context.read<AccountsNotifier>().reset();
+    context.read<CardEventsNotifier>().reset();
+    context.read<DeviceCaptureNotifier>().resetSessionData();
   }
 
   @override

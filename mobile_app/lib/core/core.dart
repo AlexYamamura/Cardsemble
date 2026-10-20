@@ -1,3 +1,4 @@
+export 'cache/cache.dart';
 export 'error/app_exception.dart';
 export 'error/failure.dart';
 export 'network/api_client.dart';

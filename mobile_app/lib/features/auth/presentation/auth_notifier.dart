@@ -5,14 +5,29 @@ import 'package:cardsemble/features/auth/domain/auth_domain.dart';
 class AuthNotifier extends ChangeNotifier {
   AuthNotifier({
     required AuthRepository authRepository,
-  }) : _authRepository = authRepository {
+    Future<void> Function(String? previousUserId)? onBeforeSignOut,
+    void Function(String previousUserId, String? nextUserId)? onUserIdChanged,
+  })  : _authRepository = authRepository,
+        _onBeforeSignOut = onBeforeSignOut,
+        _onUserIdChanged = onUserIdChanged {
     _authStateSubscription = _authRepository.authStateChanges().listen((session) {
+      final previousUserId = _userSession?.userId;
+      final nextUserId = session?.userId;
       _userSession = session;
+      if (previousUserId != null && previousUserId != nextUserId) {
+        try {
+          _onUserIdChanged?.call(previousUserId, nextUserId);
+        } catch (_) {
+          // Cache cleanup must never block authentication state.
+        }
+      }
       notifyListeners();
     });
   }
 
   final AuthRepository _authRepository;
+  final Future<void> Function(String? previousUserId)? _onBeforeSignOut;
+  final void Function(String previousUserId, String? nextUserId)? _onUserIdChanged;
   late final StreamSubscription<UserSession?> _authStateSubscription;
 
   UserSession? _userSession;
@@ -64,6 +79,16 @@ class AuthNotifier extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    final previousUserId = _userSession?.userId;
+    try {
+      // Clear the current identity's cached data while the scope is still
+      // resolvable. The scoped keys already isolate users, but erasing the
+      // session snapshot avoids leaving financial data on a signed-out device.
+      await _onBeforeSignOut?.call(previousUserId);
+    } catch (_) {
+      // Cache cleanup must not prevent sign-out.
+    }
+
     try {
       await _authRepository.signOut();
       _userSession = null;
