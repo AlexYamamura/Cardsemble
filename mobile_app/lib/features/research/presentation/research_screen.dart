@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
 import 'package:cardsemble/features/card_catalog/data/card_catalog_repository.dart';
 import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
 
 /// Research surface for browsing credit cards.
 ///
-/// Shows all available credit cards from the card catalog with a search bar
-/// above the list. The search bar filters the card list by name.
+/// Keeps the search bar at the top. Directly below it is a separate dropdown
+/// card listing matching cards to select from; choosing one adds it to the
+/// white-background selected-cards table underneath. Tapping a row in that
+/// table opens a detail sheet with more information about the card.
 class ResearchScreen extends StatefulWidget {
   const ResearchScreen({
     super.key,
@@ -27,15 +30,25 @@ class _ResearchScreenState extends State<ResearchScreen> {
   String _query = '';
   bool _isLoading = true;
   List<CardCatalogCard> _allCards = [];
+  final Set<String> _selectedIds = <String>{};
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() {
+      setState(() => _query = _searchController.text);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _loadCards();
     });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCards() async {
@@ -44,13 +57,13 @@ class _ResearchScreenState extends State<ResearchScreen> {
       _isLoading = true;
       _error = null;
     });
-    
+
     try {
       final repository = context.read<CardCatalogRepository>();
       final result = await repository.getAllCards();
-      
+
       if (!mounted) return;
-      
+
       if (result.isSuccess) {
         setState(() {
           _allCards = result.value;
@@ -71,22 +84,54 @@ class _ResearchScreenState extends State<ResearchScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
   bool _matches(CardCatalogCard card) {
     final query = _query.toLowerCase();
-    return card.name.toLowerCase().contains(query);
+    return query.isEmpty ? false : card.searchText.contains(query);
+  }
+
+  List<CardCatalogCard> get _searchResults {
+    final results = _allCards.where(_matches).toList(growable: false);
+    results.sort((a, b) => a.name.compareTo(b.name));
+    return results;
+  }
+
+  List<CardCatalogCard> get _selectedCards {
+    final list = _allCards
+        .where((card) => _selectedIds.contains(card.id))
+        .toList(growable: false);
+    list.sort((a, b) => a.name.compareTo(b.name));
+    return list;
+  }
+
+  void _toggleCard(CardCatalogCard card) {
+    setState(() {
+      if (_selectedIds.contains(card.id)) {
+        _selectedIds.remove(card.id);
+      } else {
+        _selectedIds.add(card.id);
+      }
+    });
+  }
+
+  void _showCardDetail(CardCatalogCard card) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => _CardDetailSheet(card: card),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: AppColors.cream,
       appBar: AppBar(
+        backgroundColor: AppColors.primary,
+        foregroundColor: AppColors.onPrimary,
         title: const Text('Research'),
         actions: [
           SettingsGearMenu(
@@ -97,22 +142,15 @@ class _ResearchScreenState extends State<ResearchScreen> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search credit cards',
-                prefixIcon: const Icon(Icons.search),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              onChanged: (value) => setState(() => _query = value),
-            ),
-          ),
+          // Search bar at the top (previous format).
+          _buildSearchBar(),
+          const Divider(height: 1),
+          // Separate dropdown of matching cards to select from.
+          _buildSearchDropdown(),
+          const Divider(height: 1),
+          // White-background table of the selected cards.
+          _buildSelectedTable(),
+          // Full available catalog list below (previous commit behavior).
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -132,19 +170,367 @@ class _ResearchScreenState extends State<ResearchScreen> {
                       )
                     : _allCards.isEmpty
                         ? const Center(child: Text('No credit cards available'))
-                        : ListView.builder(
-                            itemCount: _allCards.where(_matches).toList(growable: false).length,
-                            itemBuilder: (context, index) {
-                              final matches = _allCards.where(_matches).toList(growable: false);
-                              final card = matches[index];
-                              return ListTile(
-                                leading: const Icon(Icons.credit_card),
-                                title: Text(card.name),
-                                trailing: const Icon(Icons.chevron_right),
-                              );
-                            },
-                          ),
+                        : _buildAvailableList(),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      child: TextField(
+        controller: _searchController,
+        decoration: InputDecoration(
+          hintText: 'Search credit cards',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: _query.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    _searchController.clear();
+                  },
+                )
+              : null,
+          filled: true,
+          fillColor: AppColors.surface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.outline),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.primary),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Dropdown of matching cards, shown directly below the search bar.
+  Widget _buildSearchDropdown() {
+    final results = _searchResults;
+    if (_query.isEmpty || results.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return SizedBox(
+      height: 220,
+      child: Card(
+        color: AppColors.surface,
+        elevation: 4,
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemCount: results.length,
+          itemBuilder: (context, index) {
+            final card = results[index];
+            final isSelected = _selectedIds.contains(card.id);
+            return ListTile(
+              dense: true,
+              leading: const Icon(Icons.credit_card, size: 20),
+              title: Text(card.name),
+              subtitle: Text(
+                '${card.issuer ?? ''} ${card.network ?? ''}'.trim(),
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              trailing: isSelected
+                  ? const Icon(Icons.check_circle, color: AppColors.primary)
+                  : const Icon(Icons.add, color: AppColors.primary),
+              onTap: () => _toggleCard(card),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// White-background table of the cards the user has selected.
+  Widget _buildSelectedTable() {
+    return SizedBox(
+      height: 200,
+      child: Column(
+        children: [
+          _buildSelectedTableHeader(),
+          Expanded(
+            child: _selectedCards.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.credit_card_outlined,
+                            size: 48, color: Colors.grey),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Select a card from the dropdown above',
+                          style: TextStyle(color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _selectedCards.length,
+                    itemBuilder: (context, index) {
+                      final card = _selectedCards[index];
+                      return _SelectedRow(
+                        card: card,
+                        onTap: () => _showCardDetail(card),
+                        onRemove: () => _toggleCard(card),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedTableHeader() {
+    return Container(
+      color: AppColors.surface,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: const [
+          Expanded(
+              flex: 3,
+              child: Text('Card', style: TextStyle(fontWeight: FontWeight.w600))),
+          Expanded(
+              flex: 2,
+              child: Text('Issuer', style: TextStyle(fontWeight: FontWeight.w600))),
+          Expanded(
+              flex: 2,
+              child: Text('Network', style: TextStyle(fontWeight: FontWeight.w600))),
+          SizedBox(width: 48),
+        ],
+      ),
+    );
+  }
+
+  /// Full available catalog list (previous commit behavior).
+  Widget _buildAvailableList() {
+    final cards = _allCards
+        .where((card) => _query.isEmpty || _matches(card))
+        .toList(growable: false);
+    cards.sort((a, b) => a.name.compareTo(b.name));
+    if (cards.isEmpty) {
+      return const Center(child: Text('No matching cards'));
+    }
+    return ListView.builder(
+      itemCount: cards.length,
+      itemBuilder: (context, index) {
+        final card = cards[index];
+        final isSelected = _selectedIds.contains(card.id);
+        return ListTile(
+          dense: true,
+          leading: const Icon(Icons.credit_card_outlined),
+          title: Text(card.name),
+          subtitle: Text(
+            '${card.issuer ?? ''} ${card.network ?? ''}'.trim(),
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          trailing: isSelected
+              ? const Icon(Icons.check_circle, color: AppColors.primary)
+              : const Icon(Icons.add_circle_outline, color: AppColors.primary),
+          onTap: () => _toggleCard(card),
+        );
+      },
+    );
+  }
+}
+
+/// A row in the selected-cards table.
+class _SelectedRow extends StatelessWidget {
+  const _SelectedRow({
+    required this.card,
+    required this.onTap,
+    required this.onRemove,
+  });
+
+  final CardCatalogCard card;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.surface,
+      child: ListTile(
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: const Icon(Icons.credit_card),
+        title: Text(card.name,
+            style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(
+          '${card.issuer ?? ''} • ${card.network ?? ''}',
+          style: const TextStyle(fontSize: 13, color: Colors.grey),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.info_outline, color: AppColors.primary),
+              tooltip: 'View details',
+              onPressed: onTap,
+            ),
+            IconButton(
+              icon: const Icon(Icons.remove_circle_outline, color: Colors.grey),
+              tooltip: 'Remove',
+              onPressed: onRemove,
+            ),
+          ],
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+/// Bottom sheet showing more information about a card from the table body.
+class _CardDetailSheet extends StatelessWidget {
+  const _CardDetailSheet({required this.card});
+
+  final CardCatalogCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.credit_card, color: AppColors.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  card.name,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _DetailRow(label: 'Issuer', value: card.issuer ?? '—'),
+          _DetailRow(label: 'Network', value: card.network ?? '—'),
+          _DetailRow(label: 'Type', value: card.type ?? '—'),
+          _DetailRow(label: 'Segment', value: card.segment ?? '—'),
+          _DetailRow(label: 'Country', value: card.country ?? '—'),
+          if (card.annualFee != null)
+            _DetailRow(
+              label: 'Annual fee',
+              value: _formatMoney(card.annualFee!.amount, card.annualFee!.currency),
+            ),
+          if (card.fxFee != null)
+            _DetailRow(
+              label: 'FX fee',
+              value: '${card.fxFee!.percent?.toStringAsFixed(2) ?? '—'}%',
+            ),
+          if (card.creditRequired?.scoreBand != null)
+            _DetailRow(
+              label: 'Credit required',
+              value: card.creditRequired!.scoreBand!,
+            ),
+          if (card.rewards != null && card.rewards!.currency != null)
+            _DetailRow(label: 'Rewards currency', value: card.rewards!.currency!),
+          const Divider(height: 24),
+          if (card.benefits.isNotEmpty) ...[
+            const Text('Benefits',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+            const SizedBox(height: 8),
+            ...card.benefits.map(
+              (benefit) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  '• ${benefit.title ?? benefit.id ?? 'Benefit'}',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (card.signupBonus != null) ...[
+            const Text('Signup bonus',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+            const SizedBox(height: 8),
+            _DetailRow(label: 'Amount', value: _formatMoney(card.signupBonus!.amount, card.signupBonus!.unit)),
+            if (card.signupBonus!.spendRequired != null)
+              _DetailRow(
+                label: 'Spend required',
+                value: _formatMoney(card.signupBonus!.spendRequired, card.signupBonus!.spendCurrency),
+              ),
+            if (card.signupBonus!.months != null)
+              _DetailRow(
+                label: 'Within',
+                value: '${card.signupBonus!.months} months',
+              ),
+            const SizedBox(height: 12),
+          ],
+          if (card.notes != null) ...[
+            const Text('Notes',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+            const SizedBox(height: 8),
+            Text(card.notes!, style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+          ],
+          if (card.officialUrl != null) ...[
+            ListTile(
+              leading: const Icon(Icons.open_in_new),
+              title: const Text('Official site'),
+              onTap: () {},
+            ),
+          ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatMoney(num? amount, String? unit) {
+    if (amount == null) return '—';
+    final formatted = amount is int ? amount.toString() : amount.toStringAsFixed(2);
+    return unit != null ? '$unit $formatted' : formatted;
+  }
+}
+
+/// A detail row inside the card detail sheet.
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.grey,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(child: Text(value, style: const TextStyle(fontSize: 13))),
         ],
       ),
     );
