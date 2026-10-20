@@ -13,10 +13,10 @@ class _FakeSource implements CardCatalogSource {
 
   final Map<String, CardCatalogCard> cards;
   int fetchCalls = 0;
-  int searchCalls = 0;
+  int fetchAllCalls = 0;
   Set<String> lastFetched = <String>{};
   Result<List<CardCatalogCard>>? fetchResult;
-  Result<List<CardCatalogCard>>? searchResult;
+  Result<List<CardCatalogCard>>? fetchAllResult;
 
   @override
   Future<Result<List<CardCatalogCard>>> fetchCards(Set<String> ids) async {
@@ -31,9 +31,9 @@ class _FakeSource implements CardCatalogSource {
   }
 
   @override
-  Future<Result<List<CardCatalogCard>>> searchCards(String query) async {
-    searchCalls++;
-    final override = searchResult;
+  Future<Result<List<CardCatalogCard>>> fetchAllCards() async {
+    fetchAllCalls++;
+    final override = fetchAllResult;
     if (override != null) return override;
     return Success(cards.values.toList(growable: false));
   }
@@ -147,5 +147,14 @@ void main() {
     expect(batch.values['a']!.id, 'a');
     expect(batch.staleKeys, {'a'});
     expect(batch.failure, isA<NetworkFailure>());
+  });
+
+  test('getAllCards returns all cards from the source', () async {
+    final repo = repository();
+    final result = await repo.getAllCards();
+    
+    expect(result.isSuccess, isTrue);
+    expect(result.value.length, 3);
+    expect(source.fetchAllCalls, 1);
   });
 }

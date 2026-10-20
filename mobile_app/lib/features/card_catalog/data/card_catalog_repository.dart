@@ -53,4 +53,10 @@ class CardCatalogRepository extends CachedRepository<String, CardCatalogCard> {
       return byId;
     });
   }
+
+  /// Fetches all cards from the catalog.
+  Future<Result<List<CardCatalogCard>>> getAllCards() async {
+    final result = await _source.fetchAllCards();
+    return result.map((cards) => cards);
+  }
 }

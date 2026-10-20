@@ -1,26 +1,29 @@
-import '../cache/cache_store.dart';
-import '../cache/shared_preferences_cache_store.dart';
-import '../../core/network/supabase_api_client.dart';
-import '../../core/database/supabase_client.dart';
-import '../../features/auth/data/auth_repository_impl.dart';
-import '../../features/auth/domain/auth_repository.dart';
-import '../../features/auth/presentation/auth_notifier.dart';
-import '../../features/household/data/household_repository_impl.dart';
-import '../../features/household/domain/household_repository.dart';
-import '../../features/household/presentation/household_notifier.dart';
-import '../../features/transactions/data/transaction_repository_impl.dart';
-import '../../features/transactions/data/transaction_cache.dart';
-import '../../features/transactions/domain/transactions_domain.dart';
-import '../../features/transactions/presentation/transactions_notifier.dart';
-import '../../features/card_events/data/card_event_repository_impl.dart';
-import '../../features/card_events/domain/card_event_repository.dart';
-import '../../features/card_events/presentation/card_events_notifier.dart';
-import '../../features/accounts/data/account_repository_impl.dart';
-import '../../features/accounts/domain/account_repository.dart';
-import '../../features/accounts/presentation/accounts_notifier.dart';
-import '../../features/device_capture/data/device_capture_repository_impl.dart';
-import '../../features/device_capture/domain/device_capture_repository.dart';
-import '../../features/device_capture/presentation/device_capture_notifier.dart';
+import 'package:cardsemble/core/cache/cache_store.dart';
+import 'package:cardsemble/core/cache/shared_preferences_cache_store.dart';
+import 'package:cardsemble/core/network/supabase_api_client.dart';
+import 'package:cardsemble/core/database/supabase_client.dart';
+import 'package:cardsemble/features/auth/data/auth_repository_impl.dart';
+import 'package:cardsemble/features/auth/domain/auth_repository.dart';
+import 'package:cardsemble/features/auth/presentation/auth_notifier.dart';
+import 'package:cardsemble/features/household/data/household_repository_impl.dart';
+import 'package:cardsemble/features/household/domain/household_repository.dart';
+import 'package:cardsemble/features/household/presentation/household_notifier.dart';
+import 'package:cardsemble/features/transactions/data/transaction_repository_impl.dart';
+import 'package:cardsemble/features/transactions/data/transaction_cache.dart';
+import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
+import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
+import 'package:cardsemble/features/card_events/data/card_event_repository_impl.dart';
+import 'package:cardsemble/features/card_events/domain/card_event_repository.dart';
+import 'package:cardsemble/features/card_events/presentation/card_events_notifier.dart';
+import 'package:cardsemble/features/accounts/data/account_repository_impl.dart';
+import 'package:cardsemble/features/accounts/domain/account_repository.dart';
+import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
+import 'package:cardsemble/features/device_capture/data/device_capture_repository_impl.dart';
+import 'package:cardsemble/features/device_capture/domain/device_capture_repository.dart';
+import 'package:cardsemble/features/device_capture/presentation/device_capture_notifier.dart';
+import 'package:cardsemble/features/card_catalog/domain/card_catalog_source.dart';
+import 'package:cardsemble/features/card_catalog/data/card_catalog_source_impl.dart';
+import 'package:cardsemble/features/card_catalog/data/card_catalog_repository.dart';
 
 class ServiceLocator {
   ServiceLocator._();
@@ -146,10 +149,19 @@ class ServiceLocator {
           supabase: supabaseClient,
         ));
 
-     registerFactory<DeviceCaptureNotifier>(() => DeviceCaptureNotifier(
-           deviceCaptureRepository: sl.get<DeviceCaptureRepository>(),
-           householdRepository: sl.get<HouseholdRepository>(),
-         ));
+      registerFactory<DeviceCaptureNotifier>(() => DeviceCaptureNotifier(
+            deviceCaptureRepository: sl.get<DeviceCaptureRepository>(),
+            householdRepository: sl.get<HouseholdRepository>(),
+          ));
+
+      // Card catalog
+      registerFactory<CardCatalogSource>(() => CardCatalogSourceImpl(
+            apiClient: sl.get<SupabaseApiClient>(),
+          ));
+      registerFactory<CardCatalogRepository>(() => CardCatalogRepository(
+            store: sl.get<CacheStore>(),
+            source: sl.get<CardCatalogSource>(),
+          ));
 
      // Use cases
      registerFactory<LoadTransactionSplitDraft>(() => LoadTransactionSplitDraft(

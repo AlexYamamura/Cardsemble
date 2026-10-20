@@ -22,6 +22,9 @@ verify_jwt = false
 [functions.cron]
 verify_jwt = false
 
+[functions.card-catalog-sync]
+verify_jwt = false
+
 [edge]
 headless = false
 

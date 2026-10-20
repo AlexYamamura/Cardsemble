@@ -25,6 +25,9 @@ import {
   generateCsvPreview,
   confirmCsvImport,
 } from "../_shared/csv_import.ts";
+import {
+  syncCardCatalog,
+} from "../_shared/card_catalog.ts";
 import { Decimal } from "https://esm.sh/decimal.js@10.4.3";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -106,15 +109,38 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: true, service: "card-events-api" });
   }
 
-    // --- Public config ---
-    if (method === "GET" && path === "public-config") {
-      const projectUrl = Deno.env.get("SUPABASE_URL");
-      const publishableKey = Deno.env.get("SUPABASE_ANON_KEY");
-      if (!projectUrl || !publishableKey) {
-        throw new ApiError(503, "Supabase public client configuration is not configured");
+     // --- Public config ---
+     if (method === "GET" && path === "public-config") {
+       const projectUrl = Deno.env.get("SUPABASE_URL");
+       const publishableKey = Deno.env.get("SUPABASE_ANON_KEY");
+       if (!projectUrl || !publishableKey) {
+         throw new ApiError(503, "Supabase public client configuration is not configured");
+       }
+       return jsonResponse({ supabase_url: projectUrl, supabase_publishable_key: publishableKey });
+     }
+
+      // --- Card catalog (public) ---
+      if (method === "GET" && path === "card-catalog") {
+        const idsParam = url.searchParams.get("ids");
+        const ids = idsParam ? idsParam.split(",").map(id => id.trim()).filter(Boolean) : [];
+        
+        let query = supabase.from("card_catalog").select("data");
+        
+        if (ids.length > 0) {
+          query = query.in("id", ids);
+        }
+        // If no IDs specified, we return all cards (no additional filtering)
+
+        const { data, error } = await query;
+
+        if (error) {
+          throw new ApiError(502, error.message);
+        }
+
+        // data is an array of { data: ... }
+        const cards = data.map(row => row.data);
+        return jsonResponse({ cards });
       }
-      return jsonResponse({ supabase_url: projectUrl, supabase_publishable_key: publishableKey });
-    }
 
     // --- Card events ---
     if (method === "POST" && path === "card-events") {
@@ -1012,26 +1038,57 @@ Deno.serve(async (req) => {
       return jsonResponse(result);
     }
 
-    if (method === "GET" && path === "csv-import/history") {
-      const auth = await authenticateRequest(authorization);
-      if (auth.userId === null) {
-        throw new ApiError(403, "A user-linked device key or Supabase session is required");
-      }
-      const limit = Math.min(parseInt(url.searchParams.get("limit") || "50", 10), 100);
-      const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+     if (method === "GET" && path === "csv-import/history") {
+       const auth = await authenticateRequest(authorization);
+       if (auth.userId === null) {
+         throw new ApiError(403, "A user-linked device key or Supabase session is required");
+       }
+       const limit = Math.min(parseInt(url.searchParams.get("limit") || "50", 10), 100);
+       const offset = parseInt(url.searchParams.get("offset") || "0", 10);
 
-      const { data, error, count } = await supabase
-        .from("csv_import_history")
-        .select("*", { count: "exact" })
-        .eq("user_id", auth.userId)
-        .order("created_at", { ascending: false })
-        .range(offset, offset + limit - 1);
+       const { data, error, count } = await supabase
+         .from("csv_import_history")
+         .select("*", { count: "exact" })
+         .eq("user_id", auth.userId)
+         .order("created_at", { ascending: false })
+         .range(offset, offset + limit - 1);
 
-      if (error) throw new ApiError(502, error.message);
-      return jsonResponse({ imports: data ?? [], total: count ?? 0 });
-    }
+       if (error) throw new ApiError(502, error.message);
+       return jsonResponse({ imports: data ?? [], total: count ?? 0 });
+     }
 
-    // --- Create manual credit card ---
+     // --- Manual card catalog sync ---
+     if (method === "POST" && path === "card-catalog/sync-now") {
+       // Require authentication for manual sync
+       const auth = await authenticateRequest(authorization);
+       if (auth.userId === null) {
+         throw new ApiError(403, "A user-linked device key or Supabase session is required");
+       }
+       
+       const result = await syncCardCatalog();
+       return jsonResponse(result);
+     }
+
+     // --- Cron card catalog sync ---
+     if ((method === "GET" || method === "POST") && path === "cron/card-catalog-sync") {
+       const cronSecret = Deno.env.get("CRON_SECRET");
+       if (!cronSecret) throw new ApiError(503, "Scheduled sync is not configured");
+
+       let supplied: string | null = null;
+       try {
+         supplied = getBearerToken(authorization);
+       } catch {
+         throw new ApiError(401, "Unauthorized cron request");
+       }
+       if (supplied !== cronSecret) {
+         throw new ApiError(401, "Unauthorized cron request");
+       }
+
+       const result = await syncCardCatalog();
+       return jsonResponse(result);
+     }
+
+     // --- Create manual credit card ---
     if (method === "POST" && path === "plaid-credit-accounts/manual") {
       const auth = await authenticateRequest(authorization);
       if (auth.userId === null) {

@@ -1,17 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
-import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
-import 'package:cardsemble/features/accounts/domain/entities/account.dart';
+import 'package:cardsemble/features/card_catalog/data/card_catalog_repository.dart';
+import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
 
-/// Placeholder research surface.
+/// Research surface for browsing credit cards.
 ///
-/// Shows the currently connected credit cards
-/// ([AccountsNotifier.connections]) with a search bar above the list.
-///
-/// The search bar is wired up, but the filtering is placeholder logic only: it
-/// filters the already-loaded connection list locally. Later this should
-/// connect to a repository-backed list of all credit cards.
+/// Shows all available credit cards from the card catalog with a search bar
+/// above the list. The search bar filters the card list by name.
 class ResearchScreen extends StatefulWidget {
   const ResearchScreen({
     super.key,
@@ -29,17 +25,50 @@ class ResearchScreen extends StatefulWidget {
 class _ResearchScreenState extends State<ResearchScreen> {
   final _searchController = TextEditingController();
   String _query = '';
+  bool _isLoading = true;
+  List<CardCatalogCard> _allCards = [];
+  String? _error;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final accounts = context.read<AccountsNotifier>();
-      if (accounts.connections.isEmpty && !accounts.isLoading) {
-        accounts.loadConnections();
-      }
+      _loadCards();
     });
+  }
+
+  Future<void> _loadCards() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    
+    try {
+      final repository = context.read<CardCatalogRepository>();
+      final result = await repository.getAllCards();
+      
+      if (!mounted) return;
+      
+      if (result.isSuccess) {
+        setState(() {
+          _allCards = result.value;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _error = result.failure.message;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -48,12 +77,9 @@ class _ResearchScreenState extends State<ResearchScreen> {
     super.dispose();
   }
 
-  bool _matches(PlaidConnection connection) {
+  bool _matches(CardCatalogCard card) {
     final query = _query.toLowerCase();
-    return connection.institutionName.toLowerCase().contains(query) ||
-        (connection.institutionId != null &&
-            connection.institutionId!.toLowerCase().contains(query)) ||
-        connection.status.toLowerCase().contains(query);
+    return card.name.toLowerCase().contains(query);
   }
 
   @override
@@ -71,71 +97,53 @@ class _ResearchScreenState extends State<ResearchScreen> {
       ),
       body: Column(
         children: [
-           Padding(
-             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-             child: TextField(
-               controller: _searchController,
-               decoration: InputDecoration(
-                 hintText: 'Search connected cards',
-                 prefixIcon: const Icon(Icons.search),
-                 filled: true,
-                 fillColor: Colors.white,
-                 border: OutlineInputBorder(
-                   borderRadius: BorderRadius.circular(8),
-                 ),
-               ),
-               onChanged: (value) => setState(() => _query = value),
-             ),
-           ),
-          Expanded(
-            child: Consumer<AccountsNotifier>(
-              builder: (context, accounts, _) {
-                if (accounts.connections.isEmpty) {
-                  if (accounts.isLoading) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (accounts.error != null) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(accounts.error!),
-                          const SizedBox(height: 12),
-                          FilledButton(
-                            onPressed: () => accounts.loadConnections(),
-                            child: const Text('Retry'),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                  return const Center(child: Text('No connected credit cards'));
-                }
-
-                final matches =
-                    accounts.connections.where(_matches).toList(growable: false);
-                if (matches.isEmpty) {
-                  return const Center(child: Text('No matching cards'));
-                }
-
-                return ListView.builder(
-                  itemCount: matches.length,
-                  itemBuilder: (context, index) {
-                    final connection = matches[index];
-                    return ListTile(
-                      key: ValueKey(connection.itemId),
-                      leading: const Icon(Icons.credit_card),
-                      title: Text(connection.institutionName),
-                      subtitle: Text(
-                        'Status: ${connection.status}'
-                            '${connection.institutionId != null ? ' · ${connection.institutionId}' : ''}',
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                    );
-                  },
-                );
-              },
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search credit cards',
+                prefixIcon: const Icon(Icons.search),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onChanged: (value) => setState(() => _query = value),
             ),
+          ),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(_error!),
+                            const SizedBox(height: 12),
+                            FilledButton(
+                              onPressed: _loadCards,
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      )
+                    : _allCards.isEmpty
+                        ? const Center(child: Text('No credit cards available'))
+                        : ListView.builder(
+                            itemCount: _allCards.where(_matches).toList(growable: false).length,
+                            itemBuilder: (context, index) {
+                              final matches = _allCards.where(_matches).toList(growable: false);
+                              final card = matches[index];
+                              return ListTile(
+                                leading: const Icon(Icons.credit_card),
+                                title: Text(card.name),
+                                trailing: const Icon(Icons.chevron_right),
+                              );
+                            },
+                          ),
           ),
         ],
       ),
