@@ -11,7 +11,7 @@ import 'package:cardsemble/features/card_optimizer/presentation/card_optimizer_s
 ///
 /// Keeps the search bar at the top. Directly below it is a separate dropdown
 /// card listing matching cards to select from; choosing one adds it to the
-/// white-background selected-cards table underneath. Tapping a row in that
+/// white selected-cards table underneath. Tapping a row in that
 /// table opens a detail sheet with more information about the card.
 class ResearchScreen extends StatefulWidget {
   const ResearchScreen({
@@ -170,27 +170,35 @@ class _ResearchScreenState extends State<ResearchScreen> {
                   _buildSearchDropdown(),
                   const Divider(height: 1),
                   _buildSelectedTable(),
+                  // Thick dark green rule separating the selected-cards table
+                  // from the available-cards table.
+                  Container(height: 6, color: AppColors.primary),
                   SizedBox(
                     height: 240,
-                    child: _isLoading
-                        ? const Center(child: CircularProgressIndicator())
-                        : _error != null
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(_error!),
-                                const SizedBox(height: 12),
-                                FilledButton(
-                                  onPressed: _loadCards,
-                                  child: const Text('Retry'),
-                                ),
-                              ],
-                            ),
-                          )
-                        : _allCards.isEmpty
-                        ? const Center(child: Text('No credit cards available'))
-                        : _buildAvailableList(),
+                    child: Container(
+                      // The card list region keeps a white background in
+                      // every state (loading, error, empty and populated).
+                      color: AppColors.surface,
+                      child: _isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : _error != null
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(_error!),
+                                  const SizedBox(height: 12),
+                                  FilledButton(
+                                    onPressed: _loadCards,
+                                    child: const Text('Retry'),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : _allCards.isEmpty
+                          ? const Center(child: Text('No credit cards available'))
+                          : _buildAvailableList(),
+                    ),
                   ),
                 ],
               ),
@@ -275,7 +283,9 @@ class _ResearchScreenState extends State<ResearchScreen> {
     );
   }
 
-  /// White-background table of the cards the user has selected.
+  /// White table of the cards the user has selected.
+  ///
+  /// Rows are separated by a hairline rule.
   Widget _buildSelectedTable() {
     return SizedBox(
       height: 260,
@@ -283,35 +293,42 @@ class _ResearchScreenState extends State<ResearchScreen> {
         children: [
           _buildOptimizerButton(),
           Expanded(
-            child: _selectedCards.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.credit_card_outlined,
-                          size: 48,
-                          color: Colors.grey,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Select a card from the dropdown above',
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                      ],
+            child: Container(
+              // The card list keeps a white background instead of the cream
+              // scaffold color.
+              color: AppColors.surface,
+              child: _selectedCards.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.credit_card_outlined,
+                            size: 48,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Select a card from the dropdown above',
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: _selectedCards.length,
+                      separatorBuilder: (context, index) =>
+                          const _RowHairlineDivider(),
+                      itemBuilder: (context, index) {
+                        final card = _selectedCards[index];
+                        return _SelectedRow(
+                          card: card,
+                          onTap: () => _showCardDetail(card),
+                          onRemove: () => _removeSelectedCard(card),
+                        );
+                      },
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: _selectedCards.length,
-                    itemBuilder: (context, index) {
-                      final card = _selectedCards[index];
-                      return _SelectedRow(
-                        card: card,
-                        onTap: () => _showCardDetail(card),
-                        onRemove: () => _removeSelectedCard(card),
-                      );
-                    },
-                  ),
+            ),
           ),
         ],
       ),
@@ -374,6 +391,8 @@ class _ResearchScreenState extends State<ResearchScreen> {
   }
 
   /// Full available catalog list (previous commit behavior).
+  ///
+  /// The list renders on a white background with hairline rules between rows.
   Widget _buildAvailableList() {
     final cards = _allCards
         .where((card) => _query.isEmpty || _matches(card))
@@ -382,9 +401,10 @@ class _ResearchScreenState extends State<ResearchScreen> {
     if (cards.isEmpty) {
       return const Center(child: Text('No matching cards'));
     }
-    return ListView.builder(
+    return ListView.separated(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       itemCount: cards.length,
+      separatorBuilder: (context, index) => const _RowHairlineDivider(),
       itemBuilder: (context, index) {
         final card = cards[index];
         final isSelected = _selectedIds.contains(card.id);
@@ -402,6 +422,20 @@ class _ResearchScreenState extends State<ResearchScreen> {
           onTap: () => _toggleCard(card),
         );
       },
+    );
+  }
+}
+
+/// A hairline rule that separates the rows of a card list.
+class _RowHairlineDivider extends StatelessWidget {
+  const _RowHairlineDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Divider(
+      height: 1,
+      thickness: 1,
+      color: AppColors.outlineVariant,
     );
   }
 }
@@ -556,6 +590,7 @@ class _CardDetailSheet extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
               ),
               const SizedBox(height: 8),
+              _BaseRateRow(rewards: card.rewards!),
               ...card.rewards!.categories.map(
                 (category) => Padding(
                   padding: const EdgeInsets.only(bottom: 6),
@@ -847,6 +882,73 @@ String _typeLabel(String key) {
       return 'Other multiplier';
     default:
       return 'Multiplier';
+  }
+}
+
+/// A row showing the card's base earn rate.
+///
+/// The base rate is the rate earned outside the elevated categories, so it
+/// gives the category rates below it something to be compared against.
+class _BaseRateRow extends StatelessWidget {
+  const _BaseRateRow({required this.rewards});
+
+  final CardRewards rewards;
+
+  @override
+  Widget build(BuildContext context) {
+    final baseRate = rewards.baseRate;
+    final points = baseRate?.pointsPerDollar;
+    final description = baseRate?.description?.trim();
+    if (points == null && (description == null || description.isEmpty)) {
+      return const SizedBox.shrink();
+    }
+    // A card can state a base earn description without a numeric rate. In
+    // that case the description carries the whole message, so it is shown
+    // inline instead of leaving the rate column empty.
+    if (points == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(
+          'Base earn rate: $description',
+          style: const TextStyle(fontSize: 13, color: Colors.grey),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const SizedBox(width: 110),
+              const Expanded(
+                child: Text(
+                  'Base earn rate',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+              ),
+              Text(
+                '${points.toStringAsFixed(1)}x',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+          if (description != null && description.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, left: 110, right: 4),
+              child: Text(
+                description,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 
