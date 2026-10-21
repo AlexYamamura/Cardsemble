@@ -3,9 +3,18 @@ import { supabase } from "./supabase.ts";
 import { getHouseholdPerson } from "./auth.ts";
 import type { PlaidPublicTokenExchange } from "./types.ts";
 
+export interface PlaidItemSyncError {
+  item_id: string;
+  institution_name: string | null;
+  error_code: string | null;
+  message: string;
+}
+
 export interface PlaidSyncResult {
   ok: true;
   items_synced: number;
+  items_failed: number;
+  item_errors: PlaidItemSyncError[];
   added: number;
   modified: number;
   removed: number;
@@ -14,6 +23,11 @@ export interface PlaidSyncResult {
   liabilities: { status: string; accounts: number; statements: number };
   statement_summaries: number;
   user_id: string;
+}
+
+export interface PlaidExchangeResult extends PlaidSyncResult {
+  item_id: string;
+  institution_name: string;
 }
 
 const PLAID_BASE_URL =
@@ -43,6 +57,42 @@ async function plaidCall(endpoint: string, body: Record<string, unknown>): Promi
   }
 
   return response.json();
+}
+
+/// Extracts the Plaid `error_code` from an error thrown by `plaidCall`.
+/// Returns null for errors that did not come from Plaid (database failures,
+/// programming errors), which must stay fatal.
+function plaidErrorCode(error: unknown): string | null {
+  if (error instanceof Error) {
+    const code = (error as Error & { code?: unknown }).code;
+    if (typeof code === "string" && code.length > 0) return code;
+  }
+  return null;
+}
+
+/// Plaid error codes that mean the stored connection is dead and the user has
+/// to sign in again. These mark the item as broken so it is not retried
+/// forever.
+const REAUTH_ERROR_CODES = new Set([
+  "ITEM_LOGIN_REQUIRED",
+  "INVALID_ACCESS_TOKEN",
+  "REAUTH_REQUIRED",
+  "INVALID_CREDENTIALS",
+]);
+
+/// Plaid error codes that describe a problem with the integration itself
+/// (bad credentials, rejected requests) rather than with one connection.
+/// These must fail the whole run instead of being reported per item.
+const SYSTEMIC_PLAID_ERROR_CODES = new Set([
+  "INVALID_API_KEYS",
+  "INVALID_INPUT",
+]);
+
+function plaidItemSyncMessage(code: string): string {
+  if (REAUTH_ERROR_CODES.has(code)) {
+    return "This connection needs to be re-authenticated.";
+  }
+  return `Plaid reported an error for this connection (${code}).`;
 }
 
 export async function createPlaidClient(): Promise<void> {
@@ -105,22 +155,17 @@ export async function createLiabilitiesLinkToken(userId: string): Promise<string
 export async function exchangePublicToken(
   payload: PlaidPublicTokenExchange,
   userId: string,
-): Promise<{ item_id: string; institution_name: string }> {
+): Promise<PlaidExchangeResult> {
   await createPlaidClient();
 
-  const [exchange, itemResponse] = await Promise.all([
-    plaidCall("/item/public_token/exchange", {
-      public_token: payload.public_token,
-    }),
-    (async () => {
-      const exchange = await plaidCall("/item/public_token/exchange", {
-        public_token: payload.public_token,
-      });
-      return plaidCall("/item/get", {
-        access_token: exchange.access_token,
-      });
-    })(),
-  ]);
+  // A public token is single-use, so it must only be exchanged once.
+  const exchange = await plaidCall("/item/public_token/exchange", {
+    public_token: payload.public_token,
+  });
+
+  const itemResponse = await plaidCall("/item/get", {
+    access_token: exchange.access_token,
+  });
 
   const itemId = itemResponse.item.item_id;
   const institutionId = payload.institution_id || itemResponse.item.institution_id;
@@ -471,7 +516,23 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
     }
   }
 
-  if (connectedItems.length === 0) {
+  const itemErrors: PlaidItemSyncError[] = [];
+  for (const item of (items ?? []) as any[]) {
+    const status = item?.status;
+    if (status === "connected" || status === "disconnected") continue;
+    itemErrors.push({
+      item_id: item?.item_id ?? "",
+      institution_name: item?.institution_name ?? null,
+      error_code: "ITEM_LOGIN_REQUIRED",
+      message: "This connection needs to be re-authenticated.",
+    });
+  }
+
+  // An account can hold only stale items, in which case there is nothing to
+  // sync but there is still something to report. An account with no usable
+  // connection at all (no connected items and no stale ones) is still an
+  // error, so the caller is not told that a sync succeeded when nothing ran.
+  if (connectedItems.length === 0 && itemErrors.length === 0) {
     throw new Error("No Plaid connections are available to sync");
   }
 
@@ -481,85 +542,127 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
   let liabilityAccountCount = 0;
   let liabilityStatementCount = 0;
   let liabilityFailures = 0;
+  let itemsSynced = 0;
 
   for (const item of connectedItems) {
-    let instName = item.institution_name;
-    if ((!instName || isGenericCardName(instName)) && item.institution_id) {
-      const resolved = await resolveInstitutionName(null, item.institution_id);
-      if (resolved) {
-        instName = resolved;
-        item.institution_name = resolved;
-        await supabase
-          .from("plaid_items")
-          .update({ institution_name: resolved })
-          .eq("item_id", item.item_id);
+    // A single stale item (for example one that needs re-authentication) must
+    // not abort the whole sync. Plaid-reported failures are isolated and
+    // reported back to the client; anything else stays fatal.
+    try {
+      let instName = item.institution_name;
+      if ((!instName || isGenericCardName(instName)) && item.institution_id) {
+        const resolved = await resolveInstitutionName(null, item.institution_id);
+        if (resolved) {
+          instName = resolved;
+          item.institution_name = resolved;
+          await supabase
+            .from("plaid_items")
+            .update({ institution_name: resolved })
+            .eq("item_id", item.item_id);
 
-        await supabase
-          .from("plaid_credit_accounts")
-          .update({ institution_name: resolved })
-          .eq("item_id", item.item_id)
-          .in("institution_name", ["Existing linked institution", "Linked institution"]);
-      }
-    }
-
-    let cursor: string | null = item.transactions_cursor ?? null;
-
-    while (true) {
-      const requestOptions: Record<string, unknown> = {
-        access_token: item.access_token,
-        options: { include_original_description: true },
-      };
-      if (cursor) {
-        requestOptions["cursor"] = cursor;
+          await supabase
+            .from("plaid_credit_accounts")
+            .update({ institution_name: resolved })
+            .eq("item_id", item.item_id)
+            .in("institution_name", ["Existing linked institution", "Linked institution"]);
+        }
       }
 
-      const response = await plaidCall("/transactions/sync", requestOptions);
-      const [savedAdded, savedModified, savedRemoved] = await syncPlaidTransactionPage(
+      let cursor: string | null = item.transactions_cursor ?? null;
+
+      while (true) {
+        const requestOptions: Record<string, unknown> = {
+          access_token: item.access_token,
+          options: { include_original_description: true },
+        };
+        if (cursor) {
+          requestOptions["cursor"] = cursor;
+        }
+
+        const response = await plaidCall("/transactions/sync", requestOptions);
+        const [savedAdded, savedModified, savedRemoved] = await syncPlaidTransactionPage(
+          userId,
+          response.added ?? [],
+          response.modified ?? [],
+          response.removed ?? [],
+        );
+        addedCount += savedAdded;
+        modifiedCount += savedModified;
+        removedCount += savedRemoved;
+        cursor = response.next_cursor;
+        if (!response.has_more) break;
+      }
+
+      await supabase
+        .from("plaid_items")
+        .update({
+          transactions_cursor: cursor,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("item_id", item.item_id)
+        .eq("user_id", userId);
+
+      await syncPlaidCreditAccounts(
+        item.access_token,
         userId,
-        response.added ?? [],
-        response.modified ?? [],
-        response.removed ?? [],
+        item.item_id,
+        item.institution_name,
       );
-      addedCount += savedAdded;
-      modifiedCount += savedModified;
-      removedCount += savedRemoved;
-      cursor = response.next_cursor;
-      if (!response.has_more) break;
-    }
 
-    await supabase
-      .from("plaid_items")
-      .update({
-        transactions_cursor: cursor,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("item_id", item.item_id)
-      .eq("user_id", userId);
+      const liabilities = await syncPlaidLiabilities(
+        item.access_token,
+        userId,
+        item.item_id,
+        item.institution_name,
+      );
+      liabilityAccountCount += liabilities.accounts;
+      liabilityStatementCount += liabilities.statements;
+      if (liabilities.status !== "synced") {
+        liabilityFailures += 1;
+      }
 
-    await syncPlaidCreditAccounts(
-      item.access_token,
-      userId,
-      item.item_id,
-      item.institution_name,
-    );
+      itemsSynced += 1;
+    } catch (error: unknown) {
+      const code = plaidErrorCode(error);
+      if (!code) throw error;
+      if (SYSTEMIC_PLAID_ERROR_CODES.has(code)) {
+        // A broken credential or a rejected request is a deployment problem,
+        // not a problem with this one connection. It must stay fatal.
+        throw error;
+      }
 
-    const liabilities = await syncPlaidLiabilities(
-      item.access_token,
-      userId,
-      item.item_id,
-      item.institution_name,
-    );
-    liabilityAccountCount += liabilities.accounts;
-    liabilityStatementCount += liabilities.statements;
-    if (liabilities.status !== "synced") {
-      liabilityFailures += 1;
+      itemErrors.push({
+        item_id: item.item_id,
+        institution_name: item.institution_name ?? null,
+        error_code: code,
+        message: plaidItemSyncMessage(code),
+      });
+
+      if (REAUTH_ERROR_CODES.has(code)) {
+        // "error" is the only status the schema allows for a broken item.
+        const { error: statusError } = await supabase
+          .from("plaid_items")
+          .update({
+            status: "error",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("item_id", item.item_id)
+          .eq("user_id", userId);
+        if (statusError) {
+          console.warn(
+            `Could not mark Plaid item ${item.item_id} as needing re-authentication: ${statusError.message}`,
+          );
+        }
+      }
     }
   }
 
   const liabilityStatus =
-    liabilityStatementCount > 0 || !liabilityFailures
-      ? "synced"
-      : "unavailable";
+    itemsSynced === 0
+      ? "unavailable"
+      : liabilityStatementCount > 0 || !liabilityFailures
+        ? "synced"
+        : "unavailable";
 
   const { error: syncStateError } = await supabase
     .from("plaid_liability_sync_state")
@@ -580,7 +683,9 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
 
   return {
     ok: true,
-    items_synced: connectedItems.length,
+    items_synced: itemsSynced,
+    items_failed: itemErrors.length,
+    item_errors: itemErrors,
     added: addedCount,
     modified: modifiedCount,
     removed: removedCount,

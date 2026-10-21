@@ -16,7 +16,9 @@ import 'package:cardsemble/features/card_events/data/card_event_repository_impl.
 import 'package:cardsemble/features/card_events/domain/card_event_repository.dart';
 import 'package:cardsemble/features/card_events/presentation/card_events_notifier.dart';
 import 'package:cardsemble/features/accounts/data/account_repository_impl.dart';
+import 'package:cardsemble/features/accounts/data/plaid_link_launcher_impl.dart';
 import 'package:cardsemble/features/accounts/domain/account_repository.dart';
+import 'package:cardsemble/features/accounts/domain/plaid_link_launcher.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/device_capture/data/device_capture_repository_impl.dart';
 import 'package:cardsemble/features/device_capture/domain/device_capture_repository.dart';
@@ -157,8 +159,15 @@ class ServiceLocator {
       ),
     );
 
+    registerFactory<PlaidLinkLauncher>(
+      () => PlaidLinkLauncherImpl(),
+    );
+
     registerFactory<AccountsNotifier>(
-      () => AccountsNotifier(accountRepository: sl.get<AccountRepository>()),
+      () => AccountsNotifier(
+        accountRepository: sl.get<AccountRepository>(),
+        linkLauncher: sl.get<PlaidLinkLauncher>(),
+      ),
     );
 
     registerFactory<DeviceCaptureRepository>(

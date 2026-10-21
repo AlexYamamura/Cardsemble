@@ -187,49 +187,33 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
     }
   }
 
-     Future<void> _openAccounts() async {
-       final accountsNotifier = context.read<AccountsNotifier>();
-       // Create the link token
-       final success = await accountsNotifier.createLinkToken();
-       if (!success) {
-         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-             const SnackBar(content: Text('Failed to create link token')),
-           );
-         }
-         return;
-       }
-       final linkToken = accountsNotifier.linkToken;
-       if (linkToken == null) {
-         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-             const SnackBar(content: Text('Link token is null')),
-           );
-         }
-         return;
-       }
-        try {
-          // TODO: Implement Plaid Link integration
-          // For now, simulate success to allow app to build
-          final result = {'public_token': 'test_public_token'};
-          if (result['public_token'] != null) {
-            await accountsNotifier.exchangePublicToken(
-              publicToken: result['public_token'] as String,
-            );
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Card linked successfully (simulated)')),
-              );
-            }
-          }
-        } catch (e) {
-         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-             SnackBar(content: Text('Error linking card: $e')),
-           );
-         }
-       }
-     }
+  Future<void> _openAccounts() async {
+    final accountsNotifier = context.read<AccountsNotifier>();
+    final success = await accountsNotifier.linkAccount();
+    if (!mounted) return;
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(accountsNotifier.error ?? 'Could not link a card.'),
+        ),
+      );
+      return;
+    }
+    final institution = accountsNotifier.lastLinkedInstitutionName;
+    final warning = accountsNotifier.warning;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          warning ??
+              (institution == null
+                  ? 'Card linked successfully.'
+                  : '$institution connected.'),
+        ),
+      ),
+    );
+    // Pull in the transactions for the newly linked card.
+    await context.read<TransactionsNotifier>().refresh();
+  }
     Future<void> _importCsv() async {
       final accountsNotifier = context.read<AccountsNotifier>();
       final statementSummary = accountsNotifier.statementSummary;
@@ -689,7 +673,7 @@ confirmResult.fold(
          runSpacing: 8,
           children: [
             FilledButton.icon(
-              onPressed: _openAccounts,
+              onPressed: (_accountsNotifier?.isLinking ?? false) ? null : _openAccounts,
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Link a card'),
               style: FilledButton.styleFrom(

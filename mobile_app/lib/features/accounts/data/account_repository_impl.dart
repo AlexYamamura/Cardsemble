@@ -58,13 +58,13 @@ class AccountRepositoryImpl implements AccountRepository {
   }
 
   @override
-  Future<Result<void>> syncPlaidConnections() async {
+  Future<Result<PlaidSyncOutcome>> syncPlaidConnections() async {
     final result = await _apiClient.safePost('/api/plaid/items/sync', const {});
-    return result.map((_) {});
+    return result.map(PlaidSyncOutcome.fromJson);
   }
 
   @override
-  Future<Result<void>> exchangePlaidPublicToken({
+  Future<Result<PlaidSyncOutcome>> exchangePlaidPublicToken({
     required String publicToken,
     required String? institutionId,
     required String? institutionName,
@@ -76,7 +76,7 @@ class AccountRepositoryImpl implements AccountRepository {
       'institution_name': institutionName,
       'platform': platform,
     });
-    return result.map((_) {});
+    return result.map(PlaidSyncOutcome.fromJson);
   }
 
   @override

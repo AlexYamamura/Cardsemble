@@ -62,10 +62,20 @@ class _AccountsScreenState extends State<AccountsScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _linkNewAccount(context),
-        icon: const Icon(Icons.add_link),
-        label: const Text('Link Account'),
+      floatingActionButton: Consumer<AccountsNotifier>(
+        builder: (context, notifier, _) {
+          return FloatingActionButton.extended(
+            onPressed: notifier.isLinking ? null : () => _linkNewAccount(context),
+            icon: notifier.isLinking
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.add_link),
+            label: const Text('Link Account'),
+          );
+        },
       ),
     );
   }
@@ -227,44 +237,43 @@ class _AccountsScreenState extends State<AccountsScreen> {
   void _syncAccounts(BuildContext context) async {
     final notifier = context.read<AccountsNotifier>();
     final success = await notifier.syncConnections();
-    if (!success && context.mounted) {
+    if (!context.mounted) return;
+    if (!success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(notifier.error ?? 'Sync failed')),
+      );
+      return;
+    }
+    final warning = notifier.warning;
+    if (warning != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(warning)),
       );
     }
   }
 
-  void _linkNewAccount(BuildContext context) async {
+  Future<void> _linkNewAccount(BuildContext context) async {
     final notifier = context.read<AccountsNotifier>();
-    final success = await notifier.createLinkToken();
+    final success = await notifier.linkAccount();
+    if (!context.mounted) return;
     if (!success) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(notifier.error ?? 'Failed to create link token')),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(notifier.error ?? 'Could not link a card.')),
+      );
       return;
     }
-
-    if (notifier.linkToken != null) {
-      // In a real app, you'd launch Plaid Link here
-      // For now, show the link token
-      if (context.mounted) {
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Plaid Link Token'),
-            content: SelectableText(notifier.linkToken!),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-        );
-      }
-    }
+    final institution = notifier.lastLinkedInstitutionName;
+    final warning = notifier.warning;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          warning ??
+              (institution == null
+                  ? 'Card linked successfully.'
+                  : '$institution connected.'),
+        ),
+      ),
+    );
   }
 
   void _editDisplayName(BuildContext context, AccountsNotifier notifier, StatementAccount account) {

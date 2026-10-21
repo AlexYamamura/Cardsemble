@@ -4,3 +4,4 @@
 __pycache__/
 transactions.db
 google_pay_capture_log.jsonl
+supabase/.temp/
