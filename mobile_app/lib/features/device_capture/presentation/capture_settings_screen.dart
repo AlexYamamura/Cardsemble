@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/device_capture/presentation/device_capture_notifier.dart';
 import 'package:cardsemble/features/device_capture/presentation/settings_step.dart';
@@ -227,7 +228,12 @@ class _CaptureSettingsScreenState extends State<CaptureSettingsScreen> {
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () async {
+                await _markSettingsReviewed();
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
               icon: const Icon(Icons.check),
               label: const Text('Continue'),
               style: FilledButton.styleFrom(
@@ -254,6 +260,15 @@ class _CaptureSettingsScreenState extends State<CaptureSettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _markSettingsReviewed() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setBool('capture_settings_reviewed', true);
+    } catch (_) {
+      // Ignore errors
+    }
   }
 
   Future<void> _autoConfigureStep1(HouseholdPerson person) async {

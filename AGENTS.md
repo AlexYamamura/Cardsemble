@@ -115,7 +115,9 @@ Flutter dependencies declared in `mobile_app/pubspec.yaml` include `provider`, `
 
 - **App shell/navigation:** `mobile_app/lib/app/router/app_router.dart` (`MainTabs`). Tabs are Summary (0), Transactions (1), Events (2), Research (3) in a `PageView`; `_showTransactionsTab` animates to index 1. The People tab was removed; household people management is reachable from the gear menu as "Manage Household", which pushes `PeopleScreen` as a route. There is no `go_router` route table despite the dependency.
 - **Settings/capture overlay:** `app_router.dart` (MainTabs now uses per-tab navigators and routes Settings via `CaptureSettingsScreen`) plus `features/device_capture/presentation/capture_settings_screen.dart`. The Summary app-bar gear icon opens a dropdown menu with "Settings", "Manage Household", and "Sign out"; "Settings" opens the `CaptureSettingsScreen` route, "Manage Household" pushes `PeopleScreen`, and "Sign out" signs out via `AuthNotifier`.
-- **Research tab:** `mobile_app/lib/features/research/presentation/research_screen.dart` (`ResearchScreen`). Placeholder tab listing the currently connected credit cards from `AccountsNotifier.connections` above a local search filter; intended to be backed by a repository list of all credit cards.
+- **Research tab:** `mobile_app/lib/features/research/presentation/research_screen.dart` (`ResearchScreen`). Catalog-backed card browser: search field, a results dropdown of matching cards, a selected-cards table, and a "Card Optimizer" button row. The body is a scrollable `LayoutBuilder`/`SingleChildScrollView` so the search dropdown and keyboard never overflow. `showCardOptimizerSettings()` (same file) is the shared "Point Multipliers" sheet: while no points-based card is selected it shows an instruction instead of a default value, and once one is selected it shows the generic `points` input, then one optional `points:<issuer>` override per unique issuer of the selected points cards, then other reward types; cash is never offered. Saving merges into the stored multipliers, so hidden values survive and untouched issuer fields inherit the generic default.
+- **Card optimizer screen:** `mobile_app/lib/features/card_optimizer/presentation/card_optimizer_screen.dart` (`CardOptimizerScreen`) shows the best card per rewards category; its app-bar settings icon opens the same multiplier sheet.
+- **Card optimizer repository:** `mobile_app/lib/features/card_optimizer/data/card_optimizer_repository.dart` (`CardOptimizerRepository`). Resolves a card's reward type (`rewardTypeFor`), normalizes category labels (`categoryKeyFor`), computes the best card per category (`optimize`), and persists multipliers in `SharedPreferences` under `card_optimizer.type_multipliers.v1` (`loadTypeMultipliers`/`saveTypeMultipliers`). Multiplier precedence is `points:<issuer>` -> `points` -> `card.type` -> 1.0; cash multipliers are always 1.0.
 - **Bank/account screen:** `features/summary/presentation/summary_screen.dart` (`_openAccounts`) pushes `features/accounts/presentation/accounts_screen.dart` via `MaterialPageRoute`. Accounts screen also has a "Link Account" FAB.
 - **Transactions UI:** `features/transactions/presentation/transactions_screen.dart` and widgets under `presentation/widgets/`.
 - **Summary UI:** `features/summary/presentation/summary_screen.dart`.
@@ -325,8 +327,8 @@ The following are observed in the current source and are useful before editing; 
 | Command | Purpose / status |
 |---|---|
 | `flutter pub get` | Install dependencies. |
-| `flutter analyze` | Static analysis. Verified on 2026-10-20: **No issues found**. |
-| `flutter test` | Run all unit/widget tests. Verified on 2026-10-20: **105 tests passed**. |
+| `flutter analyze` | Static analysis. Verified on 2026-10-20: **No issues found** (one pre-existing info-level `use_build_context_synchronously` in `capture_settings_screen.dart`). |
+| `flutter test` | Run all unit/widget tests. Verified on 2026-10-20: **130 tests passed**. |
 | `flutter test test/features/transactions/domain/split_math_test.dart` | Run one test file; substitute any path under `test/`. |
 | `adb devices` | List Android devices for phone deployment. |
 | `flutter run -d <DEVICE_ID>` | Build/run on the selected phone. The API base can be overridden with `--dart-define=CARD_EVENTS_API_URL=...`. |
@@ -346,6 +348,9 @@ The following are observed in the current source and are useful before editing; 
 | `mobile_app/test/features/transactions/presentation/transactions_screen_test.dart` | Long assignee-name layout/overflow, 3- and 4-participant horizontal split layout, unified slider presence, current-month date chip. |
 | `mobile_app/test/features/transactions/domain/split_math_test.dart` | Equal split remainders, guideline snapping, boundary movement/minimums, cent-exact allocation and no negative/zero shares, serialized split payload, normalization/backfill. |
 | `mobile_app/test/features/household/presentation/people_screen_test.dart` | People screen add buttons and QR scanner dialog behavior. |
+| `mobile_app/test/features/research/presentation/research_screen_test.dart` | Search results plus an open keyboard do not overflow the Research tab layout. |
+| `mobile_app/test/features/research/presentation/multiplier_sheet_test.dart` | Point Multipliers sheet: an instruction replaces the points input until a points card is selected, issuer inputs are sorted, stored values prefill, saving keeps hidden stored keys, untouched issuer fields inherit the default, invalid values are rejected. |
+| `mobile_app/test/features/card_optimizer/data/card_optimizer_repository_test.dart` | Reward-type resolution, category normalization, best-card-per-category ranking, cash multipliers ignored, issuer multiplier precedence over the generic points multiplier, multiplier persistence roundtrip. |
 
 ### Android instrumented tests
 

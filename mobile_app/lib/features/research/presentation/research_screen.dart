@@ -140,6 +140,7 @@ class _ResearchScreenState extends State<ResearchScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.cream,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: AppColors.primary,
         foregroundColor: AppColors.onPrimary,
@@ -151,39 +152,51 @@ class _ResearchScreenState extends State<ResearchScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Search bar at the top (previous format).
-          _buildSearchBar(),
-          const Divider(height: 1),
-          // Separate dropdown of matching cards to select from.
-          _buildSearchDropdown(),
-          const Divider(height: 1),
-          // White-background table of the selected cards.
-          _buildSelectedTable(),
-          // Full available catalog list below (previous commit behavior).
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_error!),
-                        const SizedBox(height: 12),
-                        FilledButton(
-                          onPressed: _loadCards,
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  )
-                : _allCards.isEmpty
-                ? const Center(child: Text('No credit cards available'))
-                : _buildAvailableList(),
-          ),
-        ],
+      // The body must be able to scroll: when the keyboard opens and the
+      // search dropdown appears, the fixed-height sections no longer fit in
+      // the viewport. A scroll view prevents RenderFlex overflow instead of
+      // clipping or throwing layout errors.
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildSearchBar(),
+                  const Divider(height: 1),
+                  _buildSearchDropdown(),
+                  const Divider(height: 1),
+                  _buildSelectedTable(),
+                  SizedBox(
+                    height: 240,
+                    child: _isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : _error != null
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(_error!),
+                                const SizedBox(height: 12),
+                                FilledButton(
+                                  onPressed: _loadCards,
+                                  child: const Text('Retry'),
+                                ),
+                              ],
+                            ),
+                          )
+                        : _allCards.isEmpty
+                        ? const Center(child: Text('No credit cards available'))
+                        : _buildAvailableList(),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -232,8 +245,9 @@ class _ResearchScreenState extends State<ResearchScreen> {
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 220),
+          constraints: const BoxConstraints(maxHeight: 160),
           child: ListView.builder(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             shrinkWrap: true,
             padding: EdgeInsets.zero,
             itemCount: results.length,
@@ -291,11 +305,11 @@ class _ResearchScreenState extends State<ResearchScreen> {
                     itemCount: _selectedCards.length,
                     itemBuilder: (context, index) {
                       final card = _selectedCards[index];
-                       return _SelectedRow(
-                         card: card,
-                         onTap: () => _showCardDetail(card),
-                         onRemove: () => _removeSelectedCard(card),
-                       );
+                      return _SelectedRow(
+                        card: card,
+                        onTap: () => _showCardDetail(card),
+                        onRemove: () => _removeSelectedCard(card),
+                      );
                     },
                   ),
           ),
@@ -369,6 +383,7 @@ class _ResearchScreenState extends State<ResearchScreen> {
       return const Center(child: Text('No matching cards'));
     }
     return ListView.builder(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       itemCount: cards.length,
       itemBuilder: (context, index) {
         final card = cards[index];
@@ -610,10 +625,14 @@ class _CardDetailSheet extends StatelessWidget {
 
 /// Shared modal bottom sheet for editing type multipliers.
 ///
-/// Loads current multipliers, derives keys from the supplied cards plus defaults,
-/// renders validated decimal fields, offers reset-to-1.0, and persists on Save.
-/// Returns the new [Map<String, double>] when Save is pressed, or `null` on
-/// Cancel or if the sheet is dismissed without saving.
+/// Shows the generic `points` multiplier, followed by one optional override per
+/// issuer of the selected points cards, then any other reward types found on
+/// those cards. While no points based card is selected the generic field is
+/// replaced by an instruction instead of a meaningless default value. Cash is
+/// never offered because cash back is never worth more than 1x.
+///
+/// Returns the persisted multipliers merged with the edited values when Save is
+/// pressed, or `null` on Cancel or if the sheet is dismissed without saving.
 Future<Map<String, double>?> showCardOptimizerSettings({
   required BuildContext context,
   required CardOptimizerRepository repository,
@@ -621,21 +640,60 @@ Future<Map<String, double>?> showCardOptimizerSettings({
 }) async {
   final current = await repository.loadTypeMultipliers();
   if (!context.mounted) return null;
+
+  // Reward types present on the selected cards. Cash is skipped: it is never
+  // multiplied because cash back can never be worth more than 1x.
   final types = <String>{};
+  final issuers = <String>{};
   for (final card in cards) {
-    types.add(repository.rewardTypeFor(card));
-  }
-  final allKeys = <String>{};
-  allKeys.addAll(current.keys);
-  allKeys.addAll(types);
-  final effective = Map<String, double>.from(current);
-  for (final k in allKeys) {
-    effective.putIfAbsent(k, () => 1.0);
+    final type = repository.rewardTypeFor(card);
+    if (type == 'cash') continue;
+    types.add(type);
+    if (type == 'points') {
+      final issuer = card.issuer?.trim();
+      if (issuer != null && issuer.isNotEmpty) issuers.add(issuer);
+    }
   }
 
+  // The generic points multiplier only has a meaning once a points based card
+  // is selected. Until then the sheet shows an instruction instead of a
+  // meaningless default value.
+  final hasPointsCards = types.contains('points');
+
+  // Display order: the generic points multiplier comes first, then one entry
+  // per issuer, then the other reward types, then any other persisted keys.
+  final displayKeys = <String>[];
+  if (hasPointsCards) displayKeys.add('points');
+  final sortedIssuers = issuers.toList()..sort();
+  for (final issuer in sortedIssuers) {
+    displayKeys.add('points:$issuer');
+  }
+  for (final type in types) {
+    if (type == 'points' || displayKeys.contains(type)) continue;
+    displayKeys.add(type);
+  }
+  for (final key in current.keys) {
+    if (key.isEmpty || key == 'cash' || key == 'points') continue;
+    // Overrides for issuers that are not selected stay hidden but are kept.
+    if (key.startsWith('points:')) continue;
+    if (displayKeys.contains(key)) continue;
+    displayKeys.add(key);
+  }
+
+  // Initial values: a per-issuer override when one is stored, otherwise the
+  // generic points value so the field shows what the cards actually use.
+  final initialValues = <String, double>{};
   final controllers = <String, TextEditingController>{};
-  for (final key in allKeys) {
-    final value = effective[key] ?? 1.0;
+  for (final key in displayKeys) {
+    final double value;
+    if (key == 'points') {
+      value = current[key] ?? 1.0;
+    } else if (key.startsWith('points:')) {
+      value = current[key] ?? current['points'] ?? 1.0;
+    } else {
+      value = current[key] ?? 1.0;
+    }
+    initialValues[key] = value;
     controllers[key] = TextEditingController(text: value.toStringAsFixed(2));
   }
 
@@ -663,8 +721,32 @@ Future<Map<String, double>?> showCardOptimizerSettings({
               'Point Multipliers',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
+            const SizedBox(height: 6),
+            Text(
+              hasPointsCards
+                  ? 'Set a default points multiplier, then override it per '
+                      'issuer. Cash multipliers are always 1x.'
+                  : 'Cash multipliers are always 1x.',
+              style: const TextStyle(fontSize: 12, color: Colors.black54),
+            ),
             const SizedBox(height: 16),
-            ...allKeys.map(
+            if (!hasPointsCards) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.cream,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.outline),
+                ),
+                child: const Text(
+                  'Select a points based credit card to set a points multiplier.',
+                  style: TextStyle(fontSize: 13, color: Colors.black54),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            ...displayKeys.map(
               (key) => Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: Column(
@@ -703,16 +785,37 @@ Future<Map<String, double>?> showCardOptimizerSettings({
                 const SizedBox(width: 8),
                 FilledButton(
                   onPressed: () {
-                    final result = <String, double>{};
+                    // Start from the persisted values so multipliers that are
+                    // not currently displayed are not lost.
+                    final result = Map<String, double>.from(current)
+                      ..remove('cash');
                     var valid = true;
-                    for (final key in allKeys) {
-                      final text = controllers[key]!.text;
-                      final parsed = double.tryParse(text);
-                      if (parsed == null || parsed <= 0) {
+                    for (final key in displayKeys) {
+                      final text = controllers[key]?.text.trim() ?? '';
+                      final parsed = text.isEmpty
+                          ? null
+                          : double.tryParse(text);
+                      if (parsed == null || !parsed.isFinite || parsed <= 0) {
                         valid = false;
                         break;
                       }
-                      result[key] = parsed;
+                      if (key.startsWith('points:')) {
+                        // A per-issuer value is an override of the generic
+                        // points multiplier. It is only stored when the user
+                        // changed it, so the generic value still applies to
+                        // the issuers that were left alone.
+                        final initial = initialValues[key] ?? 1.0;
+                        final existing = current[key];
+                        if (parsed != initial) {
+                          result[key] = parsed;
+                        } else if (existing != null && existing != 1.0) {
+                          result[key] = existing;
+                        } else {
+                          result.remove(key);
+                        }
+                      } else {
+                        result[key] = parsed;
+                      }
                     }
                     if (!valid) return;
                     Navigator.of(context).pop(result);
@@ -729,9 +832,13 @@ Future<Map<String, double>?> showCardOptimizerSettings({
 }
 
 String _typeLabel(String key) {
+  if (key.startsWith('points:')) {
+    final issuer = key.substring('points:'.length);
+    return '$issuer points multiplier';
+  }
   switch (key) {
     case 'points':
-      return 'Points multiplier';
+      return 'Points multiplier (default)';
     case 'cash':
       return 'Cash multiplier';
     case 'travel':

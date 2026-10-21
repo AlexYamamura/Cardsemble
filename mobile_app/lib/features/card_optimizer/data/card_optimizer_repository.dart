@@ -148,12 +148,33 @@ class CardOptimizerRepository {
       if (rewards == null || rewards.categories.isEmpty) continue;
 
       final rewardType = rewardTypeFor(card);
-      final multiplier =
-          (typeMultipliers[rewardType] ??
+      double multiplier = 1.0;
+      if (rewardType == 'cash') {
+        multiplier = 1.0;
+      } else if (rewardType == 'points') {
+        final issuer = card.issuer;
+        if (issuer != null && issuer.isNotEmpty) {
+          final issuerKey = 'points:${issuer.trim()}';
+          multiplier = (typeMultipliers[issuerKey] ??
+                  typeMultipliers['points'] ??
                   typeMultipliers[card.type ?? ''] ??
                   1.0)
               .clampDouble(0, double.infinity)
               .toDouble();
+        } else {
+          multiplier = (typeMultipliers['points'] ??
+                  typeMultipliers[card.type ?? ''] ??
+                  1.0)
+              .clampDouble(0, double.infinity)
+              .toDouble();
+        }
+      } else {
+        multiplier = (typeMultipliers[rewardType] ??
+                typeMultipliers[card.type ?? ''] ??
+                1.0)
+            .clampDouble(0, double.infinity)
+            .toDouble();
+      }
       final effectiveMultiplier = multiplier <= 0 ? 1.0 : multiplier;
 
       for (final category in rewards.categories) {

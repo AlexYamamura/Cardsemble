@@ -196,7 +196,8 @@ class _OptimizedResultCard extends StatelessWidget {
                     result.category.label ?? 'Unnamed category',
                     style: const TextStyle(
                       fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black,
                     ),
                   ),
                 ),
@@ -211,14 +212,18 @@ class _OptimizedResultCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              'Best card: ${result.bestCard.name}',
-              style: const TextStyle(fontSize: 13, color: Colors.grey),
-            ),
-            Text(
-              'Base rate: ${base.toStringAsFixed(1)} $rateSuffix',
-              style: const TextStyle(fontSize: 13, color: Colors.grey),
-            ),
+                Text(
+                  'Best card: ${result.bestCard.name}',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black,
+                  ),
+                ),
+              Text(
+                'Base rate: ${base.toStringAsFixed(1)} $rateSuffix',
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
+              ),
             const SizedBox(height: 6),
             Row(
               children: [
@@ -232,16 +237,16 @@ class _OptimizedResultCard extends StatelessWidget {
             ),
             if (result.capDescription != null) ...[
               const SizedBox(height: 6),
-              Text(
-                'Cap: $capText',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
+                Text(
+                  'Cap: $capText',
+                  style: const TextStyle(fontSize: 12, color: Colors.black87),
+                ),
             ],
             const SizedBox(height: 8),
-            Text(
-              'Multiplier: ${multiplier.toStringAsFixed(2)}x',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
+              Text(
+                'Multiplier: ${multiplier.toStringAsFixed(2)}x',
+                style: const TextStyle(fontSize: 12, color: Colors.black87),
+              ),
           ],
         ),
       ),

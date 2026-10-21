@@ -163,7 +163,7 @@ void main() {
       expect(results[2].categoryKey, 'travel');
     });
 
-    test('optimize applies type multipliers', () {
+    test('optimize ignores cash multipliers and applies points multipliers', () {
       final cards = [
         _card(
           id: '1',
@@ -184,14 +184,44 @@ void main() {
       var dining = results.firstWhere((r) => r.categoryKey == 'dining');
       expect(dining.bestCard.name, 'Points Card');
 
-      // Cash 1.5x: Points 4 vs Cash 4.5
+      // Cash 1.5x is ignored because cash is never worth more than 1x.
       results = repo.optimize(
         cards: cards,
         typeMultipliers: {'cash': 1.5, 'points': 1.0},
       );
       dining = results.firstWhere((r) => r.categoryKey == 'dining');
-      expect(dining.bestCard.name, 'Cash Card');
-      expect(dining.effectivePointsPerDollar, 4.5);
+      expect(dining.bestCard.name, 'Points Card');
+      expect(dining.effectivePointsPerDollar, 4.0);
+    });
+
+    test('optimize prefers an issuer multiplier over the generic points one', () {
+      final cards = [
+        _card(
+          id: '1',
+          name: 'Chase Card',
+          issuer: 'Chase',
+          currency: 'points',
+          categories: [{'label': 'Dining', 'pointsPerDollar': 4}],
+        ),
+        _card(
+          id: '2',
+          name: 'Amex Card',
+          issuer: 'American Express',
+          currency: 'points',
+          categories: [{'label': 'Dining', 'pointsPerDollar': 4}],
+        ),
+      ];
+
+      final results = repo.optimize(
+        cards: cards,
+        typeMultipliers: {'points': 2.0, 'points:Chase': 1.5},
+      );
+
+      final dining = results.firstWhere((r) => r.categoryKey == 'dining');
+      // Chase uses its own override (4 * 1.5) while Amex falls back to the
+      // generic points multiplier (4 * 2.0).
+      expect(dining.bestCard.name, 'Amex Card');
+      expect(dining.effectivePointsPerDollar, 8.0);
     });
 
     test('optimize skips categories with no/missing points', () {
