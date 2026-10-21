@@ -1174,7 +1174,7 @@ class _TransactionAmountChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = pending ? Colors.orange.shade300 : AppColors.sageGreen;
+    final color = pending ? Colors.orange.shade700 : AppColors.sageGreen;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
