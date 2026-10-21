@@ -7,6 +7,10 @@ import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_ca
 import 'package:cardsemble/features/card_optimizer/data/card_optimizer_repository.dart';
 import 'package:cardsemble/features/card_optimizer/presentation/card_optimizer_screen.dart';
 
+/// Height of the thick dark green rule that separates the selected-cards
+/// table from the available-cards table.
+const double _separatorHeight = 6;
+
 /// Research surface for browsing credit cards.
 ///
 /// Keeps the search bar at the top. Directly below it is a separate dropdown
@@ -29,6 +33,13 @@ class ResearchScreen extends StatefulWidget {
 
 class _ResearchScreenState extends State<ResearchScreen> {
   final _searchController = TextEditingController();
+
+  /// Key used to measure the content above the available-cards list so the
+  /// list can be stretched down to the bottom of the viewport.
+  final GlobalKey _topContentKey = GlobalKey();
+
+  /// Last measured height of the content above the available-cards list.
+  double? _topContentHeight;
   String _query = '';
   bool _isLoading = true;
   List<CardCatalogCard> _allCards = [];
@@ -158,6 +169,13 @@ class _ResearchScreenState extends State<ResearchScreen> {
       // clipping or throwing layout errors.
       body: LayoutBuilder(
         builder: (context, constraints) {
+          _scheduleTopContentMeasurement();
+          // The available-cards list stretches into the space that is left
+          // below the selected-cards table, so no cream gap remains between
+          // the card list and the bottom tab bar.
+          final topHeight = _topContentHeight ?? 0;
+          final remaining = constraints.maxHeight - topHeight - _separatorHeight;
+          final listHeight = remaining < 240 ? 240.0 : remaining;
           return SingleChildScrollView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             child: ConstrainedBox(
@@ -165,16 +183,24 @@ class _ResearchScreenState extends State<ResearchScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildSearchBar(),
-                  const Divider(height: 1),
-                  _buildSearchDropdown(),
-                  const Divider(height: 1),
-                  _buildSelectedTable(),
+                  KeyedSubtree(
+                    key: _topContentKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildSearchBar(),
+                        const Divider(height: 1),
+                        _buildSearchDropdown(),
+                        const Divider(height: 1),
+                        _buildSelectedTable(),
+                      ],
+                    ),
+                  ),
                   // Thick dark green rule separating the selected-cards table
                   // from the available-cards table.
-                  Container(height: 6, color: AppColors.primary),
+                  Container(height: _separatorHeight, color: AppColors.primary),
                   SizedBox(
-                    height: 240,
+                    height: listHeight,
                     child: Container(
                       // The card list region keeps a white background in
                       // every state (loading, error, empty and populated).
@@ -207,6 +233,18 @@ class _ResearchScreenState extends State<ResearchScreen> {
         },
       ),
     );
+  }
+
+  /// Measures the content above the available-cards list after layout so the
+  /// list can fill the remaining vertical space.
+  void _scheduleTopContentMeasurement() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final height = _topContentKey.currentContext?.size?.height;
+      if (height == null) return;
+      if (((_topContentHeight ?? -1) - height).abs() < 0.5) return;
+      setState(() => _topContentHeight = height);
+    });
   }
 
   Widget _buildSearchBar() {
