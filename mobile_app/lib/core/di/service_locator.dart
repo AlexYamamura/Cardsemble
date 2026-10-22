@@ -12,6 +12,7 @@ import 'package:cardsemble/features/transactions/data/transaction_repository_imp
 import 'package:cardsemble/features/transactions/data/transaction_cache.dart';
 import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
+import 'package:cardsemble/features/wallet/presentation/wallet_notifier.dart';
 import 'package:cardsemble/features/card_events/data/card_event_repository_impl.dart';
 import 'package:cardsemble/features/card_events/domain/card_event_repository.dart';
 import 'package:cardsemble/features/card_events/presentation/card_events_notifier.dart';
@@ -193,6 +194,13 @@ class ServiceLocator {
     );
 
     registerFactory<CardOptimizerRepository>(() => CardOptimizerRepository());
+
+    registerFactory<WalletNotifier>(
+      () => WalletNotifier(
+        accounts: sl.get<AccountsNotifier>(),
+        catalog: sl.get<CardCatalogRepository>(),
+      ),
+    );
 
     // Use cases
     registerFactory<LoadTransactionSplitDraft>(

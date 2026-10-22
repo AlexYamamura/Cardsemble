@@ -1,0 +1,331 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:cardsemble/theme/app_colors.dart';
+import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
+import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
+import 'package:cardsemble/features/wallet/presentation/wallet_notifier.dart';
+import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_panel.dart';
+
+/// Wallet landing tab.
+///
+/// Shows the cards that are actually in the user's wallet (connected accounts,
+/// enriched with catalog reference data from the Research tab) under "Your
+/// Cards", plus a "Household cards" section for cards owned by others in the
+/// household (empty until household account data is served by the backend).
+class WalletScreen extends StatefulWidget {
+  const WalletScreen({
+    super.key,
+    this.onOpenSettings,
+    this.onOpenManageHousehold,
+  });
+
+  final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenManageHousehold;
+
+  @override
+  State<WalletScreen> createState() => _WalletScreenState();
+}
+
+class _WalletScreenState extends State<WalletScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<WalletNotifier>().load();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.cream,
+      appBar: AppBar(
+        backgroundColor: AppColors.primary,
+        foregroundColor: AppColors.onPrimary,
+        title: const Text('Wallet'),
+        actions: [
+          SettingsGearMenu(
+            onOpenSettings: widget.onOpenSettings,
+            onOpenManageHousehold: widget.onOpenManageHousehold,
+          ),
+        ],
+      ),
+      body: Consumer<WalletNotifier>(
+        builder: (context, notifier, child) {
+          return RefreshIndicator(
+            onRefresh: () async => await notifier.load(),
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _Header(
+                    error: notifier.error,
+                    lastUpdated: notifier.lastUpdated,
+                    onRetry: () => notifier.load(),
+                  ),
+                ),
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  sliver: SliverToBoxAdapter(
+                    child: _SectionHeader(title: 'Your Cards', subtitle: 'Connected credit card accounts'),
+                  ),
+                ),
+                _YourCardsSection(notifier: notifier),
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
+                  sliver: SliverToBoxAdapter(
+                    child: _SectionHeader(
+                      title: 'Household cards',
+                      subtitle: 'Cards owned by others in your household',
+                    ),
+                  ),
+                ),
+                _HouseholdCardsSection(notifier: notifier),
+                const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  const _Header({this.error, this.lastUpdated, this.onRetry});
+
+  final String? error;
+  final DateTime? lastUpdated;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Your wallet',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.charcoal),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'See your connected cards, unused benefits, and welcome bonus progress for the current month.',
+            style: const TextStyle(fontSize: 13, color: Colors.grey),
+          ),
+          if (error != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, size: 16, color: AppColors.error),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(error!, style: const TextStyle(fontSize: 12, color: AppColors.error))),
+                  const SizedBox(width: 8),
+                  if (onRetry != null)
+                    TextButton(onPressed: onRetry, child: const Text('Retry')),
+                ],
+              ),
+            ),
+          ],
+          if (lastUpdated != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Updated ${_formatTime(lastUpdated!)}',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(DateTime time) {
+    final h = time.hour.toString().padLeft(2, '0');
+    final m = time.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.subtitle});
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.charcoal),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          subtitle,
+          style: const TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      ],
+    );
+  }
+}
+
+class _YourCardsSection extends StatelessWidget {
+  const _YourCardsSection({required this.notifier});
+
+  final WalletNotifier notifier;
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = notifier.yourCards;
+    if (cards.isEmpty) {
+      return SliverToBoxAdapter(
+        child: _EmptyState(
+          icon: Icons.credit_card_outlined,
+          title: 'No cards in your wallet yet',
+          body: 'Link a credit card account to see your cards, benefits, and welcome bonus progress here.',
+          button: const Text('Link a card'),
+          onPressed: () => context.read<AccountsNotifier>().linkAccount(),
+        ),
+      );
+    }
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          final card = cards[index];
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: WalletCardPanel(
+                  card: card,
+                  onToggleBenefit: (benefit) async {
+                    await notifier.toggleBenefit(card.id, benefit.id, !benefit.used);
+                  },
+                  onSetBonusSpend: (spent) async {
+                    await notifier.setBonusSpend(card.id, spent);
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+        childCount: cards.length,
+      ),
+    );
+  }
+}
+
+class _HouseholdCardsSection extends StatelessWidget {
+  const _HouseholdCardsSection({required this.notifier});
+
+  final WalletNotifier notifier;
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = notifier.householdCards;
+    if (cards.isEmpty) {
+      return SliverToBoxAdapter(
+        child: _EmptyState(
+          icon: Icons.people_outlined,
+          title: 'No household cards shared yet',
+          body: 'Cards owned by others in your household will appear here once household accounts are connected.',
+          button: null,
+          onPressed: null,
+        ),
+      );
+    }
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          final card = cards[index];
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: WalletCardPanel(
+                  card: card,
+                  onToggleBenefit: (benefit) async {
+                    await notifier.toggleBenefit(card.id, benefit.id, !benefit.used);
+                  },
+                  onSetBonusSpend: (spent) async {
+                    await notifier.setBonusSpend(card.id, spent);
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+        childCount: cards.length,
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({
+    required this.icon,
+    required this.title,
+    required this.body,
+    this.button,
+    this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+  final Widget? button;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 48, color: Colors.grey.shade400),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.charcoal),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            style: const TextStyle(fontSize: 13, color: Colors.grey),
+            textAlign: TextAlign.center,
+          ),
+          if (button != null && onPressed != null) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(onPressed: onPressed, child: button),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}

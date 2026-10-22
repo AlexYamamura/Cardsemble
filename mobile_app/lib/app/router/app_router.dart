@@ -9,6 +9,7 @@ import 'package:cardsemble/features/device_capture/presentation/capture_settings
 import 'package:cardsemble/features/household/presentation/people_screen.dart';
 import 'package:cardsemble/features/research/presentation/research_screen.dart';
 import 'package:cardsemble/features/summary/presentation/summary_screen.dart';
+import 'package:cardsemble/features/wallet/presentation/wallet_screen.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_screen.dart';
 
@@ -38,6 +39,8 @@ class _MainTabsState extends State<MainTabs>
   late final ValueNotifier<int> _tabIndexNotifier;
   int _activeTabIndex = 0;
   // Navigator keys for each tab
+  final GlobalKey<NavigatorState> _walletNavigatorKey =
+      GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _summaryNavigatorKey =
       GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _transactionsNavigatorKey =
@@ -48,6 +51,11 @@ class _MainTabsState extends State<MainTabs>
       GlobalKey<NavigatorState>();
   static const _settingsReviewedKey = 'capture_settings_reviewed';
   static const List<_TabInfo> _tabs = [
+    _TabInfo(
+      icon: Icons.account_balance_wallet_outlined,
+      selectedIcon: Icons.account_balance_wallet,
+      label: 'Wallet',
+    ),
     _TabInfo(
       icon: Icons.insights_outlined,
       selectedIcon: Icons.insights,
@@ -134,9 +142,9 @@ class _MainTabsState extends State<MainTabs>
 
   void _showTransactionsTab() {
     if (!mounted) return;
-    _tabController.animateTo(1);
+    _tabController.animateTo(2);
     _pageController.animateToPage(
-      1,
+      2,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutCubic,
     );
@@ -271,6 +279,14 @@ class _MainTabsState extends State<MainTabs>
             children: [
               _buildTabNavigator(
                 index: 0,
+                navigatorKey: _walletNavigatorKey,
+                rootBuilder: (_) => WalletScreen(
+                  onOpenSettings: _openSettings,
+                  onOpenManageHousehold: _openManageHousehold,
+                ),
+              ),
+              _buildTabNavigator(
+                index: 1,
                 navigatorKey: _summaryNavigatorKey,
                 rootBuilder: (_) => SummaryScreen(
                   onShowTransactions: _showTransactionsTab,
@@ -279,7 +295,7 @@ class _MainTabsState extends State<MainTabs>
                 ),
               ),
               _buildTabNavigator(
-                index: 1,
+                index: 2,
                 navigatorKey: _transactionsNavigatorKey,
                 rootBuilder: (_) => TransactionsScreen(
                   onOpenSettings: _openSettings,
@@ -287,7 +303,7 @@ class _MainTabsState extends State<MainTabs>
                 ),
               ),
               _buildTabNavigator(
-                index: 2,
+                index: 3,
                 navigatorKey: _eventsNavigatorKey,
                 rootBuilder: (_) => CardEventsScreen(
                   onOpenSettings: _openSettings,
@@ -295,7 +311,7 @@ class _MainTabsState extends State<MainTabs>
                 ),
               ),
               _buildTabNavigator(
-                index: 3,
+                index: 4,
                 navigatorKey: _researchNavigatorKey,
                 rootBuilder: (_) => ResearchScreen(
                   onOpenSettings: _openSettings,
@@ -381,7 +397,7 @@ class _SensitiveTabPhysics extends PageScrollPhysics {
 const double _kNavBarHeight = 80.0;
 const double _kNavIndicatorWidth = 64.0;
 const double _kNavIndicatorHeight = 32.0;
-const double _kNavIndicatorTop = 14.0;
+const double _kNavIndicatorTop = 12.0;
 
 /// A bottom navigation bar whose highlight pill tracks the actual tab the user
 /// is on — including mid-swipe, where the fractional page position is used so
@@ -516,7 +532,7 @@ class _Destination extends StatelessWidget {
       child: Padding(
         // Reserve the same top region the selection pill occupies so the icon
         // sits centred inside the pill and the label falls below it.
-        padding: const EdgeInsets.only(top: _kNavIndicatorTop),
+        padding: const EdgeInsets.only(top: 10.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.start,
           children: [

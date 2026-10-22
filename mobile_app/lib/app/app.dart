@@ -16,6 +16,7 @@ import 'package:cardsemble/features/card_optimizer/data/card_optimizer_repositor
 import 'package:cardsemble/features/device_capture/presentation/device_capture_notifier.dart';
 import 'package:cardsemble/features/household/presentation/household_notifier.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
+import 'package:cardsemble/features/wallet/presentation/wallet_notifier.dart';
 
 class CardsembleApp extends StatefulWidget {
   const CardsembleApp({super.key});
@@ -102,6 +103,9 @@ class _CardsembleAppState extends State<CardsembleApp> {
             ),
             ChangeNotifierProvider<DeviceCaptureNotifier>(
               create: (_) => sl.get<DeviceCaptureNotifier>(),
+            ),
+            ChangeNotifierProvider<WalletNotifier>(
+              create: (_) => sl.get<WalletNotifier>(),
             ),
             Provider<CardCatalogRepository>(
               create: (_) => sl.get<CardCatalogRepository>(),
