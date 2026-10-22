@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
+import 'package:cardsemble/features/card_optimizer/data/card_optimizer_repository.dart';
+import 'package:cardsemble/features/card_optimizer/presentation/card_optimizer_screen.dart';
 import 'package:cardsemble/features/wallet/presentation/wallet_notifier.dart';
 import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_panel.dart';
 
@@ -56,6 +58,10 @@ class _WalletScreenState extends State<WalletScreen> {
       ),
       body: Consumer<WalletNotifier>(
         builder: (context, notifier, child) {
+          final matchedCards = notifier.yourCards
+              .where((card) => card.catalogCard != null)
+              .map((card) => card.catalogCard!)
+              .toList(growable: false);
           return RefreshIndicator(
             onRefresh: () async => await notifier.load(),
             child: CustomScrollView(
@@ -77,19 +83,44 @@ class _WalletScreenState extends State<WalletScreen> {
                     ),
                   ),
                 ),
-                _YourCardsSection(notifier: notifier),
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
                   sliver: SliverToBoxAdapter(
                     child: SizedBox(
                       width: double.infinity,
-                      child: FilledButton(
-                        onPressed: () => context.read<AccountsNotifier>().linkAccount(),
-                        child: const Text('Link a card'),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () => context.read<AccountsNotifier>().linkAccount(),
+                              child: const Text('Link a card'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: matchedCards.isEmpty
+                                  ? null
+                                  : () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) => CardOptimizerScreen(
+                                            selectedCards: matchedCards,
+                                            repository: context.read<CardOptimizerRepository>(),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                              icon: const Icon(Icons.auto_awesome, size: 18),
+                              label: const Text('Optimize'),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
+                _YourCardsSection(notifier: notifier),
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
                   sliver: SliverToBoxAdapter(
