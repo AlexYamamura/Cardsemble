@@ -2,94 +2,138 @@ import 'package:flutter/material.dart';
 import 'package:cardsemble/core/utils/currency.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
+import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
+import 'package:cardsemble/features/wallet/presentation/wallet_card_colors.dart';
+
+/// How a [WalletCardPanel] is presented.
+///
+/// [expandable] panels live in the vertical list layout and drop down a details
+/// pane when tapped. [collapsed] panels live inside the horizontal carousel and
+/// stay fixed-height; tapping them opens the details in a bottom sheet instead
+/// (handled by the parent screen) so expanding cards don't overflow the row.
+enum WalletCardPanelMode {
+  expandable,
+  collapsed,
+}
 
 /// A panel/tile for one wallet card.
 ///
-/// Shows the card name and issuing network, the current-month balance and
-/// utilization (placeholders until per-account balances are served by the
-/// backend), a dropdown of catalog benefits with usage state, and a welcome
-/// bonus progress bar when the catalog defines one.
+/// The collapsed pane shows the card name (themed with a bank/card-derived
+/// accent color), issuer/network/last-four, balance and utilization. Tapping
+/// the entire card drops down a details panel with the annual fee, foreign
+/// transaction fee, benefits and travel perks — replacing the previous
+/// "Update spend" button and "Statement Credits" dropdown.
 class WalletCardPanel extends StatelessWidget {
   const WalletCardPanel({
     super.key,
     required this.card,
-    required this.onToggleBenefit,
-    required this.onSetBonusSpend,
-    this.onViewDetails,
+    this.mode = WalletCardPanelMode.expandable,
+    this.expanded = false,
+    this.onTap,
   });
 
   final WalletCard card;
-  final ValueChanged<WalletBenefit> onToggleBenefit;
-  final ValueChanged<int> onSetBonusSpend;
-  final VoidCallback? onViewDetails;
+  final WalletCardPanelMode mode;
+  final bool expanded;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
+    final color = WalletCardColors.accentColor(card);
+    final showToggle = mode == WalletCardPanelMode.expandable;
+
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: onViewDetails,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _CardName(card: card),
-              const SizedBox(height: 8),
-              _CardSubtitle(card: card),
-              if (!card.isCatalogMatched) _CatalogMatchTag(card: card),
-              const Divider(height: 24),
-              _MonthlyInfo(card: card),
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _CardHeader(
+              card: card,
+              color: color,
+              expanded: expanded,
+              showToggle: showToggle,
+            ),
+            const Divider(height: 1),
+            _MonthlyInfo(card: card, color: color),
+            if (card.catalogCard != null) ...[
               const SizedBox(height: 12),
-              if (card.benefits.isNotEmpty) ...[
-                _BenefitsDropdown(
-                  card: card,
-                  onToggleBenefit: onToggleBenefit,
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (card.welcomeBonus != null) ...[
-                _WelcomeBonusProgress(
-                  bonus: card.welcomeBonus!,
-                  onSetSpend: onSetBonusSpend,
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (onViewDetails != null)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: onViewDetails,
-                    child: const Text('View details'),
-                  ),
-                ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeInOut,
+                child: expanded && showToggle
+                    ? CardDetails(card: card, color: color)
+                    : const SizedBox.shrink(),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _CardName extends StatelessWidget {
-  const _CardName({required this.card});
+class _CardHeader extends StatelessWidget {
+  const _CardHeader({
+    required this.card,
+    required this.color,
+    required this.expanded,
+    required this.showToggle,
+  });
 
   final WalletCard card;
+  final Color color;
+  final bool expanded;
+  final bool showToggle;
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      card.displayName,
-      style: const TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w700,
-        color: AppColors.charcoal,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  card.displayName,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.charcoal,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (showToggle)
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 20,
+                  color: color,
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          _CardSubtitle(card: card),
+        ],
       ),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
     );
   }
 }
@@ -117,93 +161,70 @@ class _CardSubtitle extends StatelessWidget {
   }
 }
 
-/// Tag shown on cards that did not match a `card_catalog` row.
-class _CatalogMatchTag extends StatelessWidget {
-  const _CatalogMatchTag({required this.card});
+class _MonthlyInfo extends StatelessWidget {
+  const _MonthlyInfo({required this.card, required this.color});
 
   final WalletCard card;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.error.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
-      ),
-      child: Row(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.error_outline, size: 10, color: AppColors.error),
-          const SizedBox(width: 6),
-          const Text(
-            'Not available for benefit checks',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: AppColors.error,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MonthlyInfo extends StatelessWidget {
-  const _MonthlyInfo({required this.card});
-
-  final WalletCard card;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _MetricTile(
-                label: 'Balance',
-                value: card.hasBalance
-                    ? formatCurrency(card.balanceCents! / 100, card.currency ?? 'USD')
-                    : '—',
+          Row(
+            children: [
+              Expanded(
+                child: _MetricTile(
+                  label: 'Balance',
+                  value: card.hasBalance
+                      ? formatCurrency(card.balanceCents! / 100, card.currency ?? 'USD')
+                      : '—',
+                  color: color,
+                ),
               ),
-            ),
-            Expanded(
-              child: _MetricTile(
-                label: 'Utilization',
-                value: card.hasCreditLimit
-                    ? '${(card.utilization! * 100).round()}%'
-                    : '—',
+              Expanded(
+                child: _MetricTile(
+                  label: 'Utilization',
+                  value: card.hasCreditLimit
+                      ? '${(card.utilization! * 100).round()}%'
+                      : '—',
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+          if (card.hasCreditLimit) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: card.utilization,
+                minHeight: 6,
+                backgroundColor: AppColors.outlineVariant,
+                color: color,
               ),
             ),
           ],
-        ),
-        if (card.hasCreditLimit) ...[
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: card.utilization,
-              minHeight: 6,
-              backgroundColor: AppColors.outlineVariant,
-              color: AppColors.primary,
-            ),
-          ),
         ],
-      ],
+      ),
     );
   }
 }
 
 class _MetricTile extends StatelessWidget {
-  const _MetricTile({required this.label, required this.value});
+  const _MetricTile({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
 
   final String label;
   final String value;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
@@ -218,10 +239,10 @@ class _MetricTile extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: AppColors.charcoal,
+            color: color,
           ),
         ),
       ],
@@ -229,286 +250,213 @@ class _MetricTile extends StatelessWidget {
   }
 }
 
-/// A compact dropdown of the card's catalog benefits, each tracked as a credit
-/// that needs to be actively used (e.g. "$200 hotel credit, expires semi-annually").
-/// Tapping a benefit toggles its used/unused state.
-class _BenefitsDropdown extends StatefulWidget {
-  const _BenefitsDropdown({
+/// Expanded details pane shown when a card is tapped.
+///
+/// Displays annual fee, foreign transaction fee, catalog benefits and travel
+/// perks. Read-only reference data; benefit usage marking has moved out of this
+/// panel.
+class CardDetails extends StatelessWidget {
+  const CardDetails({
+    super.key,
     required this.card,
-    required this.onToggleBenefit,
+    required this.color,
   });
 
   final WalletCard card;
-  final ValueChanged<WalletBenefit> onToggleBenefit;
-
-  @override
-  State<_BenefitsDropdown> createState() => _BenefitsDropdownState();
-}
-
-class _BenefitsDropdownState extends State<_BenefitsDropdown> {
-  bool _expanded = false;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final usedCount = widget.card.benefits.where((b) => b.used).length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  _expanded ? Icons.expand_less : Icons.expand_more,
-                  size: 16,
-                  color: AppColors.primary,
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  'Statement Credits',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppColors.sand.withValues(alpha: 0.4),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '$usedCount / ${widget.card.benefits.length} used',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (_expanded) ...[
-          for (final benefit in widget.card.benefits) ...[
-            _BenefitTile(
-              benefit: benefit,
-              onToggle: () => widget.onToggleBenefit(benefit),
-            ),
-            if (benefit != widget.card.benefits.last)
-              const Divider(height: 1),
-          ],
-        ],
-      ],
-    );
-  }
-}
-
-/// One benefit row showing the credit amount, expiry date, and used/unused state.
-class _BenefitTile extends StatelessWidget {
-  const _BenefitTile({
-    required this.benefit,
-    required this.onToggle,
-  });
-
-  final WalletBenefit benefit;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final isUsed = benefit.used;
-    final isExpired = benefit.isExpired;
-    final statusColor = isUsed
-        ? AppColors.primary
-        : isExpired
-            ? AppColors.error
-            : Colors.grey;
-    final statusIcon = isUsed
-        ? Icons.check_circle
-        : isExpired
-            ? Icons.schedule
-            : Icons.radio_button_unchecked;
-
-    return ListTile(
-      dense: true,
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(
-        statusIcon,
-        size: 20,
-        color: statusColor,
-      ),
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(
-              benefit.title,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: isUsed ? AppColors.primary : AppColors.charcoal,
-                decoration: isUsed ? TextDecoration.lineThrough : null,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (benefit.amountLabel != null)
-            Text(
-              benefit.amountLabel!,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: statusColor,
-              ),
-            ),
-        ],
-      ),
-      subtitle: Column(
+    final catalog = card.catalogCard;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (benefit.periodLabel != null) ...[
-            Text(
-              benefit.periodLabel!,
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+          if (catalog != null && catalog.annualFee?.amount != null) ...[
+            _DetailRow(
+              label: 'Annual fee',
+              value: formatCurrency(
+                catalog.annualFee!.amount!.toDouble(),
+                catalog.annualFee!.currency ?? 'USD',
+              ),
+              color: color,
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 10),
           ],
-          if (benefit.expiresAt != null)
-            Text(
-              'Expires ${_formatDate(benefit.expiresAt!)}${isExpired ? ' (expired)' : ''}',
+          if (catalog != null && catalog.fxFee?.percent != null) ...[
+            _DetailRow(
+              label: 'Foreign transaction fee',
+              value: '${catalog.fxFee!.percent!.toStringAsFixed(2)}%',
+              color: color,
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (catalog != null && catalog.benefits.isNotEmpty) ...[
+            const Text(
+              'Benefits',
               style: TextStyle(
-                fontSize: 11,
-                color: isExpired ? AppColors.error : Colors.grey,
-                fontWeight: isExpired ? FontWeight.w600 : FontWeight.normal,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.charcoal,
               ),
             ),
-          if (benefit.usedAt != null)
-            Text(
-              'Used ${_formatDate(benefit.usedAt!)}',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            const SizedBox(height: 6),
+            ...catalog.benefits.map(
+              (benefit) => _DetailRow(
+                label: benefit.title ?? 'Benefit',
+                value: benefit.category ?? '—',
+                color: color,
+              ),
             ),
+            const SizedBox(height: 10),
+          ],
+          if (catalog != null && catalog.travelPerks != null) ...[
+            const Text(
+              'Travel perks',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.charcoal,
+              ),
+            ),
+            const SizedBox(height: 6),
+            _TravelPerks(perks: catalog.travelPerks!, color: color),
+            const SizedBox(height: 10),
+          ],
+          if (catalog == null) ...[
+            const Text(
+              'No catalog reference data available for this card.',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+          ],
         ],
       ),
-      trailing: TextButton(
-        onPressed: onToggle,
-        child: Text(
-          isUsed ? 'Mark unused' : 'Mark used',
-          style: TextStyle(fontSize: 11, color: statusColor),
-        ),
-      ),
-      onTap: onToggle,
     );
-  }
-
-  String _formatDate(DateTime date) {
-    return '${date.year.toString().padLeft(4, '0')}-'
-        '${date.month.toString().padLeft(2, '0')}-'
-        '${date.day.toString().padLeft(2, '0')}';
   }
 }
 
-/// Welcome bonus progress bar for a card currently earning its signup bonus.
-class _WelcomeBonusProgress extends StatelessWidget {
-  const _WelcomeBonusProgress({
-    required this.bonus,
-    required this.onSetSpend,
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({
+    required this.label,
+    required this.value,
+    required this.color,
   });
 
-  final WalletBonus bonus;
-  final ValueChanged<int> onSetSpend;
+  final String label;
+  final String value;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final spent = bonus.spentUnits;
-    final required = bonus.spendRequiredUnits;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'Welcome bonus',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.charcoal,
+                ),
+                children: [
+                  TextSpan(
+                    text: '$label: ',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                  TextSpan(text: value),
+                ],
+              ),
             ),
-            Text(
-              '${(bonus.progress * 100).round()}%',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primary),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: bonus.progress,
-            minHeight: 6,
-            backgroundColor: AppColors.outlineVariant,
-            color: bonus.isComplete ? AppColors.success : AppColors.primary,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          bonus.isComplete
-              ? 'Bonus earned'
-              : '$spent of $required spent toward the ${bonus.amountUnits} bonus',
-          style: const TextStyle(fontSize: 12, color: Colors.grey),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            onPressed: () => _promptSpend(context),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              side: BorderSide(color: AppColors.outlineVariant),
-            ),
-            child: const Text('Update spend'),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _promptSpend(BuildContext context) async {
-    final controller = TextEditingController(text: spent.toString());
-    final saved = await showDialog<int?>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Update bonus spend'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            labelText: 'Spend toward bonus',
-            helperText: bonus.spendCurrency != null
-                ? 'in ${bonus.spendCurrency}'
-                : null,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final value = int.tryParse(controller.text.trim());
-              if (value == null || value < 0) return;
-              Navigator.pop(dialogContext, value);
-            },
-            child: const Text('Save'),
           ),
         ],
       ),
     );
-    if (saved != null) onSetSpend(saved);
+  }
+}
+
+class _TravelPerks extends StatelessWidget {
+  const _TravelPerks({required this.perks, required this.color});
+
+  final CardTravelPerks perks;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <String>[];
+    if (perks.loungeAccess != null) {
+      items.add('Lounge access: ${_perkValue(perks.loungeAccess)}');
+    }
+    if (perks.tsaPrecheckCredit != null) {
+      items.add('TSA Pre\u2713 credit: ${_perkValue(perks.tsaPrecheckCredit)}');
+    }
+    if (perks.globalEntryCredit != null) {
+      items.add('Global Entry credit: ${_perkValue(perks.globalEntryCredit)}');
+    }
+    if (perks.freeCheckedBags != null) {
+      items.add('Free checked bags: ${_perkValue(perks.freeCheckedBags)}');
+    }
+    if (perks.hotelStatus != null) {
+      items.add('Hotel status: ${_perkValue(perks.hotelStatus)}');
+    }
+    items.addAll(perks.other);
+
+    if (items.isEmpty) {
+      return const Text(
+        'None listed',
+        style: TextStyle(fontSize: 13, color: Colors.grey),
+      );
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: items
+          .map((item) => _PerkChip(label: item, color: color))
+          .toList(growable: false),
+    );
   }
 
-  int get spent => bonus.spentUnits;
+  String _perkValue(Object? value) {
+    if (value == null) return '—';
+    if (value is bool) return value ? 'Yes' : 'No';
+    return value.toString();
+  }
+}
+
+class _PerkChip extends StatelessWidget {
+  const _PerkChip({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
+  }
 }

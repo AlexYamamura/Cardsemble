@@ -5,6 +5,8 @@ import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/card_optimizer/data/card_optimizer_repository.dart';
 import 'package:cardsemble/features/card_optimizer/presentation/card_optimizer_screen.dart';
+import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
+import 'package:cardsemble/features/wallet/presentation/wallet_card_colors.dart';
 import 'package:cardsemble/features/wallet/presentation/wallet_notifier.dart';
 import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_panel.dart';
 
@@ -14,6 +16,10 @@ import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_pane
 /// enriched with catalog reference data from the Research tab) under "Your
 /// Cards", plus a "Household cards" section for cards owned by others in the
 /// household (empty until household account data is served by the backend).
+///
+/// "Your cards" can be shown as a vertical stack or as a horizontal carousel,
+/// toggled from the layout header. Tapping a card drops down its details pane
+/// (annual fee, FX fee, benefits, travel perks).
 class WalletScreen extends StatefulWidget {
   const WalletScreen({
     super.key,
@@ -31,6 +37,41 @@ class WalletScreen extends StatefulWidget {
 }
 
 class _WalletScreenState extends State<WalletScreen> {
+  /// Whether "Your cards" is shown as a horizontal carousel (true) or a
+  /// vertical stack (false).
+  bool _useCarousel = true;
+
+  /// Ids of cards whose details pane is expanded in the vertical layout.
+  final Set<String> _expandedIds = <String>{};
+
+  void _toggleCard(String id) {
+    setState(() {
+      if (_expandedIds.contains(id)) {
+        _expandedIds.remove(id);
+      } else {
+        _expandedIds.add(id);
+      }
+    });
+  }
+
+  void _setLayout(bool useCarousel) => setState(() => _useCarousel = useCarousel);
+
+  void _showCardDetails(BuildContext context, WalletCard card) {
+    final color = WalletCardColors.accentColor(card);
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+        child: CardDetails(card: card, color: color),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +111,12 @@ class _WalletScreenState extends State<WalletScreen> {
                   child: _Header(
                     error: notifier.error,
                     onRetry: () => notifier.load(),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: _LayoutToggle(
+                    useCarousel: _useCarousel,
+                    onChanged: _setLayout,
                   ),
                 ),
                 SliverPadding(
@@ -120,7 +167,17 @@ class _WalletScreenState extends State<WalletScreen> {
                     ),
                   ),
                 ),
-                _YourCardsSection(notifier: notifier),
+                if (_useCarousel)
+                  _YourCardsCarouselSection(
+                    notifier: notifier,
+                    onCardTap: (card) => _showCardDetails(context, card),
+                  )
+                else
+                  _YourCardsSection(
+                    notifier: notifier,
+                    expandedIds: _expandedIds,
+                    onToggleCard: _toggleCard,
+                  ),
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
                   sliver: SliverToBoxAdapter(
@@ -135,12 +192,49 @@ class _WalletScreenState extends State<WalletScreen> {
                     ),
                   ),
                 ),
-                _HouseholdCardsSection(notifier: notifier),
+                _HouseholdCardsSection(
+                  notifier: notifier,
+                  expandedIds: _expandedIds,
+                  onToggleCard: _toggleCard,
+                ),
                 const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _LayoutToggle extends StatelessWidget {
+  const _LayoutToggle({
+    required this.useCarousel,
+    required this.onChanged,
+  });
+
+  final bool useCarousel;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: SegmentedButton<bool>(
+        selected: <bool>{useCarousel},
+        onSelectionChanged: (selection) => onChanged(selection.first),
+        segments: const <ButtonSegment<bool>>[
+          ButtonSegment<bool>(
+            value: true,
+            icon: Icon(Icons.view_agenda_outlined, size: 18),
+            label: Text('Carousel'),
+          ),
+          ButtonSegment<bool>(
+            value: false,
+            icon: Icon(Icons.view_list_outlined, size: 18),
+            label: Text('List'),
+          ),
+        ],
       ),
     );
   }
@@ -215,9 +309,15 @@ class _SectionHeader extends StatelessWidget {
 }
 
 class _YourCardsSection extends StatelessWidget {
-  const _YourCardsSection({required this.notifier});
+  const _YourCardsSection({
+    required this.notifier,
+    required this.expandedIds,
+    required this.onToggleCard,
+  });
 
   final WalletNotifier notifier;
+  final Set<String> expandedIds;
+  final ValueChanged<String> onToggleCard;
 
   @override
   Widget build(BuildContext context) {
@@ -242,12 +342,9 @@ class _YourCardsSection extends StatelessWidget {
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: WalletCardPanel(
                   card: card,
-                  onToggleBenefit: (benefit) async {
-                    await notifier.toggleBenefit(card.id, benefit.id, !benefit.used);
-                  },
-                  onSetBonusSpend: (spent) async {
-                    await notifier.setBonusSpend(card.id, spent);
-                  },
+                  mode: WalletCardPanelMode.expandable,
+                  expanded: expandedIds.contains(card.id),
+                  onTap: () => onToggleCard(card.id),
                 ),
               ),
             ),
@@ -259,10 +356,69 @@ class _YourCardsSection extends StatelessWidget {
   }
 }
 
-class _HouseholdCardsSection extends StatelessWidget {
-  const _HouseholdCardsSection({required this.notifier});
+class _YourCardsCarouselSection extends StatelessWidget {
+  const _YourCardsCarouselSection({
+    required this.notifier,
+    required this.onCardTap,
+  });
 
   final WalletNotifier notifier;
+  final ValueChanged<WalletCard> onCardTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = notifier.yourCards;
+    if (cards.isEmpty) {
+      return SliverToBoxAdapter(
+        child: _EmptyState(
+          icon: Icons.credit_card_outlined,
+          title: 'No cards in your wallet yet',
+          body: 'Link a credit card account to see your cards, benefits, and welcome bonus progress here.',
+        ),
+      );
+    }
+    return SliverToBoxAdapter(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: _carouselItemHeight,
+            child: PageView.builder(
+              itemCount: cards.length,
+              itemBuilder: (_, index) {
+                final card = cards[index];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: WalletCardPanel(
+                        card: card,
+                        mode: WalletCardPanelMode.collapsed,
+                        onTap: () => onCardTap(card),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HouseholdCardsSection extends StatelessWidget {
+  const _HouseholdCardsSection({
+    required this.notifier,
+    required this.expandedIds,
+    required this.onToggleCard,
+  });
+
+  final WalletNotifier notifier;
+  final Set<String> expandedIds;
+  final ValueChanged<String> onToggleCard;
 
   @override
   Widget build(BuildContext context) {
@@ -287,12 +443,9 @@ class _HouseholdCardsSection extends StatelessWidget {
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: WalletCardPanel(
                   card: card,
-                  onToggleBenefit: (benefit) async {
-                    await notifier.toggleBenefit(card.id, benefit.id, !benefit.used);
-                  },
-                  onSetBonusSpend: (spent) async {
-                    await notifier.setBonusSpend(card.id, spent);
-                  },
+                  mode: WalletCardPanelMode.expandable,
+                  expanded: expandedIds.contains(card.id),
+                  onTap: () => onToggleCard(card.id),
                 ),
               ),
             ),
@@ -346,3 +499,6 @@ class _EmptyState extends StatelessWidget {
     );
   }
 }
+
+/// Height of one collapsed card inside the horizontal carousel.
+const double _carouselItemHeight = 230;
