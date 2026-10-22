@@ -501,6 +501,10 @@ class CardBenefit {
     this.source,
     this.description,
     this.details,
+    this.amount,
+    this.currency,
+    this.expiresAt,
+    this.periodLength,
   });
 
   final String? id;
@@ -510,6 +514,19 @@ class CardBenefit {
   final String? description;
   final Map<String, dynamic>? details;
 
+  /// Credit amount in minor currency units (e.g. 20000 for $200.00), when the
+  /// benefit is a statement credit with a dollar value.
+  final int? amount;
+
+  /// Currency code for [amount].
+  final String? currency;
+
+  /// When the credit expires / the current period ends (ISO-8601 string).
+  final String? expiresAt;
+
+  /// How often the credit resets: "monthly", "semi-annually", "annually", etc.
+  final String? periodLength;
+
   factory CardBenefit.fromJson(Map<String, dynamic> json) {
     return CardBenefit(
       id: _asString(json['id']),
@@ -518,6 +535,10 @@ class CardBenefit {
       source: _asString(json['source']),
       description: _asString(json['description']),
       details: _asMap(json['details']),
+      amount: _asInt(json['amount']),
+      currency: _asString(json['currency']),
+      expiresAt: _asString(json['expires_at']),
+      periodLength: _asString(json['period_length']),
     );
   }
 
@@ -529,6 +550,10 @@ class CardBenefit {
       if (source != null) 'source': source,
       if (description != null) 'description': description,
       if (details != null) 'details': details,
+      if (amount != null) 'amount': amount,
+      if (currency != null) 'currency': currency,
+      if (expiresAt != null) 'expires_at': expiresAt,
+      if (periodLength != null) 'period_length': periodLength,
     };
   }
 }

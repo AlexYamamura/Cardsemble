@@ -45,8 +45,6 @@ class _MainTabsState extends State<MainTabs>
       GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _transactionsNavigatorKey =
       GlobalKey<NavigatorState>();
-  final GlobalKey<NavigatorState> _eventsNavigatorKey =
-      GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _researchNavigatorKey =
       GlobalKey<NavigatorState>();
   static const _settingsReviewedKey = 'capture_settings_reviewed';
@@ -65,11 +63,6 @@ class _MainTabsState extends State<MainTabs>
       icon: Icons.receipt_long_outlined,
       selectedIcon: Icons.receipt_long,
       label: 'Transactions',
-    ),
-    _TabInfo(
-      icon: Icons.notifications_none,
-      selectedIcon: Icons.notifications,
-      label: 'Events',
     ),
     _TabInfo(
       icon: Icons.travel_explore_outlined,
@@ -199,6 +192,15 @@ class _MainTabsState extends State<MainTabs>
         .push<void>(_slideFadeRoute(const PeopleScreen()));
   }
 
+  Future<void> _openCardEvents() async {
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true)
+        .push<void>(_slideFadeRoute(CardEventsScreen(
+              onOpenSettings: _openSettings,
+              onOpenManageHousehold: _openManageHousehold,
+            )));
+  }
+
   PageRouteBuilder<void> _slideFadeRoute(Widget page) {
     return PageRouteBuilder<void>(
       transitionDuration: const Duration(milliseconds: 300),
@@ -282,6 +284,7 @@ class _MainTabsState extends State<MainTabs>
                 navigatorKey: _walletNavigatorKey,
                 rootBuilder: (_) => WalletScreen(
                   onOpenSettings: _openSettings,
+                  onOpenCardEvents: _openCardEvents,
                   onOpenManageHousehold: _openManageHousehold,
                 ),
               ),
@@ -291,6 +294,7 @@ class _MainTabsState extends State<MainTabs>
                 rootBuilder: (_) => SummaryScreen(
                   onShowTransactions: _showTransactionsTab,
                   onOpenSettings: _openSettings,
+                  onOpenCardEvents: _openCardEvents,
                   onOpenManageHousehold: _openManageHousehold,
                 ),
               ),
@@ -299,22 +303,16 @@ class _MainTabsState extends State<MainTabs>
                 navigatorKey: _transactionsNavigatorKey,
                 rootBuilder: (_) => TransactionsScreen(
                   onOpenSettings: _openSettings,
+                  onOpenCardEvents: _openCardEvents,
                   onOpenManageHousehold: _openManageHousehold,
                 ),
               ),
               _buildTabNavigator(
                 index: 3,
-                navigatorKey: _eventsNavigatorKey,
-                rootBuilder: (_) => CardEventsScreen(
-                  onOpenSettings: _openSettings,
-                  onOpenManageHousehold: _openManageHousehold,
-                ),
-              ),
-              _buildTabNavigator(
-                index: 4,
                 navigatorKey: _researchNavigatorKey,
                 rootBuilder: (_) => ResearchScreen(
                   onOpenSettings: _openSettings,
+                  onOpenCardEvents: _openCardEvents,
                   onOpenManageHousehold: _openManageHousehold,
                 ),
               ),

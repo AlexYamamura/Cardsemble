@@ -21,10 +21,12 @@ class ResearchScreen extends StatefulWidget {
   const ResearchScreen({
     super.key,
     this.onOpenSettings,
+    this.onOpenCardEvents,
     this.onOpenManageHousehold,
   });
 
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenCardEvents;
   final VoidCallback? onOpenManageHousehold;
 
   @override
@@ -159,6 +161,7 @@ class _ResearchScreenState extends State<ResearchScreen> {
         actions: [
           SettingsGearMenu(
             onOpenSettings: widget.onOpenSettings,
+            onOpenCardEvents: widget.onOpenCardEvents,
             onOpenManageHousehold: widget.onOpenManageHousehold,
           ),
         ],

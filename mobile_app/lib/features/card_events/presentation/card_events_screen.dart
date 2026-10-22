@@ -35,7 +35,7 @@ class _CardEventsScreenState extends State<CardEventsScreen> with AutomaticKeepA
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: const Color(0xFFD5CFC2),
       appBar: AppBar(
         title: const Text('Card Events'),
         actions: [

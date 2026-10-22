@@ -17,11 +17,13 @@ class SummaryScreen extends StatefulWidget {
     super.key,
     required this.onShowTransactions,
     this.onOpenSettings,
+    this.onOpenCardEvents,
     this.onOpenManageHousehold,
   });
 
   final VoidCallback onShowTransactions;
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenCardEvents;
   final VoidCallback? onOpenManageHousehold;
 
   @override
@@ -469,6 +471,7 @@ confirmResult.fold(
         actions: [
           SettingsGearMenu(
             onOpenSettings: widget.onOpenSettings,
+            onOpenCardEvents: widget.onOpenCardEvents,
             onOpenManageHousehold: widget.onOpenManageHousehold,
           ),
         ],

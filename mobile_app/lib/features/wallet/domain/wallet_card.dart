@@ -93,6 +93,10 @@ class WalletCard {
 }
 
 /// One catalog benefit with its locally-tracked usage state.
+///
+/// Tracks statement credits that need to be actively used (e.g. "$200 hotel
+/// credit, expires semi-annually"). `used` reflects whether the credit has been
+/// consumed within the current period; `expiresAt` is the period end date.
 class WalletBenefit {
   const WalletBenefit({
     required this.id,
@@ -100,7 +104,12 @@ class WalletBenefit {
     this.category,
     this.source,
     this.description,
+    this.amount,
+    this.currency,
+    this.expiresAt,
+    this.periodLength,
     this.used = false,
+    this.usedAt,
   });
 
   final String id;
@@ -108,7 +117,50 @@ class WalletBenefit {
   final String? category;
   final String? source;
   final String? description;
+
+  /// Credit amount in minor currency units (e.g. 20000 for $200.00), when the
+  /// benefit is a statement credit with a dollar value.
+  final int? amount;
+
+  /// Currency code for [amount].
+  final String? currency;
+
+  /// When the credit expires / the current period ends.
+  final DateTime? expiresAt;
+
+  /// How often the credit resets: "monthly", "semi-annually", "annually", etc.
+  final String? periodLength;
+
+  /// Whether the credit has been used within the current period.
   final bool used;
+
+  /// When the credit was last marked as used.
+  final DateTime? usedAt;
+
+  /// Human-readable amount string, e.g. "$200.00" or "200.00 EUR".
+  String? get amountLabel {
+    if (amount == null) return null;
+    final value = amount! / 100;
+    final currencySymbol = switch (currency) {
+      'USD' => '\$',
+      'EUR' => '€',
+      'GBP' => '£',
+      _ => '',
+    };
+    return '${currencySymbol}${value.toStringAsFixed(2)}';
+  }
+
+  /// Whether this benefit has expired (past its expiry date).
+  bool get isExpired {
+    if (expiresAt == null) return false;
+    return DateTime.now().isAfter(expiresAt!);
+  }
+
+  /// Short label for the reset frequency, e.g. "Resets semi-annually".
+  String? get periodLabel {
+    if (periodLength == null) return null;
+    return 'Resets $periodLength';
+  }
 }
 
 /// One catalog welcome bonus with locally-tracked spend progress.

@@ -34,6 +34,8 @@ class WalletNotifier extends ChangeNotifier {
 
   /// Locally persisted benefit usage: cardId -> {benefitId: used}.
   final Map<String, Map<String, bool>> _benefitUsage = {};
+  /// Locally persisted benefit used-at timestamps: cardId -> {benefitId: ISO-8601}.
+  final Map<String, Map<String, String>> _benefitUsedAt = {};
   /// Locally persisted bonus spend: cardId -> spent units.
   final Map<String, int> _bonusSpend = {};
 
@@ -44,6 +46,7 @@ class WalletNotifier extends ChangeNotifier {
   DateTime? get lastUpdated => _lastUpdated;
 
   static const String _benefitUsageKeyPrefix = 'wallet.benefit_usage.v1.';
+  static const String _benefitUsedAtKeyPrefix = 'wallet.benefit_used_at.v1.';
   static const String _bonusSpendKeyPrefix = 'wallet.bonus_spend.v1.';
 
   Future<SharedPreferences> _prefs() async => SharedPreferences.getInstance();
@@ -108,6 +111,18 @@ class WalletNotifier extends ChangeNotifier {
           };
         } catch (_) {
           _benefitUsage[id] = const {};
+        }
+      }
+      final usedAtRaw = prefs.getString('$_benefitUsedAtKeyPrefix$id');
+      if (usedAtRaw != null) {
+        try {
+          final decoded = jsonDecode(usedAtRaw) as Map<String, dynamic>;
+          _benefitUsedAt[id] = <String, String>{
+            for (final entry in decoded.entries)
+              if (entry.value is String) entry.key: entry.value as String,
+          };
+        } catch (_) {
+          _benefitUsedAt[id] = const {};
         }
       }
       final spendRaw = prefs.getString('$_bonusSpendKeyPrefix$id');
@@ -266,16 +281,25 @@ class WalletNotifier extends ChangeNotifier {
     }
     if (best != null) return best;
 
-    // 3. Issuer match ONLY when there's exactly one card for that issuer.
+    // 3. Issuer match only when there's exactly one card for that issuer.
     // If multiple cards share an issuer (e.g. Chase Freedom + Chase Aer Lingus),
     // don't guess — leave it unmatched so it shows the tag.
+    //
+    // Connection institution names may differ from catalog issuers (e.g.
+    // "Chase Bank" vs "Chase"), so match when one contains the other rather than
+    // requiring exact equality.
     final instSet = instCandidates.toSet();
     for (final card in _catalogCards) {
       final issuer = (card.issuer ?? '').toLowerCase().trim();
       if (issuer.isEmpty) continue;
-      if (!instSet.contains(issuer)) continue;
+      final matchesInst = instSet.any(
+        (inst) => inst.contains(issuer) || issuer.contains(inst),
+      );
+      if (!matchesInst) continue;
       final sameIssuerCards = _catalogCards.where(
-        (c) => (c.issuer ?? '').toLowerCase().trim() == issuer,
+        (c) => instSet.any(
+          (inst) => (c.issuer ?? '').toLowerCase().trim().contains(inst) || inst.contains((c.issuer ?? '').toLowerCase().trim()),
+        ),
       ).toList(growable: false);
       if (sameIssuerCards.length == 1) return sameIssuerCards.single;
     }
@@ -288,13 +312,20 @@ class WalletNotifier extends ChangeNotifier {
     final source = catalogCard?.benefits ?? const <CardBenefit>[];
     return source.map((benefit) {
       final id = benefit.id ?? benefit.title ?? '';
+      final used = usedMap?[id] ?? false;
+      final usedAt = _benefitUsedAt[cardId]?[id];
       return WalletBenefit(
         id: id,
         title: benefit.title ?? benefit.id ?? 'Benefit',
         category: benefit.category,
         source: benefit.source,
         description: benefit.description,
-        used: usedMap?[id] ?? false,
+        amount: benefit.amount,
+        currency: benefit.currency,
+        expiresAt: benefit.expiresAt != null ? DateTime.tryParse(benefit.expiresAt!) : null,
+        periodLength: benefit.periodLength,
+        used: used,
+        usedAt: usedAt != null ? DateTime.tryParse(usedAt) : null,
       );
     }).toList(growable: false);
   }
@@ -319,6 +350,14 @@ class WalletNotifier extends ChangeNotifier {
     map[benefitId] = used;
     _benefitUsage[cardId] = map;
 
+    final usedAtMap = <String, String>{...(_benefitUsedAt[cardId] ?? const {})};
+    if (used) {
+      usedAtMap[benefitId] = DateTime.now().toIso8601String();
+    } else {
+      usedAtMap.remove(benefitId);
+    }
+    _benefitUsedAt[cardId] = usedAtMap;
+
     final index = _yourCards.indexWhere((c) => c.id == cardId);
     if (index != -1) {
       final card = _yourCards[index];
@@ -336,7 +375,9 @@ class WalletNotifier extends ChangeNotifier {
         currency: card.currency,
         creditLimitCents: card.creditLimitCents,
         benefits: card.benefits.map((b) {
-          if (b.id == benefitId) return b.copyWith(used: used);
+          if (b.id == benefitId) {
+            return b.copyWith(used: used, usedAt: used ? DateTime.now() : null);
+          }
           return b;
         }).toList(growable: false),
         welcomeBonus: card.welcomeBonus,
@@ -345,6 +386,7 @@ class WalletNotifier extends ChangeNotifier {
     }
     notifyListeners();
     await _persistBenefitUsage(cardId);
+    await _persistBenefitUsedAt(cardId);
   }
 
   /// Sets the spend counted toward a card's welcome bonus and persists it.
@@ -389,9 +431,22 @@ class WalletNotifier extends ChangeNotifier {
 
   Future<void> _persistBenefitUsage(String cardId) async {
     final prefs = await _prefs();
-    final map = _benefitUsage[cardId];
-    if (map == null) return;
-    await prefs.setString('$_benefitUsageKeyPrefix$cardId', jsonEncode(map));
+    final usageMap = _benefitUsage[cardId];
+    if (usageMap != null) {
+      await prefs.setString('$_benefitUsageKeyPrefix$cardId', jsonEncode(usageMap));
+    }
+    final usedAtMap = _benefitUsedAt[cardId];
+    if (usedAtMap != null) {
+      await prefs.setString('$_benefitUsedAtKeyPrefix$cardId', jsonEncode(usedAtMap));
+    }
+  }
+
+  Future<void> _persistBenefitUsedAt(String cardId) async {
+    final prefs = await _prefs();
+    final map = _benefitUsedAt[cardId];
+    if (map != null) {
+      await prefs.setString('$_benefitUsedAtKeyPrefix$cardId', jsonEncode(map));
+    }
   }
 
   Future<void> _persistBonusSpend(String cardId) async {
@@ -407,14 +462,22 @@ class WalletNotifier extends ChangeNotifier {
 }
 
 extension _WalletBenefitCopy on WalletBenefit {
-  WalletBenefit copyWith({bool? used}) {
+  WalletBenefit copyWith({
+    bool? used,
+    DateTime? usedAt,
+  }) {
     return WalletBenefit(
       id: id,
       title: title,
       category: category,
       source: source,
       description: description,
+      amount: amount,
+      currency: currency,
+      expiresAt: expiresAt,
+      periodLength: periodLength,
       used: used ?? this.used,
+      usedAt: usedAt ?? this.usedAt,
     );
   }
 }

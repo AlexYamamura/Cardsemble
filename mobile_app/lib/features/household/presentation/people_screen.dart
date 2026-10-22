@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/household/presentation/household_notifier.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
 
@@ -35,10 +34,7 @@ class _PeopleScreenState extends State<PeopleScreen>
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
-      // This screen is presented as a full-page route (Manage Household).
-      // An opaque background prevents the black flash behind the transparent
-      // route during the open/close transition.
-      backgroundColor: AppColors.cream,
+      backgroundColor: const Color(0xFFD5CFC2),
       appBar: AppBar(
         title: const Text('Household People'),
       ),

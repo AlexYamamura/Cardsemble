@@ -4,15 +4,17 @@ import 'package:cardsemble/features/auth/presentation/auth_notifier.dart';
 
 /// Gear dropdown shown in the header of every tab.
 ///
-/// Options, in order: Settings, Manage Household, Sign out.
+/// Options, in order: Settings, Card Events, Manage Household, Sign out.
 class SettingsGearMenu extends StatelessWidget {
   const SettingsGearMenu({
     super.key,
     this.onOpenSettings,
+    this.onOpenCardEvents,
     this.onOpenManageHousehold,
   });
 
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenCardEvents;
   final VoidCallback? onOpenManageHousehold;
 
   @override
@@ -25,6 +27,9 @@ class SettingsGearMenu extends StatelessWidget {
           case 'settings':
             onOpenSettings?.call();
             break;
+          case 'card-events':
+            onOpenCardEvents?.call();
+            break;
           case 'manage-household':
             onOpenManageHousehold?.call();
             break;
@@ -35,6 +40,7 @@ class SettingsGearMenu extends StatelessWidget {
       },
       itemBuilder: (context) => const [
         PopupMenuItem(value: 'settings', child: Text('Settings')),
+        PopupMenuItem(value: 'card-events', child: Text('Card Events')),
         PopupMenuItem(
           value: 'manage-household',
           child: Text('Manage Household'),

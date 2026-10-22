@@ -33,10 +33,12 @@ class TransactionsScreen extends StatefulWidget {
   const TransactionsScreen({
     super.key,
     this.onOpenSettings,
+    this.onOpenCardEvents,
     this.onOpenManageHousehold,
   });
 
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenCardEvents;
   final VoidCallback? onOpenManageHousehold;
 
   @override
@@ -81,6 +83,7 @@ class _TransactionsScreenState extends State<TransactionsScreen>
         actions: [
           SettingsGearMenu(
             onOpenSettings: widget.onOpenSettings,
+            onOpenCardEvents: widget.onOpenCardEvents,
             onOpenManageHousehold: widget.onOpenManageHousehold,
           ),
           IconButton(

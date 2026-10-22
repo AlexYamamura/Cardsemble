@@ -16,10 +16,12 @@ class WalletScreen extends StatefulWidget {
   const WalletScreen({
     super.key,
     this.onOpenSettings,
+    this.onOpenCardEvents,
     this.onOpenManageHousehold,
   });
 
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenCardEvents;
   final VoidCallback? onOpenManageHousehold;
 
   @override
@@ -39,7 +41,7 @@ class _WalletScreenState extends State<WalletScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.cream,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         backgroundColor: AppColors.primary,
         foregroundColor: AppColors.onPrimary,
@@ -47,6 +49,7 @@ class _WalletScreenState extends State<WalletScreen> {
         actions: [
           SettingsGearMenu(
             onOpenSettings: widget.onOpenSettings,
+            onOpenCardEvents: widget.onOpenCardEvents,
             onOpenManageHousehold: widget.onOpenManageHousehold,
           ),
         ],
@@ -60,23 +63,44 @@ class _WalletScreenState extends State<WalletScreen> {
                 SliverToBoxAdapter(
                   child: _Header(
                     error: notifier.error,
-                    lastUpdated: notifier.lastUpdated,
                     onRetry: () => notifier.load(),
                   ),
                 ),
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
                   sliver: SliverToBoxAdapter(
-                    child: _SectionHeader(title: 'Your Cards', subtitle: 'Connected credit card accounts'),
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: _SectionHeader(title: 'Your Cards', subtitle: 'Connected credit card accounts'),
+                      ),
+                    ),
                   ),
                 ),
                 _YourCardsSection(notifier: notifier),
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
                   sliver: SliverToBoxAdapter(
-                    child: _SectionHeader(
-                      title: 'Household cards',
-                      subtitle: 'Cards owned by others in your household',
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => context.read<AccountsNotifier>().linkAccount(),
+                        child: const Text('Link a card'),
+                      ),
+                    ),
+                  ),
+                ),
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
+                  sliver: SliverToBoxAdapter(
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: _SectionHeader(
+                          title: 'Household cards',
+                          subtitle: 'Cards owned by others in your household',
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -92,10 +116,9 @@ class _WalletScreenState extends State<WalletScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({this.error, this.lastUpdated, this.onRetry});
+  const _Header({this.error, this.onRetry});
 
   final String? error;
-  final DateTime? lastUpdated;
   final VoidCallback? onRetry;
 
   @override
@@ -106,15 +129,6 @@ class _Header extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            'Your wallet',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.charcoal),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'See your connected cards, unused benefits, and welcome bonus progress for the current month.',
-            style: const TextStyle(fontSize: 13, color: Colors.grey),
-          ),
           if (error != null) ...[
             const SizedBox(height: 8),
             Container(
@@ -137,22 +151,9 @@ class _Header extends StatelessWidget {
               ),
             ),
           ],
-          if (lastUpdated != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              'Updated ${_formatTime(lastUpdated!)}',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
-            ),
-          ],
         ],
       ),
     );
-  }
-
-  String _formatTime(DateTime time) {
-    final h = time.hour.toString().padLeft(2, '0');
-    final m = time.minute.toString().padLeft(2, '0');
-    return '$h:$m';
   }
 }
 
@@ -196,8 +197,6 @@ class _YourCardsSection extends StatelessWidget {
           icon: Icons.credit_card_outlined,
           title: 'No cards in your wallet yet',
           body: 'Link a credit card account to see your cards, benefits, and welcome bonus progress here.',
-          button: const Text('Link a card'),
-          onPressed: () => context.read<AccountsNotifier>().linkAccount(),
         ),
       );
     }
@@ -243,8 +242,6 @@ class _HouseholdCardsSection extends StatelessWidget {
           icon: Icons.people_outlined,
           title: 'No household cards shared yet',
           body: 'Cards owned by others in your household will appear here once household accounts are connected.',
-          button: null,
-          onPressed: null,
         ),
       );
     }
@@ -281,15 +278,11 @@ class _EmptyState extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.body,
-    this.button,
-    this.onPressed,
   });
 
   final IconData icon;
   final String title;
   final String body;
-  final Widget? button;
-  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -297,7 +290,7 @@ class _EmptyState extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.outlineVariant),
       ),
@@ -317,13 +310,6 @@ class _EmptyState extends StatelessWidget {
             style: const TextStyle(fontSize: 13, color: Colors.grey),
             textAlign: TextAlign.center,
           ),
-          if (button != null && onPressed != null) ...[
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(onPressed: onPressed, child: button),
-            ),
-          ],
         ],
       ),
     );

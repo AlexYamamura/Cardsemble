@@ -229,8 +229,9 @@ class _MetricTile extends StatelessWidget {
   }
 }
 
-/// A compact dropdown of the card's catalog benefits, each marked used or
-/// available. Tapping a benefit toggles its usage state.
+/// A compact dropdown of the card's catalog benefits, each tracked as a credit
+/// that needs to be actively used (e.g. "$200 hotel credit, expires semi-annually").
+/// Tapping a benefit toggles its used/unused state.
 class _BenefitsDropdown extends StatefulWidget {
   const _BenefitsDropdown({
     required this.card,
@@ -268,7 +269,7 @@ class _BenefitsDropdownState extends State<_BenefitsDropdown> {
                 ),
                 const SizedBox(width: 6),
                 const Text(
-                  'Benefits',
+                  'Statement Credits',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(width: 6),
@@ -293,33 +294,9 @@ class _BenefitsDropdownState extends State<_BenefitsDropdown> {
         ),
         if (_expanded) ...[
           for (final benefit in widget.card.benefits) ...[
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                benefit.used ? Icons.check_circle : Icons.radio_button_unchecked,
-                size: 20,
-                color: benefit.used ? AppColors.primary : Colors.grey,
-              ),
-              title: Text(
-                benefit.title,
-                style: const TextStyle(fontSize: 13),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: benefit.category != null
-                  ? Text(
-                      benefit.category!,
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
-                    )
-                  : null,
-              trailing: benefit.source != null
-                  ? Text(
-                      benefit.source!,
-                      style: const TextStyle(fontSize: 10, color: AppColors.primary),
-                    )
-                  : null,
-              onTap: () => widget.onToggleBenefit(benefit),
+            _BenefitTile(
+              benefit: benefit,
+              onToggle: () => widget.onToggleBenefit(benefit),
             ),
             if (benefit != widget.card.benefits.last)
               const Divider(height: 1),
@@ -327,6 +304,110 @@ class _BenefitsDropdownState extends State<_BenefitsDropdown> {
         ],
       ],
     );
+  }
+}
+
+/// One benefit row showing the credit amount, expiry date, and used/unused state.
+class _BenefitTile extends StatelessWidget {
+  const _BenefitTile({
+    required this.benefit,
+    required this.onToggle,
+  });
+
+  final WalletBenefit benefit;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final isUsed = benefit.used;
+    final isExpired = benefit.isExpired;
+    final statusColor = isUsed
+        ? AppColors.primary
+        : isExpired
+            ? AppColors.error
+            : Colors.grey;
+    final statusIcon = isUsed
+        ? Icons.check_circle
+        : isExpired
+            ? Icons.schedule
+            : Icons.radio_button_unchecked;
+
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        statusIcon,
+        size: 20,
+        color: statusColor,
+      ),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              benefit.title,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isUsed ? AppColors.primary : AppColors.charcoal,
+                decoration: isUsed ? TextDecoration.lineThrough : null,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (benefit.amountLabel != null)
+            Text(
+              benefit.amountLabel!,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: statusColor,
+              ),
+            ),
+        ],
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (benefit.periodLabel != null) ...[
+            Text(
+              benefit.periodLabel!,
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+            const SizedBox(height: 2),
+          ],
+          if (benefit.expiresAt != null)
+            Text(
+              'Expires ${_formatDate(benefit.expiresAt!)}${isExpired ? ' (expired)' : ''}',
+              style: TextStyle(
+                fontSize: 11,
+                color: isExpired ? AppColors.error : Colors.grey,
+                fontWeight: isExpired ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          if (benefit.usedAt != null)
+            Text(
+              'Used ${_formatDate(benefit.usedAt!)}',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+        ],
+      ),
+      trailing: TextButton(
+        onPressed: onToggle,
+        child: Text(
+          isUsed ? 'Mark unused' : 'Mark used',
+          style: TextStyle(fontSize: 11, color: statusColor),
+        ),
+      ),
+      onTap: onToggle,
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
   }
 }
 
