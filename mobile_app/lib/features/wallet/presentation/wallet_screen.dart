@@ -67,7 +67,7 @@ class _WalletScreenState extends State<WalletScreen> {
       ),
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-        child: CardDetails(card: card, color: color),
+        child: CardDetails(card: card, color: color, scrollable: true),
       ),
     );
   }
@@ -111,12 +111,6 @@ class _WalletScreenState extends State<WalletScreen> {
                   child: _Header(
                     error: notifier.error,
                     onRetry: () => notifier.load(),
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: _LayoutToggle(
-                    useCarousel: _useCarousel,
-                    onChanged: _setLayout,
                   ),
                 ),
                 SliverPadding(
@@ -165,6 +159,12 @@ class _WalletScreenState extends State<WalletScreen> {
                         ],
                       ),
                     ),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: _LayoutToggle(
+                    useCarousel: _useCarousel,
+                    onChanged: _setLayout,
                   ),
                 ),
                 if (_useCarousel)

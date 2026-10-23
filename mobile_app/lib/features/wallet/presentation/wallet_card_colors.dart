@@ -57,6 +57,14 @@ class WalletCardColors {
     'td': _tdBank,
   };
 
+  /// Light tint of [color] for use as the details-pane background over a
+  /// white surface.
+  static Color paneBackground(Color color) => color.withValues(alpha: 0.10);
+
+  /// Foreground text/icon color (white or black) chosen for contrast against
+  /// [color].
+  static Color onColor(Color color) => color.computeLuminance() > 0.55 ? Colors.black : Colors.white;
+
   /// Deterministic, reasonably saturated accent color derived from [name].
   static Color _hashColor(String name) {
     if (name.isEmpty) return AppColors.primary;

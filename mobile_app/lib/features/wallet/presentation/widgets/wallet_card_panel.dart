@@ -74,7 +74,7 @@ class WalletCardPanel extends StatelessWidget {
           ],
         ),
       ),
-    );
+   );
   }
 }
 
@@ -93,30 +93,24 @@ class _CardHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+    final onColor = WalletCardColors.onColor(color);
+    return Container(
+      width: double.infinity,
+      color: color,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
-              Container(
-                width: 8,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   card.displayName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.charcoal,
+                    color: onColor,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -126,7 +120,7 @@ class _CardHeader extends StatelessWidget {
                 Icon(
                   expanded ? Icons.expand_less : Icons.expand_more,
                   size: 20,
-                  color: color,
+                  color: onColor,
                 ),
             ],
           ),
@@ -154,7 +148,7 @@ class _CardSubtitle extends StatelessWidget {
     if (parts.isEmpty) return const SizedBox.shrink();
     return Text(
       parts.join('  ·  '),
-      style: const TextStyle(fontSize: 13, color: Colors.grey),
+      style: const TextStyle(fontSize: 13, color: Colors.white70),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );
@@ -260,15 +254,17 @@ class CardDetails extends StatelessWidget {
     super.key,
     required this.card,
     required this.color,
+    this.scrollable = false,
   });
 
   final WalletCard card;
   final Color color;
+  final bool scrollable;
 
   @override
   Widget build(BuildContext context) {
     final catalog = card.catalogCard;
-    return Padding(
+    final content = Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -302,13 +298,17 @@ class CardDetails extends StatelessWidget {
                 color: AppColors.charcoal,
               ),
             ),
-            const SizedBox(height: 6),
-            ...catalog.benefits.map(
-              (benefit) => _DetailRow(
-                label: benefit.title ?? 'Benefit',
-                value: benefit.category ?? '—',
-                color: color,
-              ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: catalog.benefits
+                  .map((benefit) => _BenefitChip(
+                        title: benefit.title ?? 'Benefit',
+                        description: benefit.description,
+                        color: color,
+                      ))
+                  .toList(growable: false),
             ),
             const SizedBox(height: 10),
           ],
@@ -330,12 +330,24 @@ class CardDetails extends StatelessWidget {
               'No catalog reference data available for this card.',
               style: TextStyle(fontSize: 13, color: Colors.grey),
             ),
-          ],
-        ],
-      ),
-    );
-  }
-}
+           ],
+           ],
+          ),
+         );
+
+      if (scrollable) {
+       return Container(
+         width: double.infinity,
+         decoration: BoxDecoration(
+           color: WalletCardColors.paneBackground(color),
+           borderRadius: BorderRadius.circular(12),
+         ),
+         child: SingleChildScrollView(child: content),
+       );
+     }
+     return content;
+   }
+ }
 
 class _DetailRow extends StatelessWidget {
   const _DetailRow({
@@ -455,6 +467,81 @@ class _PerkChip extends StatelessWidget {
           fontSize: 11,
           fontWeight: FontWeight.w600,
           color: color,
+        ),
+      ),
+    );
+  }
+}
+
+/// One catalog benefit shown as a digestible chip: title followed by its
+/// description, with no category label. Taps to expand/collapse long text.
+class _BenefitChip extends StatefulWidget {
+  const _BenefitChip({
+    required this.title,
+    required this.description,
+    required this.color,
+  });
+
+  final String title;
+  final String? description;
+  final Color color;
+
+  @override
+  State<_BenefitChip> createState() => _BenefitChipState();
+}
+
+class _BenefitChipState extends State<_BenefitChip> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasDescription = (widget.description ?? '').isNotEmpty;
+    final showToggle = hasDescription;
+    return GestureDetector(
+      onTap: showToggle ? () => setState(() => _expanded = !_expanded) : null,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 260),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: widget.color.withValues(alpha: 0.10),
+          border: Border.all(color: widget.color.withValues(alpha: 0.5)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RichText(
+              maxLines: _expanded ? null : 2,
+              overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+              text: TextSpan(
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: AppColors.charcoal,
+                  height: 1.25,
+                ),
+                children: [
+                  TextSpan(
+                    text: widget.title,
+                    style: TextStyle(fontWeight: FontWeight.w700, color: widget.color),
+                  ),
+                  if (hasDescription) TextSpan(text: '  ${widget.description}'),
+                ],
+              ),
+            ),
+            if (showToggle)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  _expanded ? 'Show less' : 'Show more',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: widget.color,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
