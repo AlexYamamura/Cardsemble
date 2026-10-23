@@ -108,7 +108,11 @@ export async function createPlaidClient(): Promise<void> {
   }
 }
 
-export async function createPlaidLinkToken(userId: string, platform: "android" | "ios" | "web"): Promise<string> {
+export async function createPlaidLinkToken(
+  userId: string,
+  platform: "android" | "ios" | "web",
+  accessToken?: string,
+): Promise<string> {
   await createPlaidClient();
 
   const requestOptions: Record<string, unknown> = {
@@ -127,6 +131,17 @@ export async function createPlaidLinkToken(userId: string, platform: "android" |
   const redirectUri = Deno.env.get("PLAID_REDIRECT_URI");
   if (redirectUri) {
     requestOptions["redirect_uri"] = redirectUri;
+  }
+
+  // Update mode: re-authenticate an existing item in place (refresh a dead or
+  // expired access token) instead of creating a new Plaid item. Plaid rejects
+  // products/optional_products in update mode, so they are omitted. Link's
+  // onSuccess still returns a public_token that the caller exchanges to obtain
+  // the refreshed access token for the same item_id.
+  if (accessToken) {
+    requestOptions["access_token"] = accessToken;
+    delete requestOptions["products"];
+    delete requestOptions["optional_products"];
   }
 
   const response = await plaidCall("/link/token/create", requestOptions);
@@ -482,19 +497,188 @@ async function resolveInstitutionName(client: any, institutionId: string | null)
   return null;
 }
 
-export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncResult> {
-  await createPlaidClient();
+/// Syncs a single Plaid item for a user: transactions cursor, credit accounts,
+/// and liabilities. Returns aggregate counters and any per-item error. On a
+/// Plaid-reported re-auth error the item is marked `status = 'error'`. This
+/// is the shared workhorse for both full-user sync and per-item resync.
+async function syncPlaidItemOnce(
+  userId: string,
+  item: any,
+): Promise<{
+  added: number;
+  modified: number;
+  removed: number;
+  liabilityAccounts: number;
+  liabilityStatements: number;
+  liabilityFailed: boolean;
+  itemError: PlaidItemSyncError | null;
+}> {
+  try {
+    let instName = item.institution_name;
+    if ((!instName || isGenericCardName(instName)) && item.institution_id) {
+      const resolved = await resolveInstitutionName(null, item.institution_id);
+      if (resolved) {
+        instName = resolved;
+        await supabase
+          .from("plaid_items")
+          .update({ institution_name: resolved })
+          .eq("item_id", item.item_id)
+          .eq("user_id", userId);
 
-  const { data: items, error: itemsError } = await supabase
+        await supabase
+          .from("plaid_credit_accounts")
+          .update({ institution_name: resolved })
+          .eq("item_id", item.item_id)
+          .in("institution_name", ["Existing linked institution", "Linked institution"]);
+      }
+    }
+
+    let cursor: string | null = item.transactions_cursor ?? null;
+
+    let added = 0;
+    let modified = 0;
+    let removed = 0;
+
+    while (true) {
+      const requestOptions: Record<string, unknown> = {
+        access_token: item.access_token,
+        options: { include_original_description: true },
+      };
+      if (cursor) {
+        requestOptions["cursor"] = cursor;
+      }
+
+      const response = await plaidCall("/transactions/sync", requestOptions);
+      const [savedAdded, savedModified, savedRemoved] = await syncPlaidTransactionPage(
+        userId,
+        response.added ?? [],
+        response.modified ?? [],
+        response.removed ?? [],
+      );
+      added += savedAdded;
+      modified += savedModified;
+      removed += savedRemoved;
+      cursor = response.next_cursor;
+      if (!response.has_more) break;
+    }
+
+    await supabase
+      .from("plaid_items")
+      .update({
+        transactions_cursor: cursor,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("item_id", item.item_id)
+      .eq("user_id", userId);
+
+    await syncPlaidCreditAccounts(
+      item.access_token,
+      userId,
+      item.item_id,
+      instName,
+    );
+
+    const liabilities = await syncPlaidLiabilities(
+      item.access_token,
+      userId,
+      item.item_id,
+      instName,
+    );
+
+    return {
+      added,
+      modified,
+      removed,
+      liabilityAccounts: liabilities.accounts,
+      liabilityStatements: liabilities.statements,
+      liabilityFailed: liabilities.status !== "synced",
+      itemError: null,
+    };
+  } catch (error: unknown) {
+    const code = plaidErrorCode(error);
+    if (!code) throw error;
+    if (SYSTEMIC_PLAID_ERROR_CODES.has(code)) {
+      // A broken credential or a rejected request is a deployment problem,
+      // not a problem with this one connection. It must stay fatal.
+      throw error;
+    }
+
+    const itemError: PlaidItemSyncError = {
+      item_id: item.item_id,
+      institution_name: item.institution_name ?? null,
+      error_code: code,
+      message: plaidItemSyncMessage(code),
+    };
+
+    if (REAUTH_ERROR_CODES.has(code)) {
+      // "error" is the only status the schema allows for a broken item.
+      const { error: statusError } = await supabase
+        .from("plaid_items")
+        .update({
+          status: "error",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("item_id", item.item_id)
+        .eq("user_id", userId);
+      if (statusError) {
+        console.warn(
+          `Could not mark Plaid item ${item.item_id} as needing re-authentication: ${statusError.message}`,
+        );
+      }
+    }
+
+    return {
+      added: 0,
+      modified: 0,
+      removed: 0,
+      liabilityAccounts: 0,
+      liabilityStatements: 0,
+      liabilityFailed: true,
+      itemError,
+    };
+  }
+}
+
+/// Re-runs reconciliation and statement summaries for a user after one or more
+/// item syncs. Shared by full-user sync and per-item resync so both paths
+/// produce consistent post-sync state.
+async function finalizeSync(userId: string): Promise<{
+  reconciled: number;
+  walletAssigned: number;
+  statementSummaries: number;
+}> {
+  const reconciled = await import("./reconcile.ts").then((m) => m.reconcileUserCardEvents(userId));
+  const walletAssigned = await import("./reconcile.ts").then((m) => m.refreshWalletAssignments(userId));
+  const statementSummaries = await import("./reconcile.ts").then((m) => m.calculateStatementSummaries(userId));
+  return { reconciled, walletAssigned, statementSummaries };
+}
+
+/// Fetches all items for a user, optionally filtering to a single item_id.
+/// This is the shared query used by both `syncPlaidItemsForUser` and
+/// `syncPlaidItemForUser`.
+async function fetchPlaidItemsForUser(userId: string, itemIdFilter?: string) {
+  let query = supabase
     .from("plaid_items")
     .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: true })
     .order("item_id", { ascending: true });
 
-  if (itemsError) throw new Error(`Could not fetch Plaid items: ${itemsError.message}`);
+  if (itemIdFilter) {
+    query = query.eq("item_id", itemIdFilter);
+  }
 
-  const connectedItems = (items ?? []).filter((item) => item.status === "connected");
+  const { data: items, error: itemsError } = await query;
+  if (itemsError) throw new Error(`Could not fetch Plaid items: ${itemsError.message}`);
+  return items ?? [];
+}
+
+export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncResult> {
+  await createPlaidClient();
+
+  const items = await fetchPlaidItemsForUser(userId);
+
+  const connectedItems = items.filter((item: any) => item.status === "connected");
   const legacyAccessToken = Deno.env.get("PLAID_ACCESS_TOKEN");
   const legacyUserId = Deno.env.get("PLAID_USER_ID");
 
@@ -502,7 +686,7 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
     legacyAccessToken &&
     legacyUserId &&
     legacyUserId === userId &&
-    !connectedItems.some((item) => item.access_token === legacyAccessToken)
+    !connectedItems.some((item: any) => item.access_token === legacyAccessToken)
   ) {
     try {
       const itemResponse = await plaidCall("/item/get", {
@@ -510,7 +694,7 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
       });
       const legacyItem = itemResponse.item;
       const itemId = legacyItem.item_id;
-      const existing = connectedItems.find((item) => item.item_id === itemId);
+      const existing = connectedItems.find((item: any) => item.item_id === itemId);
 
       if (!existing) {
         const instName = (await resolveInstitutionName(null, legacyItem.institution_id)) || "Chase";
@@ -545,7 +729,7 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
   }
 
   const itemErrors: PlaidItemSyncError[] = [];
-  for (const item of (items ?? []) as any[]) {
+  for (const item of items as any[]) {
     const status = item?.status;
     if (status === "connected" || status === "disconnected") continue;
     itemErrors.push({
@@ -573,115 +757,19 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
   let itemsSynced = 0;
 
   for (const item of connectedItems) {
-    // A single stale item (for example one that needs re-authentication) must
-    // not abort the whole sync. Plaid-reported failures are isolated and
-    // reported back to the client; anything else stays fatal.
-    try {
-      let instName = item.institution_name;
-      if ((!instName || isGenericCardName(instName)) && item.institution_id) {
-        const resolved = await resolveInstitutionName(null, item.institution_id);
-        if (resolved) {
-          instName = resolved;
-          item.institution_name = resolved;
-          await supabase
-            .from("plaid_items")
-            .update({ institution_name: resolved })
-            .eq("item_id", item.item_id);
-
-          await supabase
-            .from("plaid_credit_accounts")
-            .update({ institution_name: resolved })
-            .eq("item_id", item.item_id)
-            .in("institution_name", ["Existing linked institution", "Linked institution"]);
-        }
-      }
-
-      let cursor: string | null = item.transactions_cursor ?? null;
-
-      while (true) {
-        const requestOptions: Record<string, unknown> = {
-          access_token: item.access_token,
-          options: { include_original_description: true },
-        };
-        if (cursor) {
-          requestOptions["cursor"] = cursor;
-        }
-
-        const response = await plaidCall("/transactions/sync", requestOptions);
-        const [savedAdded, savedModified, savedRemoved] = await syncPlaidTransactionPage(
-          userId,
-          response.added ?? [],
-          response.modified ?? [],
-          response.removed ?? [],
-        );
-        addedCount += savedAdded;
-        modifiedCount += savedModified;
-        removedCount += savedRemoved;
-        cursor = response.next_cursor;
-        if (!response.has_more) break;
-      }
-
-      await supabase
-        .from("plaid_items")
-        .update({
-          transactions_cursor: cursor,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("item_id", item.item_id)
-        .eq("user_id", userId);
-
-      await syncPlaidCreditAccounts(
-        item.access_token,
-        userId,
-        item.item_id,
-        item.institution_name,
-      );
-
-      const liabilities = await syncPlaidLiabilities(
-        item.access_token,
-        userId,
-        item.item_id,
-        item.institution_name,
-      );
-      liabilityAccountCount += liabilities.accounts;
-      liabilityStatementCount += liabilities.statements;
-      if (liabilities.status !== "synced") {
-        liabilityFailures += 1;
-      }
-
+    const result = await syncPlaidItemOnce(userId, item);
+    if (result.itemError) {
+      // syncPlaidItemOnce already threw for systemic errors, so an itemError
+      // here is always a per-item Plaid failure.
+      itemErrors.push(result.itemError);
+    } else {
+      addedCount += result.added;
+      modifiedCount += result.modified;
+      removedCount += result.removed;
+      liabilityAccountCount += result.liabilityAccounts;
+      liabilityStatementCount += result.liabilityStatements;
+      if (result.liabilityFailed) liabilityFailures += 1;
       itemsSynced += 1;
-    } catch (error: unknown) {
-      const code = plaidErrorCode(error);
-      if (!code) throw error;
-      if (SYSTEMIC_PLAID_ERROR_CODES.has(code)) {
-        // A broken credential or a rejected request is a deployment problem,
-        // not a problem with this one connection. It must stay fatal.
-        throw error;
-      }
-
-      itemErrors.push({
-        item_id: item.item_id,
-        institution_name: item.institution_name ?? null,
-        error_code: code,
-        message: plaidItemSyncMessage(code),
-      });
-
-      if (REAUTH_ERROR_CODES.has(code)) {
-        // "error" is the only status the schema allows for a broken item.
-        const { error: statusError } = await supabase
-          .from("plaid_items")
-          .update({
-            status: "error",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("item_id", item.item_id)
-          .eq("user_id", userId);
-        if (statusError) {
-          console.warn(
-            `Could not mark Plaid item ${item.item_id} as needing re-authentication: ${statusError.message}`,
-          );
-        }
-      }
     }
   }
 
@@ -705,9 +793,7 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
 
   if (syncStateError) throw new Error(`Could not save liability sync state: ${syncStateError.message}`);
 
-  const reconciledCount = await import("./reconcile.ts").then((m) => m.reconcileUserCardEvents(userId));
-  const assignedCount = await import("./reconcile.ts").then((m) => m.refreshWalletAssignments(userId));
-  const summaryCount = await import("./reconcile.ts").then((m) => m.calculateStatementSummaries(userId));
+  const { reconciled, walletAssigned, statementSummaries } = await finalizeSync(userId);
 
   return {
     ok: true,
@@ -717,14 +803,68 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
     added: addedCount,
     modified: modifiedCount,
     removed: removedCount,
-    reconciled: reconciledCount,
-    wallet_assigned: assignedCount,
+    reconciled,
+    wallet_assigned: walletAssigned,
     liabilities: {
       status: liabilityStatus,
       accounts: liabilityAccountCount,
       statements: liabilityStatementCount,
     },
-    statement_summaries: summaryCount,
+    statement_summaries: statementSummaries,
+    user_id: userId,
+  };
+}
+
+/// Syncs a single Plaid item by item_id and re-runs reconciliation/statement
+/// summaries. Used for per-card resync: re-authenticates or re-syncs just one
+/// item after an `ITEM_LOGIN_REQUIRED` error without touching other connections.
+export async function syncPlaidItemForUser(userId: string, itemId: string): Promise<PlaidSyncResult> {
+  await createPlaidClient();
+
+  const items = await fetchPlaidItemsForUser(userId, itemId);
+  if (items.length === 0) {
+    throw new Error(`Plaid item ${itemId} not found for user ${userId}`);
+  }
+
+  const item = items[0];
+  const isUsable = item.status === "connected" || item.status === "disconnected";
+
+  const itemErrors: PlaidItemSyncError[] = [];
+
+  if (!isUsable) {
+    // The item is in an error/reauth state; report it but still attempt the
+    // sync so the caller can see any partial recovery.
+    itemErrors.push({
+      item_id: item.item_id,
+      institution_name: item.institution_name ?? null,
+      error_code: "ITEM_LOGIN_REQUIRED",
+      message: "This connection needs to be re-authenticated.",
+    });
+  }
+
+  const result = await syncPlaidItemOnce(userId, item);
+  if (result.itemError) {
+    itemErrors.push(result.itemError);
+  }
+
+  const { reconciled, walletAssigned, statementSummaries } = await finalizeSync(userId);
+
+  return {
+    ok: true,
+    items_synced: result.itemError ? 0 : 1,
+    items_failed: itemErrors.length,
+    item_errors: itemErrors,
+    added: result.added,
+    modified: result.modified,
+    removed: result.removed,
+    reconciled,
+    wallet_assigned: walletAssigned,
+    liabilities: {
+      status: result.liabilityFailed ? "unavailable" : "synced",
+      accounts: result.liabilityAccounts,
+      statements: result.liabilityStatements,
+    },
+    statement_summaries: statementSummaries,
     user_id: userId,
   };
 }

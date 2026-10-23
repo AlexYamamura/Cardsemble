@@ -58,8 +58,32 @@ class AccountRepositoryImpl implements AccountRepository {
   }
 
   @override
+  Future<Result<String>> createPlaidLinkTokenForItem(String platform, String itemId) async {
+    final result = await _apiClient.safePost(
+      '/api/plaid/items/link-token?platform=${Uri.encodeQueryComponent(platform)}&item_id=${Uri.encodeQueryComponent(itemId)}',
+      const {},
+    );
+    return result.map((payload) {
+      final token = payload['link_token'];
+      if (token is! String || token.isEmpty) {
+        throw const NetworkException('The card service did not return a Plaid Link token.');
+      }
+      return token;
+    });
+  }
+
+  @override
   Future<Result<PlaidSyncOutcome>> syncPlaidConnections() async {
     final result = await _apiClient.safePost('/api/plaid/items/sync', const {});
+    return result.map(PlaidSyncOutcome.fromJson);
+  }
+
+  @override
+  Future<Result<PlaidSyncOutcome>> syncPlaidItem(String itemId) async {
+    final result = await _apiClient.safePost(
+      '/api/plaid/items/sync?item_id=${Uri.encodeQueryComponent(itemId)}',
+      const {},
+    );
     return result.map(PlaidSyncOutcome.fromJson);
   }
 

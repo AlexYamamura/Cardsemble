@@ -4,7 +4,9 @@ import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
 abstract class AccountRepository {
   Future<Result<List<PlaidConnection>>> loadPlaidConnections();
   Future<Result<String>> createPlaidLinkToken(String platform);
+  Future<Result<String>> createPlaidLinkTokenForItem(String platform, String itemId);
   Future<Result<PlaidSyncOutcome>> syncPlaidConnections();
+  Future<Result<PlaidSyncOutcome>> syncPlaidItem(String itemId);
   Future<Result<PlaidSyncOutcome>> exchangePlaidPublicToken({
     required String publicToken,
     required String? institutionId,

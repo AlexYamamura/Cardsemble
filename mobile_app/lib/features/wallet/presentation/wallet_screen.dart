@@ -74,6 +74,41 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
+  /// Re-authenticates a single errored Plaid item via Plaid Link update mode.
+  Future<void> _resyncCard(BuildContext context, WalletCard card) async {
+    final accounts = context.read<AccountsNotifier>();
+    final wallet = context.read<WalletNotifier>();
+    final itemId = card.itemId;
+    if (itemId == null) return;
+
+    final success = await accounts.relinkItem(itemId, card.displayName);
+
+    if (!mounted) return;
+
+    if (success) {
+      // relinkItem updates the AccountsNotifier connections (status flips from
+      // 'error' to 'connected'), but WalletNotifier does not listen to it, so
+      // we must explicitly reload the assembled wallet cards.
+      await wallet.load();
+    }
+
+    if (!mounted) return;
+
+    final error = accounts.error;
+    final warning = accounts.warning;
+    final message = error ??
+        warning ??
+        (!success
+            ? 'Could not re-authenticate the card. Please try again.'
+            : 'Connection restored.');
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -134,6 +169,25 @@ class _WalletScreenState extends State<WalletScreen> {
                     cards: notifier.yourCards.length,
                   ),
                 ),
+                SliverToBoxAdapter(
+                  child: _LayoutToggle(
+                    useCarousel: _useCarousel,
+                    onChanged: _setLayout,
+                  ),
+                ),
+                if (_useCarousel)
+                  _YourCardsCarouselSection(
+                    notifier: notifier,
+                    onCardTap: (card) => _showCardDetails(context, card),
+                    onResync: (card) => _resyncCard(context, card),
+                  )
+                else
+                  _YourCardsSection(
+                    notifier: notifier,
+                    expandedIds: _expandedIds,
+                    onToggleCard: _toggleCard,
+                    onResync: (card) => _resyncCard(context, card),
+                  ),
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
                   sliver: SliverToBoxAdapter(
@@ -144,7 +198,7 @@ class _WalletScreenState extends State<WalletScreen> {
                           Expanded(
                             child: FilledButton(
                               onPressed: () => context.read<AccountsNotifier>().linkAccount(),
-                              child: const Text('Link a card'),
+                              child: const Text('+ Link a card'),
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -171,23 +225,6 @@ class _WalletScreenState extends State<WalletScreen> {
                     ),
                   ),
                 ),
-                SliverToBoxAdapter(
-                  child: _LayoutToggle(
-                    useCarousel: _useCarousel,
-                    onChanged: _setLayout,
-                  ),
-                ),
-                if (_useCarousel)
-                  _YourCardsCarouselSection(
-                    notifier: notifier,
-                    onCardTap: (card) => _showCardDetails(context, card),
-                  )
-                else
-                  _YourCardsSection(
-                    notifier: notifier,
-                    expandedIds: _expandedIds,
-                    onToggleCard: _toggleCard,
-                  ),
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
                   sliver: SliverToBoxAdapter(
@@ -364,64 +401,64 @@ class _WalletSummaryCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Card(
         child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _SectionHeader(
-                  title: 'Your Cards',
-                  subtitle: 'Connected credit card accounts',
-                ),
-                const SizedBox(height: 12),
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 2.6,
-                  children: [
-                    _SummaryMetric(
-                      label: 'Total credit limit',
-                      value: limitText,
-                      subtitle: primary == null || primary.hasLimitData
-                          ? null
-                          : 'Limit not yet synced',
-                    ),
-                    _SummaryMetric(
-                      label: 'Utilization',
-                      value: utilText,
-                      subtitle: primary != null && primary.utilization != null
-                          ? '${primary.cardCount} card(s)'
-                          : null,
-                    ),
-                    _SummaryMetric(
-                      label: 'Number of cards',
-                      value: summary?.cardCount.toString() ?? '0',
-                      subtitle: isFullySynced ? 'All synced' : 'Syncing…',
-                    ),
-                    _SummaryMetric(
-                      label: 'Highest payment',
-                      value: paymentText,
-                      subtitle: payment != null
-                          ? 'Last 30 days · ${payment.date != null ? _formatDate(payment.date!) : '—'}'
-                          : 'No payments found',
-                    ),
-                  ],
-                ),
-                if (captionParts.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    captionParts.join('  •  '),
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _SectionHeader(
+                title: 'Your Cards',
+                subtitle: 'Connected credit card accounts',
+              ),
+              const SizedBox(height: 12),
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 2.6,
+                children: [
+                  _SummaryMetric(
+                    label: 'Total credit limit',
+                    value: limitText,
+                    subtitle: primary == null || primary.hasLimitData
+                        ? null
+                        : 'Limit not yet synced',
+                  ),
+                  _SummaryMetric(
+                    label: 'Utilization',
+                    value: utilText,
+                    subtitle: primary != null && primary.utilization != null
+                        ? '${primary.cardCount} card(s)'
+                        : null,
+                  ),
+                  _SummaryMetric(
+                    label: 'Number of cards',
+                    value: summary?.cardCount.toString() ?? '0',
+                    subtitle: isFullySynced ? 'All synced' : 'Syncing…',
+                  ),
+                  _SummaryMetric(
+                    label: 'Highest payment',
+                    value: paymentText,
+                    subtitle: payment != null
+                        ? 'Last 30 days · ${payment.date != null ? _formatDate(payment.date!) : '—'}'
+                        : 'No payments found',
                   ),
                 ],
+              ),
+              if (captionParts.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  captionParts.join('  •  '),
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
               ],
-            ),
+            ],
           ),
         ),
-      );
+      ),
+    );
   }
 
   String _formatDate(DateTime date) {
@@ -476,11 +513,13 @@ class _YourCardsSection extends StatelessWidget {
     required this.notifier,
     required this.expandedIds,
     required this.onToggleCard,
+    required this.onResync,
   });
 
   final WalletNotifier notifier;
   final Set<String> expandedIds;
   final ValueChanged<String> onToggleCard;
+  final Future<void> Function(WalletCard) onResync;
 
   @override
   Widget build(BuildContext context) {
@@ -508,6 +547,7 @@ class _YourCardsSection extends StatelessWidget {
                   mode: WalletCardPanelMode.expandable,
                   expanded: expandedIds.contains(card.id),
                   onTap: () => onToggleCard(card.id),
+                  onResync: card.needsRelink ? () => onResync(card) : null,
                 ),
               ),
             ),
@@ -523,10 +563,12 @@ class _YourCardsCarouselSection extends StatelessWidget {
   const _YourCardsCarouselSection({
     required this.notifier,
     required this.onCardTap,
+    required this.onResync,
   });
 
   final WalletNotifier notifier;
   final ValueChanged<WalletCard> onCardTap;
+  final Future<void> Function(WalletCard) onResync;
 
   @override
   Widget build(BuildContext context) {
@@ -559,6 +601,7 @@ class _YourCardsCarouselSection extends StatelessWidget {
                         card: card,
                         mode: WalletCardPanelMode.collapsed,
                         onTap: () => onCardTap(card),
+onResync: card.needsRelink ? () async => onResync(card) : null,
                       ),
                     ),
                   ),
@@ -591,7 +634,7 @@ class _HouseholdCardsSection extends StatelessWidget {
         child: _EmptyState(
           icon: Icons.people_outlined,
           title: 'No household cards shared yet',
-          body: 'Cards owned by others in your household will appear here once household accounts are connected.',
+          body: 'Cards owned by others in your household will appear here once household account data is available.',
         ),
       );
     }
@@ -648,7 +691,7 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             title,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.charcoal),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.charcoal),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 6),
@@ -664,4 +707,4 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// Height of one collapsed card inside the horizontal carousel.
-const double _carouselItemHeight = 230;
+const double _carouselItemHeight = 240;

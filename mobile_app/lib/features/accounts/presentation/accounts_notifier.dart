@@ -166,6 +166,105 @@ class AccountsNotifier extends ChangeNotifier {
     }
   }
 
+  /// Re-authenticates a single errored Plaid item via Plaid Link in update mode.
+  /// Opens the Link flow with the item's existing access token so the user can
+  /// sign in again, then exchanges the returned public token and re-syncs just
+  /// this item.
+  Future<bool> relinkItem(String itemId, String institutionName) async {
+    if (_isLinking) {
+      _error = 'A card link is already in progress.';
+      notifyListeners();
+      return false;
+    }
+    _isLinking = true;
+    _error = null;
+    _warning = null;
+    _lastLinkedInstitutionName = institutionName;
+    notifyListeners();
+
+    try {
+      final result = await _accountRepository.createPlaidLinkTokenForItem('android', itemId);
+      final token = result.fold<String?>(
+        (token) => token,
+        (failure) {
+          _error = failure.message;
+          notifyListeners();
+          return null;
+        },
+      );
+      if (token == null) return false;
+
+      final linkResult = await _linkLauncher.launch(linkToken: token);
+
+      if (!linkResult.isSuccess) {
+        _error = linkResult.message ?? 'Could not re-authenticate the card.';
+        notifyListeners();
+        return false;
+      }
+
+      final publicToken = linkResult.publicToken;
+      if (publicToken == null) {
+        _error = 'Could not re-authenticate the card.';
+        notifyListeners();
+        return false;
+      }
+
+      return await exchangePublicToken(
+        publicToken: publicToken,
+        institutionId: linkResult.institutionId,
+        institutionName: linkResult.institutionName ?? institutionName,
+      );
+    } finally {
+      _isLinking = false;
+      notifyListeners();
+    }
+  }
+
+  /// Re-syncs a single Plaid item without opening Plaid Link. Used when the
+  /// connection is still valid but needs a manual refresh.
+  Future<bool> syncItem(String itemId) async {
+    _error = null;
+    _warning = null;
+    notifyListeners();
+
+    try {
+      final result = await _accountRepository.syncPlaidItem(itemId);
+      return await result.fold(
+        (outcome) async {
+          final itemWarning = outcome.hasWarnings
+              ? _describeItemErrors(outcome.itemErrors)
+              : null;
+          await loadConnections();
+          final reloadError = _error;
+          await loadStatementCycles();
+          await loadWalletSummary();
+          final messages = <String>[];
+          if (reloadError != null) {
+            messages.add('Sync finished, but the account list could not be reloaded: $reloadError');
+          }
+          if (itemWarning != null) {
+            messages.add(itemWarning);
+          }
+          _error = null;
+          _warning = messages.isEmpty ? null : _joinSentences(messages);
+          notifyListeners();
+          return true;
+        },
+        (failure) {
+          _error = failure.message;
+          _warning = null;
+          notifyListeners();
+          return false;
+        },
+      );
+    } catch (e) {
+      _error = e.toString();
+      _warning = null;
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<bool> syncConnections() async {
     _error = null;
     _warning = null;

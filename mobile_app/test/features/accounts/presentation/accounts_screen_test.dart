@@ -25,7 +25,17 @@ class _FakeAccountRepository implements AccountRepository {
   }
 
   @override
+  Future<Result<String>> createPlaidLinkTokenForItem(String platform, String itemId) async {
+    return const Success('link-token-1');
+  }
+
+  @override
   Future<Result<PlaidSyncOutcome>> syncPlaidConnections() async {
+    return const Success(PlaidSyncOutcome());
+  }
+
+  @override
+  Future<Result<PlaidSyncOutcome>> syncPlaidItem(String itemId) async {
     return const Success(PlaidSyncOutcome());
   }
 

@@ -31,12 +31,14 @@ class WalletCardPanel extends StatelessWidget {
     this.mode = WalletCardPanelMode.expandable,
     this.expanded = false,
     this.onTap,
+    this.onResync,
   });
 
   final WalletCard card;
   final WalletCardPanelMode mode;
   final bool expanded;
   final VoidCallback? onTap;
+  final VoidCallback? onResync;
 
   @override
   Widget build(BuildContext context) {
@@ -59,23 +61,37 @@ class WalletCardPanel extends StatelessWidget {
               color: color,
               expanded: expanded,
               showToggle: showToggle,
+              onResync: onResync,
             ),
-            const Divider(height: 1),
-            _MonthlyInfo(card: card, color: color),
-            if (card.catalogCard != null) ...[
-              const SizedBox(height: 12),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeInOut,
-                child: expanded && showToggle
-                    ? CardDetails(card: card, color: color)
-                    : const SizedBox.shrink(),
+            // Wrap the body in a scrollable column so cards with full data
+            // (balance, utilization, progress bar) never overflow the fixed
+            // carousel height.
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                  const Divider(height: 1),
+                  _MonthlyInfo(card: card, color: color),
+                  if (card.catalogCard != null) ...[
+                    const SizedBox(height: 12),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeInOut,
+                      child: expanded && showToggle
+                          ? CardDetails(card: card, color: color)
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                  ],
+                ),
               ),
-            ],
+            ),
           ],
         ),
       ),
-   );
+    );
   }
 }
 
@@ -85,16 +101,19 @@ class _CardHeader extends StatelessWidget {
     required this.color,
     required this.expanded,
     required this.showToggle,
+    this.onResync,
   });
 
   final WalletCard card;
   final Color color;
   final bool expanded;
   final bool showToggle;
+  final VoidCallback? onResync;
 
   @override
   Widget build(BuildContext context) {
     final onColor = WalletCardColors.onColor(color);
+    final needsRelink = card.needsRelink;
     return Container(
       width: double.infinity,
       color: color,
@@ -117,6 +136,23 @@ class _CardHeader extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (needsRelink && onResync != null)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: InkWell(
+                    onTap: onResync,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: onColor.withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.refresh, size: 18, color: Colors.white),
+                    ),
+                  ),
+                ),
               if (showToggle)
                 Icon(
                   expanded ? Icons.expand_less : Icons.expand_more,
@@ -127,6 +163,33 @@ class _CardHeader extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           _CardSubtitle(card: card),
+          // In expandable mode, show the reconnection message and button below
+          // the subtitle. In collapsed/carousel mode the circular refresh icon
+          // in the header is sufficient and avoids overflow.
+          if (needsRelink && showToggle) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Connection needs reconnection',
+              style: TextStyle(
+                fontSize: 12,
+                color: onColor.withValues(alpha: 0.8),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: onResync,
+                style: TextButton.styleFrom(
+                  foregroundColor: onColor,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                ),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Fix connection', style: TextStyle(fontSize: 12)),
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -161,6 +161,7 @@ class WalletNotifier extends ChangeNotifier {
         creditLimitCents: card.creditLimitCents,
         paymentDueDate: card.paymentDueDate,
         autopayEnabled: card.autopayEnabled,
+        itemId: card.itemId,
         benefits: card.benefits.map((b) {
           final used = usedMap?[b.id] ?? b.used;
           return b.copyWith(used: used);
@@ -222,6 +223,7 @@ class WalletNotifier extends ChangeNotifier {
         creditLimitCents: statementAccount?.creditLimitCents,
         paymentDueDate: null,
         autopayEnabled: null,
+        itemId: connection.itemId,
         benefits: benefits,
         welcomeBonus: welcomeBonus,
         catalogMatchStatus:
@@ -384,6 +386,7 @@ class WalletNotifier extends ChangeNotifier {
         creditLimitCents: card.creditLimitCents,
         paymentDueDate: card.paymentDueDate,
         autopayEnabled: card.autopayEnabled,
+        itemId: card.itemId,
         benefits: card.benefits.map((b) {
           if (b.id == benefitId) {
             return b.copyWith(used: used, usedAt: used ? DateTime.now() : null);
@@ -422,8 +425,9 @@ class WalletNotifier extends ChangeNotifier {
         currency: card.currency,
         creditLimitCents: card.creditLimitCents,
         paymentDueDate: card.paymentDueDate,
-        autopayEnabled: card.autopayEnabled,
-        benefits: card.benefits,
+         autopayEnabled: card.autopayEnabled,
+         itemId: card.itemId,
+         benefits: card.benefits,
           welcomeBonus: WalletBonus(
             amountUnits: bonus.amountUnits,
             currency: bonus.currency,

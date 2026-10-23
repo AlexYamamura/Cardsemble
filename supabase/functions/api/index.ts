@@ -12,6 +12,7 @@ import {
   createLiabilitiesLinkToken,
   exchangePublicToken,
   syncPlaidItemsForUser,
+  syncPlaidItemForUser,
   runPlaidSync,
 } from "../_shared/plaid.ts";
 import {
@@ -461,7 +462,26 @@ Deno.serve(async (req) => {
         throw new ApiError(403, "A Supabase session is required to link a bank");
       }
       const platform = (url.searchParams.get("platform") || "web") as "android" | "ios" | "web";
-      const linkToken = await createPlaidLinkToken(auth.userId, platform);
+      const itemId = url.searchParams.get("item_id");
+      let accessToken: string | undefined;
+
+      if (itemId) {
+        // Update mode: look up the item's access token so Plaid Link can
+        // re-authenticate without creating a new item.
+        const { data: itemRows, error: itemError } = await supabase
+          .from("plaid_items")
+          .select("access_token")
+          .eq("item_id", itemId)
+          .eq("user_id", auth.userId)
+          .single();
+
+        if (itemError || !itemRows?.access_token) {
+          throw new ApiError(404, `Plaid item ${itemId} not found`);
+        }
+        accessToken = itemRows.access_token;
+      }
+
+      const linkToken = await createPlaidLinkToken(auth.userId, platform, accessToken);
       return jsonResponse({ link_token: linkToken });
     }
 
@@ -480,7 +500,10 @@ Deno.serve(async (req) => {
       if (auth.userId === null) {
         throw new ApiError(403, "A user-linked device key or Supabase session is required");
       }
-      const result = await syncPlaidItemsForUser(auth.userId);
+      const itemId = url.searchParams.get("item_id");
+      const result = itemId
+        ? await syncPlaidItemForUser(auth.userId, itemId)
+        : await syncPlaidItemsForUser(auth.userId);
       return jsonResponse(result);
     }
 

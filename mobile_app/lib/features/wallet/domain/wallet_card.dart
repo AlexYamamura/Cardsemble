@@ -40,6 +40,7 @@ class WalletCard {
     this.creditLimitCents,
     this.paymentDueDate,
     this.autopayEnabled,
+    this.itemId,
     this.benefits = const [],
     this.welcomeBonus,
     this.catalogMatchStatus = CatalogMatchStatus.unmatched,
@@ -68,6 +69,10 @@ class WalletCard {
   /// Whether autopay is enabled for this card. Null means unknown (not yet
   /// served by the backend); distinct from a known "off" state.
   final bool? autopayEnabled;
+
+  /// The Plaid item_id for this card's connection. Used to trigger a per-item
+  /// resync or re-authentication via Plaid Link in update mode.
+  final String? itemId;
 
   /// Catalog benefits annotated with locally-tracked usage state.
   final List<WalletBenefit> benefits;
@@ -104,6 +109,9 @@ class WalletCard {
     if (m == null || m.length < 4) return null;
     return m.substring(m.length - 4);
   }
+
+  /// Whether this card's underlying Plaid connection needs re-authentication.
+  bool get needsRelink => status == 'error' || status == 'reauth';
 }
 
 /// One catalog benefit with its locally-tracked usage state.
