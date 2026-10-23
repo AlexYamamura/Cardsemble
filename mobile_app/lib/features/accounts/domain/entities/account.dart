@@ -56,11 +56,19 @@ class StatementAccount {
   /// ISO currency code for the monetary fields above.
   final String? currency;
 
+  /// Converts a dollar value (as returned by the backend from Plaid's
+  /// `balances.current` / `balances.limit` fields) into minor currency
+  /// units (cents). The backend stores these as `numeric(14,2)` dollar
+  /// amounts, so we multiply by 100 to get cents.
   static int? _centsFrom(dynamic value) {
     if (value == null) return null;
-    if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value);
-    return null;
+    try {
+      final d = (value is num) ? value.toDouble() : double.parse(value as String);
+      if (!d.isFinite) return null;
+      return (d * 100).round();
+    } catch (_) {
+      return null;
+    }
   }
 
   factory StatementAccount.fromJson(Map<String, dynamic> json) {

@@ -351,7 +351,7 @@ class _ResearchScreenState extends State<ResearchScreen> {
                           const SizedBox(height: 12),
                           Text(
                             'Select a card from the dropdown above',
-                            style: TextStyle(color: Colors.grey.shade600),
+                            style: TextStyle(color: AppColors.sand),
                           ),
                         ],
                       ),
