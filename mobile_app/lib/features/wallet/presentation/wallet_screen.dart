@@ -11,6 +11,7 @@ import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
 import 'package:cardsemble/features/wallet/presentation/wallet_card_colors.dart';
 import 'package:cardsemble/features/wallet/presentation/wallet_notifier.dart';
 import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_panel.dart';
+import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_carousel.dart';
 
 /// Wallet landing tab.
 ///
@@ -592,28 +593,11 @@ class _YourCardsCarouselSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            height: _carouselItemHeight,
-            child: PageView.builder(
-              itemCount: cards.length,
-              itemBuilder: (_, index) {
-                final card = cards[index];
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 420),
-                      child: WalletCardPanel(
-                        card: card,
-                        mode: WalletCardPanelMode.collapsed,
-                        onTap: () => onCardTap(card),
-onResync: card.needsRelink ? () async => onResync(card) : null,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
+          WalletCardCarousel(
+            cards: cards,
+            onCardTap: onCardTap,
+            onResync: onResync,
+            carouselHeight: _carouselItemHeight,
           ),
         ],
       ),

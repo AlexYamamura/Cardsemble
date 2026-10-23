@@ -169,7 +169,7 @@ class WalletBenefit {
       'GBP' => '£',
       _ => '',
     };
-    return '${currencySymbol}${value.toStringAsFixed(2)}';
+    return '$currencySymbol${value.toStringAsFixed(2)}';
   }
 
   /// Whether this benefit has expired (past its expiry date).

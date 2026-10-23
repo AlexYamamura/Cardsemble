@@ -229,9 +229,10 @@ class _CaptureSettingsScreenState extends State<CaptureSettingsScreen> {
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: () async {
+                final navigator = Navigator.of(context);
                 await _markSettingsReviewed();
                 if (context.mounted) {
-                  Navigator.of(context).pop();
+                  navigator.pop();
                 }
               },
               icon: const Icon(Icons.check),
