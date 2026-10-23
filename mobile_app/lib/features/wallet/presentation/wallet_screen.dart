@@ -64,12 +64,16 @@ class _WalletScreenState extends State<WalletScreen> {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      enableDrag: true,
+      showDragHandle: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
+      // showDragHandle injects a 48px-tall handle above the builder content,
+      // so we drop the top padding to avoid growing the sheet visually.
       builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
         child: CardDetails(card: card, color: color, scrollable: true),
       ),
     );
