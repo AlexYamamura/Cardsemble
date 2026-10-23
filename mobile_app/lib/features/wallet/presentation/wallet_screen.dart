@@ -343,12 +343,12 @@ class _SectionHeader extends StatelessWidget {
       children: [
         Text(
           title,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.charcoal),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.charcoal),
         ),
         const SizedBox(height: 2),
         Text(
           subtitle,
-          style: const TextStyle(fontSize: 12, color: Colors.grey),
+          style: const TextStyle(fontSize: 14, color: Colors.grey),
         ),
       ],
     );
@@ -415,9 +415,9 @@ class _WalletSummaryCard extends StatelessWidget {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisCount: 2,
-                mainAxisSpacing: 12,
                 crossAxisSpacing: 12,
-                childAspectRatio: 2.6,
+                mainAxisSpacing: 12,
+                childAspectRatio: 2.0,
                 children: [
                   _SummaryMetric(
                     label: 'Total credit limit',
@@ -449,10 +449,10 @@ class _WalletSummaryCard extends StatelessWidget {
               ),
               if (captionParts.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text(
-                  captionParts.join('  •  '),
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
+                  Text(
+                    captionParts.join('  •  '),
+                    style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
               ],
             ],
           ),
@@ -483,26 +483,32 @@ class _SummaryMetric extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 10, color: Colors.grey),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: AppColors.charcoal,
-          ),
-        ),
-        if (subtitle != null) ...[
-          const SizedBox(height: 2),
           Text(
-            subtitle!,
-            style: const TextStyle(fontSize: 10, color: Colors.grey),
+            label,
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-        ],
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: AppColors.charcoal,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              subtitle!,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
       ],
     );
   }
@@ -707,4 +713,4 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// Height of one collapsed card inside the horizontal carousel.
-const double _carouselItemHeight = 240;
+const double _carouselItemHeight = 264;

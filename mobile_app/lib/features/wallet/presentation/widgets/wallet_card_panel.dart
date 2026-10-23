@@ -63,15 +63,11 @@ class WalletCardPanel extends StatelessWidget {
               showToggle: showToggle,
               onResync: onResync,
             ),
-            // Wrap the body in a scrollable column so cards with full data
-            // (balance, utilization, progress bar) never overflow the fixed
-            // carousel height.
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+            ClipRect(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   const Divider(height: 1),
                   _MonthlyInfo(card: card, color: color),
                   if (card.catalogCard != null) ...[
@@ -84,8 +80,7 @@ class WalletCardPanel extends StatelessWidget {
                           : const SizedBox.shrink(),
                     ),
                   ],
-                  ],
-                ),
+                ],
               ),
             ),
           ],
@@ -126,12 +121,12 @@ class _CardHeader extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  card.displayName,
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: onColor,
-                  ),
+                card.displayName,
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w700,
+                  color: onColor,
+                ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -212,7 +207,7 @@ class _CardSubtitle extends StatelessWidget {
     if (parts.isEmpty) return const SizedBox.shrink();
     return Text(
       parts.join('  ·  '),
-      style: const TextStyle(fontSize: 13, color: Colors.white70),
+      style: const TextStyle(fontSize: 14, color: Colors.white70),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );
@@ -309,13 +304,13 @@ class _MetricTile extends StatelessWidget {
       children: [
         Text(
           label,
-          style: const TextStyle(fontSize: 11, color: Colors.grey),
+          style: const TextStyle(fontSize: 12, color: Colors.grey),
         ),
         const SizedBox(height: 4),
         Text(
           value,
           style: TextStyle(
-            fontSize: 14,
+            fontSize: 16,
             fontWeight: FontWeight.w600,
             color: color,
           ),
@@ -349,7 +344,7 @@ class _AutopayTile extends StatelessWidget {
       children: [
         const Text(
           'Autopay',
-          style: TextStyle(fontSize: 11, color: Colors.grey),
+          style: TextStyle(fontSize: 12, color: Colors.grey),
         ),
         const SizedBox(height: 4),
         Row(
@@ -364,7 +359,7 @@ class _AutopayTile extends StatelessWidget {
             Text(
               value,
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 16,
                 fontWeight: FontWeight.w600,
                 color: active ? color : dotColor,
               ),
