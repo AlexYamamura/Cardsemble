@@ -154,6 +154,13 @@ class _WalletScreenState extends State<WalletScreen> {
       ),
       body: Consumer<WalletNotifier>(
         builder: (context, notifier, child) {
+          // Show a loading spinner on first load, before any cards have been
+          // assembled from the async data sources. Once `load()` has completed
+          // at least once, fall back to the normal UI (including the empty
+          // state) so pull-to-refresh and retry still render content.
+          if (notifier.isLoading && notifier.yourCards.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
+          }
           final matchedCards = notifier.yourCards
               .where((card) => card.catalogCard != null)
               .map((card) => card.catalogCard!)
