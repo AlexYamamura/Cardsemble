@@ -262,9 +262,6 @@ class _MonthlyInfo extends StatelessWidget {
                   color: color,
                 ),
               ),
-              Expanded(
-                child: _AutopayTile(card: card, color: color),
-              ),
             ],
           ),
           if (card.hasCreditLimit) ...[
@@ -314,57 +311,6 @@ class _MetricTile extends StatelessWidget {
             fontWeight: FontWeight.w600,
             color: color,
           ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Autopay status tile: an 8px colored dot (green when on, grey otherwise)
-/// followed by "On", "Off", or "—" when the backend has not reported a state.
-class _AutopayTile extends StatelessWidget {
-  const _AutopayTile({required this.card, required this.color});
-
-  final WalletCard card;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = card.autopayEnabled;
-    final active = enabled == true;
-    final dotColor = active ? AppColors.success : AppColors.greyDisabled;
-    final value = switch (enabled) {
-      true => 'On',
-      false => 'Off',
-      null => '—',
-    };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Text(
-          'Autopay',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
-        ),
-        const SizedBox(height: 4),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: active ? color : dotColor,
-              ),
-            ),
-          ],
         ),
       ],
     );

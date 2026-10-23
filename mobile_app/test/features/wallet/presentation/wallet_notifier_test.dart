@@ -46,20 +46,21 @@ void main() {
         PlaidConnection(itemId: 'item-amex', institutionName: 'American Express', status: 'connected'),
         PlaidConnection(itemId: 'item-local', institutionName: 'Some Local Bank', status: 'connected'),
       ]),
-      statementCyclesResult: const Success(
+      statementCyclesResult: Success(
         StatementCycleSummary(
           status: 'READY',
           total: null,
           currency: null,
           accountCount: 2,
           accounts: <StatementAccount>[
-            StatementAccount(
-              accountId: 'acct-chase',
-              accountName: 'Chase Card',
-              mask: '1234',
-              itemId: 'item-chase',
-              institutionName: 'Chase',
-            ),
+          StatementAccount(
+            accountId: 'acct-chase',
+            accountName: 'Chase Card',
+            mask: '1234',
+            itemId: 'item-chase',
+            institutionName: 'Chase',
+            nextPaymentDueDate: DateTime(2026, 11, 15),
+          ),
             StatementAccount(
               accountId: 'acct-amex',
               accountName: 'Amex Card',
@@ -148,6 +149,19 @@ void main() {
     expect(local.catalogCard, isNull);
     expect(local.benefits, isEmpty);
     expect(local.welcomeBonus, isNull);
+  });
+
+  test('payment due date is surfaced from the statement account', () async {
+    await notifier.load();
+
+    final chase =
+        notifier.yourCards.firstWhere((c) => c.id == 'acct-chase');
+    expect(chase.paymentDueDate, DateTime(2026, 11, 15));
+    expect(chase.hasPaymentDue, isTrue);
+
+    final amex = notifier.yourCards.firstWhere((c) => c.id == 'acct-amex');
+    expect(amex.paymentDueDate, isNull);
+    expect(amex.hasPaymentDue, isFalse);
   });
 
   test('household cards are empty until backend data exists', () async {

@@ -343,6 +343,7 @@ create table if not exists public.plaid_credit_accounts (
     iso_currency_code text,
     credit_limit numeric(14, 2),
     current_balance numeric(14, 2),
+    next_payment_due_date date,
     updated_at timestamptz not null default now(),
     unique (user_id, account_id)
 );
@@ -359,6 +360,8 @@ alter table public.plaid_credit_accounts
     add column if not exists credit_limit numeric(14, 2);
 alter table public.plaid_credit_accounts
     add column if not exists current_balance numeric(14, 2);
+alter table public.plaid_credit_accounts
+    add column if not exists next_payment_due_date date;
 update public.plaid_credit_accounts
 set account_type = 'credit'
 where account_type is null;

@@ -35,6 +35,7 @@ class StatementAccount {
     this.creditLimitCents,
     this.currentBalanceCents,
     this.currency,
+    this.nextPaymentDueDate,
   });
 
   final String accountId;
@@ -55,6 +56,11 @@ class StatementAccount {
 
   /// ISO currency code for the monetary fields above.
   final String? currency;
+
+  /// Next payment due date from Plaid's `/liabilities/get` credit object, or
+  /// null when a liability sync has not populated it. Surfaced on the Wallet
+  /// tab's per-card "Payment due" metric.
+  final DateTime? nextPaymentDueDate;
 
   /// Converts a dollar value (as returned by the backend from Plaid's
   /// `balances.current` / `balances.limit` fields) into minor currency
@@ -85,6 +91,9 @@ class StatementAccount {
       creditLimitCents: _centsFrom(json['credit_limit']),
       currentBalanceCents: _centsFrom(json['current_balance']),
       currency: json['iso_currency_code'] as String? ?? json['currency'] as String?,
+      nextPaymentDueDate: json['next_payment_due_date'] is String
+          ? DateTime.tryParse(json['next_payment_due_date'] as String)
+          : null,
     );
   }
 
@@ -102,6 +111,7 @@ class StatementAccount {
       'credit_limit': creditLimitCents == null ? null : creditLimitCents! / 100,
       'current_balance': currentBalanceCents == null ? null : currentBalanceCents! / 100,
       'iso_currency_code': currency,
+      'next_payment_due_date': nextPaymentDueDate?.toIso8601String().split('T').first,
     };
   }
 }

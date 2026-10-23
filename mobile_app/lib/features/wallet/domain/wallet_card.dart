@@ -39,7 +39,6 @@ class WalletCard {
     this.currency,
     this.creditLimitCents,
     this.paymentDueDate,
-    this.autopayEnabled,
     this.itemId,
     this.benefits = const [],
     this.welcomeBonus,
@@ -65,10 +64,6 @@ class WalletCard {
 
   /// Payment due date for the current statement cycle, null when unavailable.
   final DateTime? paymentDueDate;
-
-  /// Whether autopay is enabled for this card. Null means unknown (not yet
-  /// served by the backend); distinct from a known "off" state.
-  final bool? autopayEnabled;
 
   /// The Plaid item_id for this card's connection. Used to trigger a per-item
   /// resync or re-authentication via Plaid Link in update mode.
@@ -97,9 +92,6 @@ class WalletCard {
 
   /// Whether a payment due date is available.
   bool get hasPaymentDue => paymentDueDate != null;
-
-  /// Whether an autopay state is known (true or false). Null = unknown.
-  bool get hasAutopay => autopayEnabled != null;
 
   bool get isCatalogMatched => catalogMatchStatus == CatalogMatchStatus.matched;
 

@@ -160,7 +160,6 @@ class WalletNotifier extends ChangeNotifier {
         currency: card.currency,
         creditLimitCents: card.creditLimitCents,
         paymentDueDate: card.paymentDueDate,
-        autopayEnabled: card.autopayEnabled,
         itemId: card.itemId,
         benefits: card.benefits.map((b) {
           final used = usedMap?[b.id] ?? b.used;
@@ -214,15 +213,15 @@ class WalletNotifier extends ChangeNotifier {
         status: connection.status,
         catalogCard: catalogCard,
         statementAccount: statementAccount,
-        // Per-account balance, credit limit, and currency come from the synced
-        // Plaid credit account (fetched via statement cycles). They are null
-        // until a sync has populated plaid_credit_accounts, in which case the
-        // panel renders a "—" placeholder.
+        // Per-account balance, credit limit, currency, and payment due date
+        // come from the synced Plaid credit account (fetched via statement
+        // cycles). They are null until a sync has populated
+        // plaid_credit_accounts, in which case the panel renders a "—"
+        // placeholder.
         balanceCents: statementAccount?.currentBalanceCents,
         currency: statementAccount?.currency,
         creditLimitCents: statementAccount?.creditLimitCents,
-        paymentDueDate: null,
-        autopayEnabled: null,
+        paymentDueDate: statementAccount?.nextPaymentDueDate,
         itemId: connection.itemId,
         benefits: benefits,
         welcomeBonus: welcomeBonus,
@@ -385,7 +384,6 @@ class WalletNotifier extends ChangeNotifier {
         currency: card.currency,
         creditLimitCents: card.creditLimitCents,
         paymentDueDate: card.paymentDueDate,
-        autopayEnabled: card.autopayEnabled,
         itemId: card.itemId,
         benefits: card.benefits.map((b) {
           if (b.id == benefitId) {
@@ -425,9 +423,8 @@ class WalletNotifier extends ChangeNotifier {
         currency: card.currency,
         creditLimitCents: card.creditLimitCents,
         paymentDueDate: card.paymentDueDate,
-         autopayEnabled: card.autopayEnabled,
-         itemId: card.itemId,
-         benefits: card.benefits,
+        itemId: card.itemId,
+        benefits: card.benefits,
           welcomeBonus: WalletBonus(
             amountUnits: bonus.amountUnits,
             currency: bonus.currency,

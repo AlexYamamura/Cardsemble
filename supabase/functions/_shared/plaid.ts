@@ -412,20 +412,23 @@ export async function syncPlaidLiabilities(
 
   // Plaid's /accounts/get does not always return balances.limit for credit
   // accounts (e.g. some institutions omit the credit limit). The /liabilities/get
-  // endpoint returns credit_limit and current_balance per account in the
-  // liabilities.credit array. Update the stored balance/limit columns using a
-  // targeted update to preserve all other columns (display_name, etc.).
+  // endpoint returns credit_limit and current_balance, as well as
+  // next_payment_due_date, per account in the liabilities.credit array. Update
+  // the stored columns using a targeted update to preserve all other columns
+  // (display_name, etc.).
   for (const liability of creditLiabilities) {
     const accountId = liability.account_id;
     if (accountId == null) continue;
     const creditLimit = liability.credit_limit;
     const currentBalance = liability.current_balance;
-    if (creditLimit == null && currentBalance == null) continue;
+    const nextPaymentDueDate = liability.next_payment_due_date;
+    if (creditLimit == null && currentBalance == null && nextPaymentDueDate == null) continue;
     const { error: updateError } = await supabase
       .from("plaid_credit_accounts")
       .update({
         credit_limit: creditLimit ?? null,
         current_balance: currentBalance ?? null,
+        next_payment_due_date: nextPaymentDueDate ?? null,
         updated_at: new Date().toISOString(),
       })
       .eq("account_id", accountId)
