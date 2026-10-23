@@ -157,6 +157,8 @@ class WalletNotifier extends ChangeNotifier {
         balanceCents: card.balanceCents,
         currency: card.currency,
         creditLimitCents: card.creditLimitCents,
+        paymentDueDate: card.paymentDueDate,
+        autopayEnabled: card.autopayEnabled,
         benefits: card.benefits.map((b) {
           final used = usedMap?[b.id] ?? b.used;
           return b.copyWith(used: used);
@@ -209,11 +211,13 @@ class WalletNotifier extends ChangeNotifier {
         status: connection.status,
         catalogCard: catalogCard,
         statementAccount: statementAccount,
-        // Per-account balance and credit limit are not exposed by the backend
-        // yet; left null so the panel renders a placeholder.
+        // Per-account balance, credit limit, payment due date, and autopay are
+        // not exposed by the backend yet; left null so the panel renders placeholders.
         balanceCents: null,
         currency: null,
         creditLimitCents: null,
+        paymentDueDate: null,
+        autopayEnabled: null,
         benefits: benefits,
         welcomeBonus: welcomeBonus,
         catalogMatchStatus:
@@ -374,6 +378,8 @@ class WalletNotifier extends ChangeNotifier {
         balanceCents: card.balanceCents,
         currency: card.currency,
         creditLimitCents: card.creditLimitCents,
+        paymentDueDate: card.paymentDueDate,
+        autopayEnabled: card.autopayEnabled,
         benefits: card.benefits.map((b) {
           if (b.id == benefitId) {
             return b.copyWith(used: used, usedAt: used ? DateTime.now() : null);
@@ -408,10 +414,12 @@ class WalletNotifier extends ChangeNotifier {
           status: card.status,
           catalogCard: card.catalogCard,
           statementAccount: card.statementAccount,
-          balanceCents: card.balanceCents,
-          currency: card.currency,
-          creditLimitCents: card.creditLimitCents,
-          benefits: card.benefits,
+        balanceCents: card.balanceCents,
+        currency: card.currency,
+        creditLimitCents: card.creditLimitCents,
+        paymentDueDate: card.paymentDueDate,
+        autopayEnabled: card.autopayEnabled,
+        benefits: card.benefits,
           welcomeBonus: WalletBonus(
             amountUnits: bonus.amountUnits,
             currency: bonus.currency,

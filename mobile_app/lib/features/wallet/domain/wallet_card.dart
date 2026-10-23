@@ -39,6 +39,8 @@ class WalletCard {
     this.balanceCents,
     this.currency,
     this.creditLimitCents,
+    this.paymentDueDate,
+    this.autopayEnabled,
     this.benefits = const [],
     this.welcomeBonus,
     this.catalogMatchStatus = CatalogMatchStatus.unmatched,
@@ -61,6 +63,13 @@ class WalletCard {
   /// Credit limit in minor currency units, null when unavailable.
   final int? creditLimitCents;
 
+  /// Payment due date for the current statement cycle, null when unavailable.
+  final DateTime? paymentDueDate;
+
+  /// Whether autopay is enabled for this card. Null means unknown (not yet
+  /// served by the backend); distinct from a known "off" state.
+  final bool? autopayEnabled;
+
   /// Catalog benefits annotated with locally-tracked usage state.
   final List<WalletBenefit> benefits;
 
@@ -81,6 +90,12 @@ class WalletCard {
 
   bool get hasBalance => balanceCents != null;
   bool get hasCreditLimit => creditLimitCents != null;
+
+  /// Whether a payment due date is available.
+  bool get hasPaymentDue => paymentDueDate != null;
+
+  /// Whether an autopay state is known (true or false). Null = unknown.
+  bool get hasAutopay => autopayEnabled != null;
 
   bool get isCatalogMatched => catalogMatchStatus == CatalogMatchStatus.matched;
 
