@@ -5,11 +5,10 @@
 // from the card catalog (the same source used by the Research tab), plus
 // household cards owned by other household members.
 //
-// Per-account balances, credit limits, benefit usage, and welcome-bonus spend
-// are not yet exposed by the backend, so those fields are nullable and the UI
-// renders a "—" placeholder until the data exists. Benefit usage and bonus
-// spend are tracked locally so the landing page is functional today and can be
-// migrated to backend tables later.
+// Per-account balance, credit limit, and currency are populated from the synced
+// Plaid credit account (statement cycles) when available; they remain nullable
+// until a sync runs. Benefit usage and welcome-bonus spend are tracked locally
+// in SharedPreferences and can be migrated to backend tables later.
 import 'package:cardsemble/features/accounts/domain/entities/account.dart';
 import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
 

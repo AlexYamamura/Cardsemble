@@ -32,6 +32,9 @@ class StatementAccount {
     this.subtype,
     this.itemId,
     this.institutionName,
+    this.creditLimitCents,
+    this.currentBalanceCents,
+    this.currency,
   });
 
   final String accountId;
@@ -44,6 +47,22 @@ class StatementAccount {
   final String? itemId;
   final String? institutionName;
 
+  /// Credit limit in minor currency units, null when not yet synced from Plaid.
+  final int? creditLimitCents;
+
+  /// Current balance in minor currency units, null when not yet synced from Plaid.
+  final int? currentBalanceCents;
+
+  /// ISO currency code for the monetary fields above.
+  final String? currency;
+
+  static int? _centsFrom(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
   factory StatementAccount.fromJson(Map<String, dynamic> json) {
     return StatementAccount(
       accountId: json['account_id'] as String,
@@ -55,6 +74,9 @@ class StatementAccount {
       subtype: json['subtype'] as String?,
       itemId: json['item_id'] as String?,
       institutionName: json['institution_name'] as String?,
+      creditLimitCents: _centsFrom(json['credit_limit']),
+      currentBalanceCents: _centsFrom(json['current_balance']),
+      currency: json['iso_currency_code'] as String? ?? json['currency'] as String?,
     );
   }
 
@@ -69,6 +91,9 @@ class StatementAccount {
       'subtype': subtype,
       'item_id': itemId,
       'institution_name': institutionName,
+      'credit_limit': creditLimitCents == null ? null : creditLimitCents! / 100,
+      'current_balance': currentBalanceCents == null ? null : currentBalanceCents! / 100,
+      'iso_currency_code': currency,
     };
   }
 }

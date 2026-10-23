@@ -1216,6 +1216,178 @@ Deno.serve(async (req) => {
       });
     }
 
+    // --- Wallet summary ---
+    if (method === "GET" && path === "wallet/summary") {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const userId = auth.userId;
+
+      const items = await fetchUserRows("plaid_items", userId, { orderBy: "created_at.asc,item_id.asc" });
+      const activeItemIds = new Set(
+        (items ?? [])
+          .filter((item) => (item.status ?? "connected") !== "disconnected")
+          .map((item) => item.item_id),
+      );
+
+      const accounts = await fetchUserRows("plaid_credit_accounts", userId, { orderBy: "account_id.asc" });
+
+      // Only credit accounts attached to an active (non-disconnected) item count as cards.
+      // Rows with a null item_id (e.g. manually added accounts) are retained.
+      const connectedAccounts = accounts.filter((account) => {
+        const type = String(account.account_type ?? "credit");
+        if (type !== "credit") return false;
+        const itemId = account.item_id;
+        return itemId == null || activeItemIds.has(itemId);
+      });
+
+      function dollarsToCents(value: unknown): number | null {
+        if (value == null) return null;
+        try {
+          const d = new Decimal(String(value));
+          if (!d.isFinite()) return null;
+          return d.times(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber();
+        } catch {
+          return null;
+        }
+      }
+
+      const buckets = new Map<string, {
+        currency: string;
+        creditLimitCents: number;
+        balanceCents: number;
+        cardCount: number;
+        accountsWithLimit: number;
+        accountsWithBalance: number;
+      }>();
+
+      for (const account of connectedAccounts) {
+        const currency = String(account.iso_currency_code ?? "UNKNOWN");
+        let bucket = buckets.get(currency);
+        if (!bucket) {
+          bucket = {
+            currency,
+            creditLimitCents: 0,
+            balanceCents: 0,
+            cardCount: 0,
+            accountsWithLimit: 0,
+            accountsWithBalance: 0,
+          };
+          buckets.set(currency, bucket);
+        }
+        bucket.cardCount += 1;
+        const limitCents = dollarsToCents(account.credit_limit);
+        const balanceCents = dollarsToCents(account.current_balance);
+        if (limitCents != null && limitCents > 0) {
+          bucket.creditLimitCents += limitCents;
+          bucket.accountsWithLimit += 1;
+        }
+        if (balanceCents != null) {
+          bucket.balanceCents += balanceCents;
+          bucket.accountsWithBalance += 1;
+        }
+      }
+
+      const currencyList = Array.from(buckets.values()).sort((a, b) => {
+        if (b.balanceCents !== a.balanceCents) return b.balanceCents - a.balanceCents;
+        if (b.cardCount !== a.cardCount) return b.cardCount - a.cardCount;
+        return a.currency.localeCompare(b.currency);
+      });
+      const primaryCurrency = currencyList[0]?.currency ?? null;
+
+      // Highest payment in the past 30 days: largest absolute negative amount.
+      // Prefer explicitly-coded payment transactions; fall back to any negative,
+      // non-pending, non-removed transaction. Within the chosen pool, prefer the
+      // primary currency, then the largest payment overall (reported in its own
+      // currency so it is never mislabeled).
+      let highestPayment: {
+        transaction_id: string;
+        account_id: string | null;
+        account_name: string;
+        amount_cents: number;
+        currency: string;
+        date: string | null;
+        name: string | null;
+        merchant_name: string | null;
+      } | null = null;
+
+      const activeAccountIds = connectedAccounts
+        .map((account) => account.account_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+      if (activeAccountIds.length > 0) {
+        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        let paymentRows: any[] = [];
+
+        const poolQuery = (transactionCode: string | null) => {
+          let query = supabase
+            .from("plaid_transactions")
+            .select(
+              "transaction_id,account_id,amount,iso_currency_code,date,name,merchant_name,transaction_code",
+            )
+            .eq("user_id", userId)
+            .eq("is_removed", false)
+            .eq("pending", false)
+            .lt("amount", 0)
+            .gte("date", since)
+            .in("account_id", activeAccountIds)
+            .order("amount", { ascending: true })
+            .limit(500);
+          if (transactionCode) {
+            query = query.eq("transaction_code", transactionCode);
+          }
+          return query;
+        };
+
+        const { data: codedPayments, error: codedError } = await poolQuery("payment");
+        if (codedError) throw new ApiError(502, codedError.message);
+        paymentRows = codedPayments ?? [];
+        if (paymentRows.length === 0) {
+          const { data: allPayments, error: allError } = await poolQuery(null);
+          if (allError) throw new ApiError(502, allError.message);
+          paymentRows = allPayments ?? [];
+        }
+
+        if (paymentRows.length > 0) {
+          const byAccount = new Map(connectedAccounts.map((a) => [a.account_id, a]));
+          let chosen = paymentRows[0];
+          if (primaryCurrency != null) {
+            const primaryRow = paymentRows.find(
+              (row) => String(row.iso_currency_code ?? "UNKNOWN") === primaryCurrency,
+            );
+            if (primaryRow) chosen = primaryRow;
+          }
+          const amountCents = dollarsToCents(chosen.amount);
+          const account = byAccount.get(chosen.account_id ?? undefined);
+          highestPayment = {
+            transaction_id: String(chosen.transaction_id ?? ""),
+            account_id: chosen.account_id ?? null,
+            account_name: creditCardDisplayName(account ?? {}),
+            amount_cents: amountCents != null ? Math.abs(amountCents) : 0,
+            currency: String(chosen.iso_currency_code ?? "UNKNOWN"),
+            date: chosen.date ?? null,
+            name: chosen.name ?? null,
+            merchant_name: chosen.merchant_name ?? null,
+          };
+        }
+      }
+
+      return jsonResponse({
+        card_count: connectedAccounts.length,
+        primary_currency: primaryCurrency,
+        currencies: currencyList.map((bucket) => ({
+          currency: bucket.currency,
+          credit_limit_cents: bucket.creditLimitCents,
+          balance_cents: bucket.balanceCents,
+          card_count: bucket.cardCount,
+          accounts_with_limit: bucket.accountsWithLimit,
+          accounts_with_balance: bucket.accountsWithBalance,
+        })),
+        highest_payment: highestPayment,
+      });
+    }
+
     // --- Statement cycles ---
     if (method === "GET" && path === "owed/statement-cycles") {
       const auth = await authenticateRequest(authorization);

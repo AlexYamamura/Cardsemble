@@ -208,10 +208,12 @@ class FakeAccountRepository implements AccountRepository {
   FakeAccountRepository({
     this.connectionsResult,
     this.statementCyclesResult,
+    this.walletSummaryResult,
   });
 
   final Result<List<PlaidConnection>>? connectionsResult;
   final Result<StatementCycleSummary>? statementCyclesResult;
+  final Result<WalletSummary>? walletSummaryResult;
 
   @override
   Future<Result<List<PlaidConnection>>> loadPlaidConnections() async =>
@@ -248,6 +250,16 @@ class FakeAccountRepository implements AccountRepository {
           currency: null,
           accountCount: 0,
           accounts: [],
+        ),
+      );
+
+  @override
+  Future<Result<WalletSummary>> loadWalletSummary() async =>
+      walletSummaryResult ??
+      const Success(
+        WalletSummary(
+          cardCount: 0,
+          currencies: [],
         ),
       );
 }

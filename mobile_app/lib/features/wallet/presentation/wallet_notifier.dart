@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cardsemble/features/accounts/domain/entities/account.dart';
+import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/card_catalog/data/card_catalog_repository.dart';
 import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
@@ -41,6 +41,7 @@ class WalletNotifier extends ChangeNotifier {
 
   List<WalletCard> get yourCards => _yourCards;
   List<WalletCard> get householdCards => _householdCards;
+  WalletSummary? get walletSummary => _accounts.walletSummary;
   bool get isLoading => _isLoading;
   String? get error => _error;
   DateTime? get lastUpdated => _lastUpdated;
@@ -62,6 +63,7 @@ class WalletNotifier extends ChangeNotifier {
       await Future.wait<void>([
         _accounts.loadConnections(),
         _accounts.loadStatementCycles(),
+        _accounts.loadWalletSummary(),
         _loadCatalog(),
       ]);
 
@@ -211,11 +213,13 @@ class WalletNotifier extends ChangeNotifier {
         status: connection.status,
         catalogCard: catalogCard,
         statementAccount: statementAccount,
-        // Per-account balance, credit limit, payment due date, and autopay are
-        // not exposed by the backend yet; left null so the panel renders placeholders.
-        balanceCents: null,
-        currency: null,
-        creditLimitCents: null,
+        // Per-account balance, credit limit, and currency come from the synced
+        // Plaid credit account (fetched via statement cycles). They are null
+        // until a sync has populated plaid_credit_accounts, in which case the
+        // panel renders a "—" placeholder.
+        balanceCents: statementAccount?.currentBalanceCents,
+        currency: statementAccount?.currency,
+        creditLimitCents: statementAccount?.creditLimitCents,
         paymentDueDate: null,
         autopayEnabled: null,
         benefits: benefits,

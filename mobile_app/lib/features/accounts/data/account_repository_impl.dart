@@ -99,4 +99,10 @@ class AccountRepositoryImpl implements AccountRepository {
     final result = await _apiClient.safeGet('/api/owed/statement-cycles');
     return result.map(StatementCycleSummary.fromJson);
   }
+
+  @override
+  Future<Result<WalletSummary>> loadWalletSummary() async {
+    final result = await _apiClient.safeGet('/api/wallet/summary');
+    return result.map(WalletSummary.fromJson);
+  }
 }

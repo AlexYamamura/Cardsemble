@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cardsemble/core/utils/currency.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
+import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/card_optimizer/data/card_optimizer_repository.dart';
 import 'package:cardsemble/features/card_optimizer/presentation/card_optimizer_screen.dart';
@@ -90,6 +92,19 @@ class _WalletScreenState extends State<WalletScreen> {
         foregroundColor: AppColors.onPrimary,
         title: const Text('Wallet'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.sync),
+            onPressed: () {
+              context.read<AccountsNotifier>().syncConnections();
+              // Reload wallet summary after sync completes
+              Future.delayed(const Duration(seconds: 2), () {
+                if (context.mounted) {
+                  context.read<WalletNotifier>().load();
+                }
+              });
+            },
+            tooltip: 'Sync Plaid accounts',
+          ),
           SettingsGearMenu(
             onOpenSettings: widget.onOpenSettings,
             onOpenCardEvents: widget.onOpenCardEvents,
@@ -113,15 +128,10 @@ class _WalletScreenState extends State<WalletScreen> {
                     onRetry: () => notifier.load(),
                   ),
                 ),
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  sliver: SliverToBoxAdapter(
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: _SectionHeader(title: 'Your Cards', subtitle: 'Connected credit card accounts'),
-                      ),
-                    ),
+                SliverToBoxAdapter(
+                  child: _WalletSummaryCard(
+                    summary: notifier.walletSummary,
+                    cards: notifier.yourCards.length,
                   ),
                 ),
                 SliverPadding(
@@ -303,6 +313,159 @@ class _SectionHeader extends StatelessWidget {
           subtitle,
           style: const TextStyle(fontSize: 12, color: Colors.grey),
         ),
+      ],
+    );
+  }
+}
+
+/// Aggregation card shown above "Your Cards".
+///
+/// Surfaces real Plaid-derived totals: total credit limit, utilization,
+/// number of cards, and the highest payment in the past 30 days. Renders
+/// placeholders when the data has not yet been synced.
+class _WalletSummaryCard extends StatelessWidget {
+  const _WalletSummaryCard({
+    required this.summary,
+    required this.cards,
+  });
+
+  final WalletSummary? summary;
+  final int cards;
+
+  @override
+  Widget build(BuildContext context) {
+    if (cards == 0) return const SizedBox.shrink();
+
+    final primary = summary?.primary;
+    final isFullySynced = summary?.isFullySynced ?? false;
+
+    final limitText = primary != null && primary.hasLimitData
+        ? formatCurrency(primary.creditLimitCents / 100, primary.currency)
+        : '—';
+    final utilText = primary != null && primary.utilization != null
+        ? '${(primary.utilization! * 100).round()}%'
+        : '—';
+    final payment = summary?.highestPayment;
+    final paymentText = payment != null
+        ? formatCurrency(payment.amountCents / 100, payment.currency)
+        : '—';
+
+    final captionParts = <String>[];
+    if (summary != null && summary!.otherCurrencyCount > 0) {
+      captionParts.add(
+          'Showing ${summary!.primaryCurrency} · ${summary!.otherCurrencyCount} other currency not included');
+    }
+    if (!isFullySynced) {
+      captionParts.add(
+          'Partially synced (${primary?.accountsWithLimit ?? 0} of $cards cards)');
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Card(
+        child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _SectionHeader(
+                  title: 'Your Cards',
+                  subtitle: 'Connected credit card accounts',
+                ),
+                const SizedBox(height: 12),
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 2.6,
+                  children: [
+                    _SummaryMetric(
+                      label: 'Total credit limit',
+                      value: limitText,
+                      subtitle: primary == null || primary.hasLimitData
+                          ? null
+                          : 'Limit not yet synced',
+                    ),
+                    _SummaryMetric(
+                      label: 'Utilization',
+                      value: utilText,
+                      subtitle: primary != null && primary.utilization != null
+                          ? '${primary.cardCount} card(s)'
+                          : null,
+                    ),
+                    _SummaryMetric(
+                      label: 'Number of cards',
+                      value: summary?.cardCount.toString() ?? '0',
+                      subtitle: isFullySynced ? 'All synced' : 'Syncing…',
+                    ),
+                    _SummaryMetric(
+                      label: 'Highest payment',
+                      value: paymentText,
+                      subtitle: payment != null
+                          ? 'Last 30 days · ${payment.date != null ? _formatDate(payment.date!) : '—'}'
+                          : 'No payments found',
+                    ),
+                  ],
+                ),
+                if (captionParts.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    captionParts.join('  •  '),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.month}/${date.day}/${date.year}';
+  }
+}
+
+class _SummaryMetric extends StatelessWidget {
+  const _SummaryMetric({
+    required this.label,
+    required this.value,
+    this.subtitle,
+  });
+
+  final String label;
+  final String value;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 10, color: Colors.grey),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: AppColors.charcoal,
+          ),
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            subtitle!,
+            style: const TextStyle(fontSize: 10, color: Colors.grey),
+          ),
+        ],
       ],
     );
   }

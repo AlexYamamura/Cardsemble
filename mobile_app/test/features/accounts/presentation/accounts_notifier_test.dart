@@ -17,12 +17,14 @@ class FakeAccountRepository implements AccountRepository {
   Result<PlaidSyncOutcome>? exchangeResult;
   Result<List<PlaidConnection>>? connectionsResult;
   Result<StatementCycleSummary>? statementCyclesResult;
+  Result<WalletSummary>? walletSummaryResult;
   Result<PlaidSyncOutcome>? syncResult;
 
   final List<String> linkTokenPlatforms = [];
   final List<Map<String, Object?>> exchanges = [];
   int connectionLoads = 0;
   int statementCycleLoads = 0;
+  int walletSummaryLoads = 0;
 
   @override
   Future<Result<List<PlaidConnection>>> loadPlaidConnections() async {
@@ -76,6 +78,18 @@ class FakeAccountRepository implements AccountRepository {
             currency: null,
             accountCount: 0,
             accounts: [],
+          ),
+        );
+  }
+
+  @override
+  Future<Result<WalletSummary>> loadWalletSummary() async {
+    walletSummaryLoads++;
+    return walletSummaryResult ??
+        const Success(
+          WalletSummary(
+            cardCount: 0,
+            currencies: [],
           ),
         );
   }

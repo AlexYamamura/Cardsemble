@@ -13,4 +13,5 @@ abstract class AccountRepository {
   });
   Future<Result<void>> updateCreditCardDisplayName(String accountId, String? displayName);
   Future<Result<StatementCycleSummary>> loadStatementCycles();
+  Future<Result<WalletSummary>> loadWalletSummary();
 }

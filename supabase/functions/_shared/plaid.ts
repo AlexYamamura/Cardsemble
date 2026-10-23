@@ -317,6 +317,8 @@ export async function savePlaidCreditAccounts(
       account_type: accountType,
       subtype: account.subtype ? (typeof account.subtype === "object" ? account.subtype.value : account.subtype) : null,
       iso_currency_code: balances?.iso_currency_code ?? null,
+      credit_limit: balances?.limit ?? null,
+      current_balance: balances?.current ?? null,
       institution_name: institutionName,
       updated_at: new Date().toISOString(),
     });
@@ -392,6 +394,32 @@ export async function syncPlaidLiabilities(
   const snapshots: any[] = [];
 
   const creditLiabilities = response.liabilities?.credit ?? [];
+
+  // Plaid's /accounts/get does not always return balances.limit for credit
+  // accounts (e.g. some institutions omit the credit limit). The /liabilities/get
+  // endpoint returns credit_limit and current_balance per account in the
+  // liabilities.credit array. Update the stored balance/limit columns using a
+  // targeted update to preserve all other columns (display_name, etc.).
+  for (const liability of creditLiabilities) {
+    const accountId = liability.account_id;
+    if (accountId == null) continue;
+    const creditLimit = liability.credit_limit;
+    const currentBalance = liability.current_balance;
+    if (creditLimit == null && currentBalance == null) continue;
+    const { error: updateError } = await supabase
+      .from("plaid_credit_accounts")
+      .update({
+        credit_limit: creditLimit ?? null,
+        current_balance: currentBalance ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("account_id", accountId)
+      .eq("user_id", userId);
+    if (updateError) {
+      console.warn(`Could not update credit account balance/limit for account ${accountId}: ${updateError.message}`);
+    }
+  }
+
   for (const liability of creditLiabilities) {
     const accountId = liability.account_id;
     const account = accountsById.get(accountId);

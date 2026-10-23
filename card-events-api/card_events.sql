@@ -341,6 +341,8 @@ create table if not exists public.plaid_credit_accounts (
     institution_name text,
     subtype text,
     iso_currency_code text,
+    credit_limit numeric(14, 2),
+    current_balance numeric(14, 2),
     updated_at timestamptz not null default now(),
     unique (user_id, account_id)
 );
@@ -353,6 +355,10 @@ alter table public.plaid_credit_accounts
     add column if not exists item_id text;
 alter table public.plaid_credit_accounts
     add column if not exists institution_name text;
+alter table public.plaid_credit_accounts
+    add column if not exists credit_limit numeric(14, 2);
+alter table public.plaid_credit_accounts
+    add column if not exists current_balance numeric(14, 2);
 update public.plaid_credit_accounts
 set account_type = 'credit'
 where account_type is null;

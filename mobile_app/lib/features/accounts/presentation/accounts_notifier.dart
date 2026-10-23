@@ -13,6 +13,7 @@ class AccountsNotifier extends ChangeNotifier {
 
   List<PlaidConnection> _connections = [];
   StatementCycleSummary? _statementSummary;
+  WalletSummary? _walletSummary;
   bool _isLoading = false;
   bool _isLinking = false;
   String? _error;
@@ -22,6 +23,7 @@ class AccountsNotifier extends ChangeNotifier {
 
   List<PlaidConnection> get connections => _connections;
   StatementCycleSummary? get statementSummary => _statementSummary;
+  WalletSummary? get walletSummary => _walletSummary;
   bool get isLoading => _isLoading;
   bool get isLinking => _isLinking;
   String? get error => _error;
@@ -57,6 +59,25 @@ class AccountsNotifier extends ChangeNotifier {
       final result = await _accountRepository.loadStatementCycles();
       result.fold(
         (summary) => _statementSummary = summary,
+        (failure) => _error = failure.message,
+      );
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadWalletSummary() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await _accountRepository.loadWalletSummary();
+      result.fold(
+        (summary) => _walletSummary = summary,
         (failure) => _error = failure.message,
       );
     } catch (e) {
@@ -159,6 +180,8 @@ class AccountsNotifier extends ChangeNotifier {
               : null;
           await loadConnections();
           final reloadError = _error;
+          await loadStatementCycles();
+          await loadWalletSummary();
           final messages = <String>[];
           if (itemWarning != null) {
             messages.add('Sync finished with warnings: $itemWarning');
@@ -212,6 +235,7 @@ class AccountsNotifier extends ChangeNotifier {
           await loadConnections();
           final connectionsError = _error;
           await loadStatementCycles();
+          await loadWalletSummary();
           final statementCyclesError = _error;
           final details = [
             if (connectionsError != null) connectionsError,
@@ -310,6 +334,7 @@ class AccountsNotifier extends ChangeNotifier {
   void reset() {
     _connections = [];
     _statementSummary = null;
+    _walletSummary = null;
     _isLoading = false;
     _isLinking = false;
     _error = null;

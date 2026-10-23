@@ -60,6 +60,16 @@ class _FakeAccountRepository implements AccountRepository {
       ),
     );
   }
+
+  @override
+  Future<Result<WalletSummary>> loadWalletSummary() async {
+    return const Success(
+      WalletSummary(
+        cardCount: 0,
+        currencies: [],
+      ),
+    );
+  }
 }
 
 class _FakePlaidLinkLauncher implements PlaidLinkLauncher {
