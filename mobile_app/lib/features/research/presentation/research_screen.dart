@@ -15,7 +15,7 @@ const double _separatorHeight = 6;
 ///
 /// Keeps the search bar at the top. Directly below it is a separate dropdown
 /// card listing matching cards to select from; choosing one adds it to the
-/// white selected-cards table underneath. Tapping a row in that
+/// cream selected-cards table underneath. Tapping a row in that
 /// table opens a detail sheet with more information about the card.
 class ResearchScreen extends StatefulWidget {
   const ResearchScreen({
@@ -324,7 +324,7 @@ class _ResearchScreenState extends State<ResearchScreen> {
     );
   }
 
-  /// White table of the cards the user has selected.
+  /// Cream table of the cards the user has selected.
   ///
   /// Rows are separated by a hairline rule.
   Widget _buildSelectedTable() {
@@ -335,9 +335,8 @@ class _ResearchScreenState extends State<ResearchScreen> {
           _buildOptimizerButton(),
           Expanded(
             child: Container(
-              // The card list keeps a white background instead of the cream
-              // scaffold color.
-              color: AppColors.surface,
+              // The card list keeps a cream background matching the scaffold.
+              color: AppColors.cream,
               child: _selectedCards.isEmpty
                   ? Center(
                       child: Column(
@@ -382,7 +381,7 @@ class _ResearchScreenState extends State<ResearchScreen> {
   /// The tune icon opens the custom point multiplier settings.
   Widget _buildOptimizerButton() {
     return Container(
-      color: AppColors.surface,
+      color: AppColors.cream,
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
       child: Row(
         children: [
@@ -496,7 +495,7 @@ class _SelectedRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.surface,
+      color: AppColors.cream,
       child: InkWell(
         onTap: onTap,
         child: Container(
