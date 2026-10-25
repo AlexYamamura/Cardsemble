@@ -26,11 +26,6 @@ const double _kMaxRotation = 0.22;
 /// Perspective factor for the 3D effect.
 const double _kPerspective = 0.0015;
 
-/// Maximum horizontal extent for the carousel viewport. On wide tablets a
-/// fixed width keeps the peek effect visible instead of letting the card sit
-/// flush against the screen edge.
-const double _kMaxCarouselWidth = 520;
-
 /// Maximum width for an individual card inside the carousel.
 const double _kMaxCardWidth = 420;
 
@@ -169,14 +164,13 @@ class _WalletCardCarouselState extends State<WalletCardCarousel> {
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: _kMaxCarouselWidth),
-      child: SizedBox(
-        height: widget.carouselHeight,
-        child: PageView.builder(
-          controller: _controller,
-          itemCount: widget.cards.length,
-           itemBuilder: (context, index) {
+    return SizedBox(
+      width: double.infinity,
+      height: widget.carouselHeight,
+      child: PageView.builder(
+        controller: _controller,
+        itemCount: widget.cards.length,
+        itemBuilder: (context, index) {
             final card = widget.cards[index];
             final panel = WalletCardPanel(
               card: card,
@@ -230,8 +224,7 @@ class _WalletCardCarouselState extends State<WalletCardCarousel> {
                 ),
               ),
             );
-          },
-        ),
+           },
       ),
     );
   }

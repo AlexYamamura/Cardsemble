@@ -208,9 +208,15 @@ class _WalletScreenState extends State<WalletScreen> {
                       child: Row(
                         children: [
                           Expanded(
-                            child: FilledButton(
+                            child: FilledButton.icon(
                               onPressed: () => context.read<AccountsNotifier>().linkAccount(),
-                              child: const Text('+ Link a card'),
+                              icon: const Icon(Icons.add, size: 18),
+                              label: const Text('Link a card'),
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                textStyle:
+                                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -342,10 +348,11 @@ class _Header extends StatelessWidget {
 }
 
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, required this.subtitle});
+  const _SectionHeader({required this.title, this.subtitle, this.titleStyle});
 
   final String title;
-  final String subtitle;
+  final String? subtitle;
+  final TextStyle? titleStyle;
 
   @override
   Widget build(BuildContext context) {
@@ -355,13 +362,15 @@ class _SectionHeader extends StatelessWidget {
       children: [
         Text(
           title,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.charcoal),
+          style: titleStyle ?? const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.charcoal),
         ),
-        const SizedBox(height: 2),
-        Text(
-          subtitle,
-          style: const TextStyle(fontSize: 14, color: Colors.grey),
-        ),
+        if (subtitle != null && subtitle!.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            subtitle!,
+            style: const TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+        ],
       ],
     );
   }
@@ -420,7 +429,11 @@ class _WalletSummaryCard extends StatelessWidget {
             children: [
               _SectionHeader(
                 title: 'Your Cards',
-                subtitle: 'Connected credit card accounts',
+                titleStyle: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.primary,
+                ),
               ),
               const SizedBox(height: 12),
               GridView.count(
@@ -602,7 +615,8 @@ class _YourCardsCarouselSection extends StatelessWidget {
     }
     return SliverToBoxAdapter(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           WalletCardCarousel(
             cards: cards,
