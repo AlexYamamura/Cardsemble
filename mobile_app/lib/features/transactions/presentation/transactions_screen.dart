@@ -81,15 +81,15 @@ class _TransactionsScreenState extends State<TransactionsScreen>
       appBar: AppBar(
         title: const Text('Transactions'),
         actions: [
-          SettingsGearMenu(
-            onOpenSettings: widget.onOpenSettings,
-            onOpenCardEvents: widget.onOpenCardEvents,
-            onOpenManageHousehold: widget.onOpenManageHousehold,
-          ),
           IconButton(
             icon: const Icon(Icons.sync),
             onPressed: () => _refresh(context),
             tooltip: 'Refresh',
+          ),
+          SettingsGearMenu(
+            onOpenSettings: widget.onOpenSettings,
+            onOpenCardEvents: widget.onOpenCardEvents,
+            onOpenManageHousehold: widget.onOpenManageHousehold,
           ),
         ],
       ),
