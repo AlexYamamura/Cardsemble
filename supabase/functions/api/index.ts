@@ -883,15 +883,22 @@ Deno.serve(async (req) => {
         throw new ApiError(400, "invite_code is required");
       }
 
-      // Find the household owner by invite code
+      // Find the household owner by invite code.
+      //
+      // invite_code is UNIQUE and is only ever assigned to owner rows
+      // (household_id = user_id) by the set_owner_invite_code() trigger
+      // (migration 20261012213524). PostgREST cannot do column-to-column
+      // comparison, so we query by invite_code alone and verify the owner
+      // invariant in JS. This replaces the previous broken filter
+      // `.eq("household_id", "user_id")` which compared the UUID column
+      // against the literal string "user_id" and always 502'd.
       const { data: owner, error: ownerError } = await supabase
         .from("household_members")
         .select("household_id, user_id")
         .eq("invite_code", inviteCode)
-        .eq("household_id", "user_id") // Only owners have household_id = user_id
         .limit(1);
       if (ownerError) throw new ApiError(502, ownerError.message);
-      if (!owner || owner.length === 0) {
+      if (!owner || owner.length === 0 || owner[0].household_id !== owner[0].user_id) {
         throw new ApiError(404, "Invalid or expired invite code");
       }
 
@@ -921,7 +928,7 @@ Deno.serve(async (req) => {
         }
         throw new ApiError(502, error.message);
       }
-      return jsonResponse({ member: data?.[0], household_id: householdId });
+      return jsonResponse({ ok: true, member: data?.[0], household_id: householdId });
     }
 
     if (method === "POST" && path === "household/members") {
@@ -1034,12 +1041,13 @@ Deno.serve(async (req) => {
       const body = await req.json().catch(() => ({}));
       const accountId = body.account_id ? String(body.account_id) : null;
       const csvText = body.csv_text ? String(body.csv_text) : null;
+      const currency = body.currency ? String(body.currency) : undefined;
 
       if (!accountId || !csvText) {
         throw new ApiError(400, "account_id and csv_text are required");
       }
 
-      const result = await generateCsvPreview(auth.userId, accountId, csvText);
+      const result = await generateCsvPreview(auth.userId, accountId, csvText, currency ? { currency } : undefined);
       return jsonResponse(result);
     }
 
@@ -1052,12 +1060,13 @@ Deno.serve(async (req) => {
       const accountId = body.account_id ? String(body.account_id) : null;
       const rows = Array.isArray(body.rows) ? body.rows : [];
       const filename = body.filename ? String(body.filename) : "import.csv";
+      const currency = body.currency ? String(body.currency) : undefined;
 
       if (!accountId || rows.length === 0) {
         throw new ApiError(400, "account_id and rows are required");
       }
 
-      const result = await confirmCsvImport(auth.userId, accountId, rows, filename);
+      const result = await confirmCsvImport(auth.userId, accountId, rows, filename, currency ? { currency } : undefined);
       return jsonResponse(result);
     }
 
