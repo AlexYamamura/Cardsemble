@@ -83,25 +83,6 @@ class FakeTransactionRepository implements TransactionRepository {
   Future<Result<void>> setHouseholdVisible(String transactionId, bool visible) async {
     return const Success<void>(null);
   }
-
-  @override
-  Future<Result<CsvImportPreview>> previewCsvImport(String accountId, String csvText) {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<Result<CsvImportResult>> confirmCsvImport(
-    String accountId,
-    List<CsvImportRow> rows,
-    String filename,
-  ) async {
-    return const Success(CsvImportResult(inserted: 0, duplicates: 0, errors: []));
-  }
-
-  @override
-  Future<Result<List<CsvImportHistory>>> loadCsvImportHistory() async {
-    return const Success(<CsvImportHistory>[]);
-  }
 }
 
 class FakeHouseholdRepository implements HouseholdRepository {

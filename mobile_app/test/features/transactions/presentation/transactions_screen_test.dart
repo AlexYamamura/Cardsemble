@@ -69,28 +69,6 @@ class _FakeTransactionRepository implements TransactionRepository {
   ) async {
     return const Success(null);
   }
-
-  @override
-  Future<Result<CsvImportPreview>> previewCsvImport(
-    String accountId,
-    String csvText,
-  ) async {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<Result<CsvImportResult>> confirmCsvImport(
-    String accountId,
-    List<CsvImportRow> rows,
-    String filename,
-  ) async {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<Result<List<CsvImportHistory>>> loadCsvImportHistory() async {
-    throw UnimplementedError();
-  }
 }
 
 class _FakeHouseholdRepository implements HouseholdRepository {

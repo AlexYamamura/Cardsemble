@@ -23,10 +23,6 @@ import {
   creditCardDisplayName,
 } from "../_shared/reconcile.ts";
 import {
-  generateCsvPreview,
-  confirmCsvImport,
-} from "../_shared/csv_import.ts";
-import {
   syncCardCatalog,
 } from "../_shared/card_catalog.ts";
 import { Decimal } from "https://esm.sh/decimal.js@10.4.3";
@@ -207,6 +203,50 @@ Deno.serve(async (req) => {
         .select();
 
       if (error) throw new ApiError(502, error.message);
+
+      // For free users (no Plaid items linked), also insert the card event
+      // into plaid_transactions so it appears in the Transactions tab/Ledger.
+      // For paying users, Plaid sync populates transactions and reconciliation
+      // matches card events to Plaid transactions.
+      if (userId) {
+        const { data: plaidItems, error: itemsError } = await supabase
+          .from("plaid_items")
+          .select("item_id")
+          .eq("user_id", userId)
+          .limit(1);
+
+        const hasPlaidItems = plaidItems && plaidItems.length > 0;
+        if (!hasPlaidItems && !itemsError) {
+          const event = rows && rows.length > 0 ? rows[0] : null;
+          if (event) {
+            const eventDate = String(event.occurred_at || "").slice(0, 10);
+            const merchant = event.merchant || "";
+            await supabase
+              .from("plaid_transactions")
+              .upsert({
+                transaction_id: `evt_${event.event_id}`,
+                user_id: userId,
+                account_id: null,
+                amount: -Math.abs(Number(event.amount)), // Plaid convention: negative for charges
+                iso_currency_code: event.currency || "USD",
+                date: eventDate,
+                authorized_date: null,
+                datetime: event.occurred_at,
+                name: merchant,
+                original_description: merchant,
+                merchant_name: merchant,
+                transaction_type: "purchase",
+                transaction_code: "purchase",
+                pending: false,
+                is_removed: false,
+                source: "card_event",
+                synced_at: new Date().toISOString(),
+              }, { onConflict: "transaction_id" });
+          }
+        } else if (itemsError) {
+          console.error("[card-events] Error checking plaid_items:", itemsError.message);
+        }
+      }
 
       return jsonResponse({
         ok: true,
@@ -1032,64 +1072,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: true, event_id: eventId, household_visible: visible });
     }
 
-    // --- CSV Import ---
-    if (method === "POST" && path === "csv-import/preview") {
-      const auth = await authenticateRequest(authorization);
-      if (auth.userId === null) {
-        throw new ApiError(403, "A user-linked device key or Supabase session is required");
-      }
-      const body = await req.json().catch(() => ({}));
-      const accountId = body.account_id ? String(body.account_id) : null;
-      const csvText = body.csv_text ? String(body.csv_text) : null;
-      const currency = body.currency ? String(body.currency) : undefined;
-
-      if (!accountId || !csvText) {
-        throw new ApiError(400, "account_id and csv_text are required");
-      }
-
-      const result = await generateCsvPreview(auth.userId, accountId, csvText, currency ? { currency } : undefined);
-      return jsonResponse(result);
-    }
-
-    if (method === "POST" && path === "csv-import/confirm") {
-      const auth = await authenticateRequest(authorization);
-      if (auth.userId === null) {
-        throw new ApiError(403, "A user-linked device key or Supabase session is required");
-      }
-      const body = await req.json().catch(() => ({}));
-      const accountId = body.account_id ? String(body.account_id) : null;
-      const rows = Array.isArray(body.rows) ? body.rows : [];
-      const filename = body.filename ? String(body.filename) : "import.csv";
-      const currency = body.currency ? String(body.currency) : undefined;
-
-      if (!accountId || rows.length === 0) {
-        throw new ApiError(400, "account_id and rows are required");
-      }
-
-      const result = await confirmCsvImport(auth.userId, accountId, rows, filename, currency ? { currency } : undefined);
-      return jsonResponse(result);
-    }
-
-     if (method === "GET" && path === "csv-import/history") {
-       const auth = await authenticateRequest(authorization);
-       if (auth.userId === null) {
-         throw new ApiError(403, "A user-linked device key or Supabase session is required");
-       }
-       const limit = Math.min(parseInt(url.searchParams.get("limit") || "50", 10), 100);
-       const offset = parseInt(url.searchParams.get("offset") || "0", 10);
-
-       const { data, error, count } = await supabase
-         .from("csv_import_history")
-         .select("*", { count: "exact" })
-         .eq("user_id", auth.userId)
-         .order("created_at", { ascending: false })
-         .range(offset, offset + limit - 1);
-
-       if (error) throw new ApiError(502, error.message);
-       return jsonResponse({ imports: data ?? [], total: count ?? 0 });
-     }
-
-     // --- Manual card catalog sync ---
+    // --- Manual card catalog sync ---
      if (method === "POST" && path === "card-catalog/sync-now") {
        // Require authentication for manual sync
        const auth = await authenticateRequest(authorization);

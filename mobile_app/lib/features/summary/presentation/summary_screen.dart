@@ -1,16 +1,10 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cardsemble/core/core.dart';
 import 'package:cardsemble/core/widgets/settings_gear_menu.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
-import 'package:cardsemble/features/accounts/domain/entities/account.dart';
 import 'package:cardsemble/features/household/domain/household_domain.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
-import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
-import 'package:file_picker/file_picker.dart';
-import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
 
 class SummaryScreen extends StatefulWidget {
   const SummaryScreen({
@@ -32,8 +26,7 @@ class SummaryScreen extends StatefulWidget {
 
 class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveClientMixin {
     late DateTimeRange _summaryRange;
-    bool _isImporting = false;
-    AccountsNotifier? _accountsNotifier;
+  AccountsNotifier? _accountsNotifier;
 
   @override
   bool get wantKeepAlive => true;
@@ -68,15 +61,6 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
   }
 
   /// True while the statement-cycle account list has not settled yet.
-  /// Do not use AccountsNotifier.isLoading: it is shared with loadConnections,
-  /// so it can flip false while statement cycles are still in flight.
-  bool get _accountsLoading {
-    final accounts = _accountsNotifier;
-    return accounts != null &&
-        accounts.statementSummary == null &&
-        accounts.error == null;
-  }
-
   DateTimeRange _currentMonthRange() {
     return monthRange(DateTime.now());
   }
@@ -216,249 +200,6 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
     // Pull in the transactions for the newly linked card.
     await context.read<TransactionsNotifier>().refresh();
   }
-    Future<void> _importCsv() async {
-      final accountsNotifier = context.read<AccountsNotifier>();
-      final statementSummary = accountsNotifier.statementSummary;
-      if (statementSummary == null || statementSummary.accounts.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                _accountsLoading
-                    ? 'Accounts are still loading. Please try again in a moment.'
-                    : 'No accounts available. Please link a card first.',
-              ),
-            ),
-          );
-        }
-        return;
-      }
-
-      final List<StatementAccount> availableAccounts = statementSummary.accounts;
-      String? selectedAccountId;
-
-      if (availableAccounts.length == 1) {
-        selectedAccountId = availableAccounts.first.accountId;
-      } else {
-        // Show account selection dialog
-        selectedAccountId = await showDialog<String?>(
-          context: context,
-          builder: (BuildContext dialogContext) {
-            return AlertDialog(
-              title: const Text('Select Account for CSV Import'),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: availableAccounts.length,
-                  itemBuilder: (context, index) {
-                    final account = availableAccounts[index];
-                     return RadioListTile<String>(
-                       title: Text(account.displayName ?? account.accountName),
-                       subtitle: Text('Ending in ${account.mask ?? '****'}'),
-                      value: account.accountId,
-                      groupValue: selectedAccountId,
-                      onChanged: (value) {
-                        Navigator.pop(dialogContext, value);
-                      },
-                    );
-                  },
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, null),
-                  child: const Text('Cancel'),
-                ),
-              ],
-            );
-          },
-        );
-
-        // If the user canceled, return
-        if (selectedAccountId == null) {
-          return;
-        }
-      }
-
-      // Now proceed with the selected account
-      final accountId = selectedAccountId;
-
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['csv'],
-      );
-
-      if (result == null) return;
-
-      final file = result.files.first;
-      Uint8List? csvBytes = file.bytes;
-      if (csvBytes == null) {
-        // Fallback to reading from path if available
-        if (file.path != null && file.path!.isNotEmpty) {
-          try {
-            csvBytes = await File(file.path!).readAsBytes();
-          } catch (e) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Error reading file: $e')),
-              );
-            }
-            return;
-          }
-        }
-      }
-
-      if (csvBytes == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not read file.')),
-          );
-        }
-        return;
-      }
-
-      final csvText = utf8.decode(csvBytes);
-
-      if (!mounted) return;
-
-      setState(() {
-        _isImporting = true;
-      });
-
-      final previewResult = await context
-          .read<TransactionsNotifier>()
-          .previewCsvImport(accountId, csvText);
-
-      if (!mounted) {
-        setState(() {
-          _isImporting = false;
-        });
-        return;
-      }
-
-      previewResult.fold(
-        (preview) {
-          setState(() {
-            _isImporting = false;
-          });
-          _showImportPreviewDialog(preview, accountId, file.name);
-        },
-        (failure) {
-          setState(() {
-            _isImporting = false;
-          });
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Preview failed: ${failure.message}')),
-            );
-          }
-        },
-      );
-    }
-
-   void _showImportPreviewDialog(CsvImportPreview preview, String accountId, String fileName) {
-     showDialog(
-       context: context,
-       builder: (context) => AlertDialog(
-         title: const Text('CSV Import Preview'),
-         content: SingleChildScrollView(
-           child: Column(
-             mainAxisSize: MainAxisSize.min,
-             children: [
-               Text(
-                   'New: ${preview.summary.newCount}, Duplicates: ${preview.summary.duplicateCount}, Errors: ${preview.summary.errorCount}'),
-               const SizedBox(height: 10),
-               if (preview.preview.isEmpty)
-                 const Text('No rows to import.')
-               else
-                 DataTable(
-                   columns: const [
-                     DataColumn(label: Text('Date')),
-                     DataColumn(label: Text('Description')),
-                     DataColumn(label: Text('Amount')),
-                     DataColumn(label: Text('Status')),
-                   ],
-                   rows: preview.preview.map((row) => DataRow(cells: [
-                         DataCell(Text(row.row.transactionDate)),
-                         DataCell(Text(row.row.description.length > 20
-                             ? '${row.row.description.substring(0, 20)}...'
-                             : row.row.description)),
-                         DataCell(Text('${row.row.amount} ${row.row.currency}')),
-                         DataCell(Text(row.status)),
-                       ])).toList()),
-             ],
-           ),
-         ),
-         actions: [
-           TextButton(
-             onPressed: () => Navigator.pop(context),
-             child: const Text('Cancel'),
-           ),
-           ElevatedButton(
-             onPressed: preview.summary.newCount > 0
-                 ? () async {
-                     Navigator.pop(context);
-                     setState(() {
-                       _isImporting = true;
-                     });
-                     final newRows = preview.preview
-                         .where((r) => r.status == 'new')
-                         .map((r) => r.row)
-                         .toList();
-                     final confirmResult = await context
-                         .read<TransactionsNotifier>()
-                         .confirmCsvImport(accountId, newRows, fileName);
-                     if (!mounted) {
-                       setState(() {
-                         _isImporting = false;
-                       });
-                       return;
-                     }
-confirmResult.fold(
-                        (result) {
-                          setState(() {
-                            _isImporting = false;
-                          });
-                          if (mounted) {
-                            final parts = [
-                              'Imported ${result.inserted} transactions',
-                            ];
-                            if (result.duplicates > 0) {
-                              parts.add('${result.duplicates} duplicates skipped');
-                            }
-                            if (result.errors.isNotEmpty) {
-                              parts.add('${result.errors.length} errors');
-                            }
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                  content: Text(parts.join(', '))),
-                            );
-                          }
-                          // Refresh transactions
-                          context.read<TransactionsNotifier>().refresh();
-                        },
-                       (failure) {
-                         setState(() {
-                           _isImporting = false;
-                         });
-                         if (mounted) {
-                           ScaffoldMessenger.of(context).showSnackBar(
-                             SnackBar(
-                                 content: Text('Import failed: ${failure.message}')),
-                           );
-                         }
-                       },
-                     );
-                   }
-                 : null,
-             child: const Text('Import'),
-           ),
-         ],
-       ),
-     );
-   }
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -685,24 +426,8 @@ confirmResult.fold(
                     const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
               ),
             ),
-            FilledButton.icon(
-              onPressed: _isImporting ? null : _importCsv,
-              icon: _isImporting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.upload_file, size: 18),
-              label: const Text('Import CSV'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                textStyle:
-                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-              ),
-            ),
           ],
-       ),
+        ),
       const SizedBox(height: 12),
       _BreakdownCard(
         title: 'By household member',
@@ -920,7 +645,7 @@ String _money(String value, {bool absolute = false}) {
 }
 
 String _rangeLabel(DateTimeRange range) {
-  return '${_shortDate(range.start)} – ${_shortDate(range.end)}';
+  return '${_shortDate(range.start)} â€“ ${_shortDate(range.end)}';
 }
 
 String _shortDate(DateTime value) {

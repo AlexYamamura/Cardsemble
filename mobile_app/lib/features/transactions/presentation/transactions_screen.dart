@@ -383,7 +383,7 @@ class _EmptyState extends StatelessWidget {
         ? 'Try clearing a filter or widening the date range.'
         : (hasAnyTransactions
               ? 'Pull down to refresh.'
-              : 'Sync a card or import a CSV to see transactions here.');
+              : 'Sync a card to see transactions here.');
 
     return Center(
       child: Padding(

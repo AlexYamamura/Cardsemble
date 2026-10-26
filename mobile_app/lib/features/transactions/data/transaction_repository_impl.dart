@@ -132,36 +132,4 @@ class TransactionRepositoryImpl implements TransactionRepository {
       }
     });
   }
-
-  @override
-  Future<Result<CsvImportPreview>> previewCsvImport(String accountId, String csvText) async {
-    final result = await _apiClient.safePost(
-      '/api/csv-import/preview',
-      {'account_id': accountId, 'csv_text': csvText},
-    );
-    return result.map(CsvImportPreview.fromJson);
-  }
-
-  @override
-  Future<Result<CsvImportResult>> confirmCsvImport(String accountId, List<CsvImportRow> rows, String filename) async {
-    final result = await _apiClient.safePost(
-      '/api/csv-import/confirm',
-      {
-        'account_id': accountId,
-        'rows': rows.map((r) => r.toJson()).toList(growable: false),
-        'filename': filename,
-      },
-    );
-    return result.map(CsvImportResult.fromJson);
-  }
-
-  @override
-  Future<Result<List<CsvImportHistory>>> loadCsvImportHistory() async {
-    final result = await _apiClient.safeGet('/api/csv-import/history');
-    return result.map(
-      (payload) => extractRecords(payload, 'imports')
-          .map(CsvImportHistory.fromJson)
-          .toList(growable: false),
-    );
-  }
 }

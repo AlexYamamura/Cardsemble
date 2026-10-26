@@ -1,6 +1,7 @@
 import { Decimal } from "https://esm.sh/decimal.js@10.4.3";
 import { supabase } from "./supabase.ts";
 import { clearDefaultPersonCache } from "./auth.ts";
+import { normalizeMerchantForMatch } from "./merchant.ts";
 
 async function fetchUserRows(
   table: string,
@@ -143,20 +144,10 @@ export function mappedPlaidCreditCardName(officialName: string | null, name: str
   return null;
 }
 
-export function normalizeMerchant(value: string | null | undefined): string {
-  if (!value) return "";
-  let v = String(value);
-  v = v.normalize("NFKD").replace(/[^\x00-\x7F]/g, "");
-  v = v.toLowerCase();
-  v = v.replace(/^(sq|dd|tst|pos|paypal|venmo)\s*\*?\s*/, "");
-  v = v.replace(/[^a-z0-9]+/g, " ");
-  return v.replace(/\s+/g, " ").trim();
-}
-
 function merchantMatchScore(event: Record<string, unknown>, transaction: Record<string, unknown>): number {
   const eventNames = new Set<string>();
-  const em = normalizeMerchant(event.merchant);
-  const emn = normalizeMerchant(event.merchant_name);
+  const em = normalizeMerchantForMatch(event.merchant);
+  const emn = normalizeMerchantForMatch(event.merchant_name);
   if (em) eventNames.add(em);
   if (emn) eventNames.add(emn);
   if (eventNames.size === 0) return 0.0;
@@ -164,7 +155,7 @@ function merchantMatchScore(event: Record<string, unknown>, transaction: Record<
   const transactionFields = ["merchant_name", "name", "original_description"];
   const transactionNames = new Set<string>();
   for (const field of transactionFields) {
-    const normalized = normalizeMerchant(transaction[field]);
+    const normalized = normalizeMerchantForMatch(transaction[field]);
     if (normalized) transactionNames.add(normalized);
   }
   if (transactionNames.size === 0) return 0.0;
@@ -254,8 +245,8 @@ function reconciliationCandidates(event: Record<string, unknown>, transactions: 
     let isTip = false;
     let tipPercentage: number | null = null;
     try {
-      const eventAmount = new Decimal(String(event.amount));
-      const txAmount = new Decimal(String(transaction.amount));
+       const eventAmount = new Decimal(String(Math.abs(Number(event.amount))));
+       const txAmount = new Decimal(String(Math.abs(Number(transaction.amount))));
       amountDifference = eventAmount.sub(txAmount).abs();
 
       if (txAmount.gt(eventAmount) && eventAmount.gt(0)) {
@@ -273,7 +264,7 @@ function reconciliationCandidates(event: Record<string, unknown>, transactions: 
     const txDate = transactionCalendarDate(transaction);
     const dateDifference = eventDate && txDate ? Math.abs(Math.floor((eventDate.getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24))) : null;
 
-    if (dateDifference !== null && dateDifference > 3) continue;
+    if (dateDifference !== null && dateDifference > 5) continue;
 
     if (amountDifference.gt(new Decimal("0.01")) && !isTip && (merchantSimilarity < 0.60 || dateDifference === null)) {
       continue;

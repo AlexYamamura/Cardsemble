@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:cardsemble/core/utils/date_utils.dart';
 import 'package:cardsemble/features/transactions/domain/transactions_domain.dart';
 import 'package:cardsemble/features/transactions/data/transaction_cache.dart';
@@ -83,8 +83,6 @@ class TransactionsNotifier extends ChangeNotifier {
   List<StatementAccount> _accounts = [];
   String? _error;
   DateTime? _lastUpdated;
-  CsvImportPreview? _csvPreview;
-  bool _isPreviewing = false;
   // Default filter: current month-to-date. Owned here so the transactions tab
   // has a date filter (and therefore a visible date chip) without depending on
   // the summary tab's lifecycle or post-frame callback ordering.
@@ -117,8 +115,6 @@ class TransactionsNotifier extends ChangeNotifier {
   bool get hasMore => _hasMore;
   String? get error => _error;
   DateTime? get lastUpdated => _lastUpdated;
-  CsvImportPreview? get csvPreview => _csvPreview;
-  bool get isPreviewing => _isPreviewing;
   DateTimeRange? get dateRange => _dateRange;
 
   String? get selectedAccountId => _selectedAccountId;
@@ -678,93 +674,6 @@ class TransactionsNotifier extends ChangeNotifier {
     }
   }
 
-   Future<Result<CsvImportPreview>> previewCsvImport(String accountId, String csvText) async {
-     _isPreviewing = true;
-     _csvPreview = null;
-     _error = null;
-     notifyListeners();
-     final scope = _cache?.currentScope;
-
-     try {
-       final result = await _transactionRepository.previewCsvImport(accountId, csvText);
-       if (!_scopeStillValid(scope)) {
-         _isPreviewing = false;
-         return const FailureResult(
-           AuthFailure('The signed-in user changed during the import preview.'),
-         );
-       }
-       return result.fold(
-         (preview) {
-           _csvPreview = preview;
-           _isPreviewing = false;
-           notifyListeners();
-           return Success(preview);
-         },
-         (failure) {
-           _error = failure.message;
-           _isPreviewing = false;
-           notifyListeners();
-           return FailureResult(failure);
-         },
-       );
-     } catch (e) {
-       if (!_scopeStillValid(scope)) {
-         _isPreviewing = false;
-         return const FailureResult(
-           AuthFailure('The signed-in user changed during the import preview.'),
-         );
-       }
-       _error = e.toString();
-       _isPreviewing = false;
-       notifyListeners();
-       return FailureResult(UnknownFailure(e.toString()));
-     }
-   }
-
-   Future<Result<CsvImportResult>> confirmCsvImport(String accountId, List<CsvImportRow> rows, String filename) async {
-     _error = null;
-     notifyListeners();
-     final scope = _cache?.currentScope;
-
-     try {
-       final result = await _transactionRepository.confirmCsvImport(accountId, rows, filename);
-       if (!_scopeStillValid(scope)) {
-         return const FailureResult(
-           AuthFailure('The signed-in user changed during the import.'),
-         );
-       }
-       if (result.isFailure) {
-         _error = result.failure.message;
-         notifyListeners();
-         return FailureResult(result.failure);
-       }
-       await loadTransactions(reset: true);
-       await _reloadSummary();
-       return Success(result.value);
-     } catch (e) {
-       if (!_scopeStillValid(scope)) {
-         return const FailureResult(
-           AuthFailure('The signed-in user changed during the import.'),
-         );
-       }
-       _error = e.toString();
-       notifyListeners();
-       return FailureResult(UnknownFailure(e.toString()));
-     }
-   }
-
-  Future<void> loadCsvHistory() async {
-    try {
-      final result = await _transactionRepository.loadCsvImportHistory();
-      result.fold(
-        (history) => debugPrint('History: $history'),
-        (failure) => _error = failure.message,
-      );
-    } catch (e) {
-      _error = e.toString();
-    }
-  }
-
   /// Clears all user-owned state. Called when the authenticated identity
   /// changes so the next session cannot render the previous user's data.
   void resetForSessionChange({bool clearFilters = true}) {
@@ -773,8 +682,6 @@ class TransactionsNotifier extends ChangeNotifier {
     _people = [];
     _accounts = [];
     _splitDraftCache.clear();
-    _csvPreview = null;
-    _isPreviewing = false;
     _error = null;
     _lastUpdated = null;
     _isLoading = false;
@@ -1026,11 +933,6 @@ class TransactionsNotifier extends ChangeNotifier {
 
   void clearError() {
     _error = null;
-    notifyListeners();
-  }
-
-  void clearPreview() {
-    _csvPreview = null;
     notifyListeners();
   }
 }
