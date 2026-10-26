@@ -241,22 +241,6 @@ class _CaptureSettingsScreenState extends State<CaptureSettingsScreen> {
                 minimumSize: const Size(double.infinity, 56),
               ),
             ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () async {
-                final deviceId = notifier.deviceId;
-                if (deviceId != null) {
-                  await notifier.revokeDeviceToken(deviceId);
-                }
-              },
-              icon: const Icon(Icons.block, color: Colors.red),
-              label: const Text('Disable Capture',
-                  style: TextStyle(color: Colors.red)),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 56),
-                side: const BorderSide(color: Colors.red, width: 2),
-              ),
-            ),
           ],
         ],
       ),

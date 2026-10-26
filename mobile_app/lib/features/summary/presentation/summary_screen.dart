@@ -173,33 +173,6 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
     }
   }
 
-  Future<void> _openAccounts() async {
-    final accountsNotifier = context.read<AccountsNotifier>();
-    final success = await accountsNotifier.linkAccount();
-    if (!mounted) return;
-    if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(accountsNotifier.error ?? 'Could not link a card.'),
-        ),
-      );
-      return;
-    }
-    final institution = accountsNotifier.lastLinkedInstitutionName;
-    final warning = accountsNotifier.warning;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          warning ??
-              (institution == null
-                  ? 'Card linked successfully.'
-                  : '$institution connected.'),
-        ),
-      ),
-    );
-    // Pull in the transactions for the newly linked card.
-    await context.read<TransactionsNotifier>().refresh();
-  }
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -410,24 +383,6 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
           );
         }).toList(),
       ),
-      const SizedBox(height: 8),
-       Wrap(
-         alignment: WrapAlignment.center,
-         spacing: 12,
-         runSpacing: 8,
-          children: [
-            FilledButton.icon(
-              onPressed: (_accountsNotifier?.isLinking ?? false) ? null : _openAccounts,
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Link a card'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                textStyle:
-                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-              ),
-            ),
-          ],
-        ),
       const SizedBox(height: 12),
       _BreakdownCard(
         title: 'By household member',
@@ -645,7 +600,7 @@ String _money(String value, {bool absolute = false}) {
 }
 
 String _rangeLabel(DateTimeRange range) {
-  return '${_shortDate(range.start)} â€“ ${_shortDate(range.end)}';
+  return '${_shortDate(range.start)} – ${_shortDate(range.end)}';
 }
 
 String _shortDate(DateTime value) {
