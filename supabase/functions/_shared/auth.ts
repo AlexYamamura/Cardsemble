@@ -1,6 +1,6 @@
 import { supabase } from "./supabase.ts";
 
-export function getBearerToken(authorization: string | undefined): string {
+export function getBearerToken(authorization: string | null): string {
   const parts = (authorization || "").split(" ");
   if (parts.length !== 2 || parts[0]?.toLowerCase() !== "bearer" || !parts[1]) {
     throw new Error("401: Bearer token required");
@@ -20,7 +20,7 @@ export async function verifySupabaseUser(token: string): Promise<string> {
 }
 
 export async function authenticateRequest(
-  authorization: string | undefined,
+  authorization: string | null,
 ): Promise<{ userId: string | null; authSource: string }> {
   const token = getBearerToken(authorization);
   const testToken = Deno.env.get("CARD_EVENTS_API_TOKEN");
