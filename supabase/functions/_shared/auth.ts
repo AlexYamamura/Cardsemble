@@ -187,4 +187,4 @@ export class ApiError extends Error {
   }
 }
 
-export async function addHouseholdMember(householdId, userId, role = "member") { const { error } = await supabase.from("household_members").insert({ household_id: householdId, user_id: userId, role }); if (error) throw new Error("502:" + error.message); }
+export async function addHouseholdMember(householdId: string, userId: string, role = "member"): Promise<void> { const { error } = await supabase.from("household_members").insert({ household_id: householdId, user_id: userId, role }); if (error) throw new Error("502:" + error.message); }

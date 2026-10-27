@@ -53,7 +53,7 @@ async function fetchAllRows(
   userId: string | null,
   params: Record<string, string>,
   selectOverride?: string,
-): Promise<any[]> {
+): Promise<any[] | Response> {
   const rows: any[] = [];
   let offset = 0;
   while (true) {
@@ -135,7 +135,7 @@ Deno.serve(async (req) => {
         }
 
         // data is an array of { data: ... }
-        const cards = data.map(row => row.data);
+        const cards = data.map((row: any) => row.data);
         return jsonResponse({ cards });
       }
 
@@ -816,7 +816,7 @@ Deno.serve(async (req) => {
       }
       const transactionId = path.split("/")[1];
       const body = await req.json().catch(() => ({}));
-      const splits = Array.isArray(body.splits) ? body.splits : [];
+      const splits: any[] = Array.isArray(body.splits) ? body.splits : [];
 
       if (splits.length === 0) {
         throw new ApiError(400, "At least one split is required");
@@ -1435,7 +1435,7 @@ Deno.serve(async (req) => {
       );
 
       const liabilityState = liabilityStates?.[0] ?? null;
-      const accountCurrency = new Map(accounts.map((row) => [row.account_id, row.iso_currency_code ?? "UNKNOWN"]));
+      const accountCurrency = new Map<string, string>(accounts.map((row): [string, string] => [row.account_id as string, (row.iso_currency_code as string | null | undefined) ?? "UNKNOWN"]));
       const totalsByCurrency: Record<string, Decimal> = {};
       for (const row of readyRows) {
         const currency = accountCurrency.get(row.account_id as string) ?? "UNKNOWN";

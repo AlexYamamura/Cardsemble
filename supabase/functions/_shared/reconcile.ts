@@ -184,7 +184,7 @@ function merchantMatchScore(event: Record<string, unknown>, transaction: Record<
   return best;
 }
 
-function parseDate(value: string | null | undefined): Date | null {
+function parseDate(value: unknown): Date | null {
   if (!value) return null;
   try {
     return new Date(String(value).replace("Z", "+00:00"));
@@ -381,7 +381,7 @@ export async function refreshWalletAssignments(userId: string): Promise<number> 
 
   for (const result of reconciliations) {
     const event = eventById.get(result.event_id as string);
-    const transactionId = result.candidate_transaction_id;
+    const transactionId = result.candidate_transaction_id as string | null;
     if (
       !event ||
       !event.person_id ||
@@ -485,7 +485,7 @@ export async function refreshWalletAssignments(userId: string): Promise<number> 
   return updates.length;
 }
 
-function statementIssueDate(value: string | Date | null | undefined): Date | null {
+function statementIssueDate(value: unknown): Date | null {
   if (!value) return null;
   if (value instanceof Date) return value;
   try {

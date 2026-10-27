@@ -21,7 +21,7 @@ export const PROCESSOR_PREFIXES = ["sq", "dd", "tst", "pos", "paypal", "pp", "ve
 /**
  * Match-only merchant normalizer.
  */
-export function normalizeMerchantForMatch(value: string | null | undefined): string {
+export function normalizeMerchantForMatch(value: unknown): string {
   if (!value) return "";
   let v = String(value);
 

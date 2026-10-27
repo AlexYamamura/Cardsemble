@@ -295,7 +295,7 @@ export async function savePlaidCreditAccounts(
   accounts: any[],
   userId: string,
   itemId: string,
-  institutionName: string | null,
+  institutionName: string | null | undefined,
 ): Promise<number> {
   const { data: existingAccounts, error: fetchError } = await supabase
     .from("plaid_credit_accounts")
@@ -305,7 +305,7 @@ export async function savePlaidCreditAccounts(
   if (fetchError) throw new Error(`Could not fetch credit accounts: ${fetchError.message}`);
 
   const existingDisplayNames = new Map(
-    (existingAccounts ?? []).map((row) => [row.account_id, row.display_name]),
+    (existingAccounts ?? []).map((row: any) => [row.account_id, row.display_name]),
   );
 
   const accountRows: any[] = [];
@@ -404,7 +404,7 @@ export async function syncPlaidLiabilities(
     await savePlaidCreditAccounts(response.accounts, userId, itemId, institutionName);
   }
 
-  const accountsById = new Map(accountRows.map((row: any) => [row.account_id, row]));
+  const accountsById = new Map<string, any>(accountRows.map((row: any): [string, any] => [row.account_id, row]));
   const now = new Date().toISOString();
   const snapshots: any[] = [];
 
