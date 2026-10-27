@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -19,9 +20,13 @@ import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
 /// tracked locally in SharedPreferences and can be migrated to backend tables
 /// later.
 class WalletNotifier extends ChangeNotifier {
-  WalletNotifier({required AccountsNotifier accounts, required CardCatalogRepository catalog})
-      : _accounts = accounts,
-        _catalog = catalog;
+  WalletNotifier({
+    required AccountsNotifier accounts,
+    required CardCatalogRepository catalog,
+  })  : _accounts = accounts,
+        _catalog = catalog {
+    _accounts.addListener(_onAccountsChanged);
+  }
 
   final AccountsNotifier _accounts;
   final CardCatalogRepository _catalog;
@@ -31,6 +36,23 @@ class WalletNotifier extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   DateTime? _lastUpdated;
+
+  /// Prevents the AccountsNotifier listener from re-entering while it is
+  /// rebuilding the card panels.
+  bool _applyingAccountsUpdate = false;
+
+  /// A non-sync AccountsNotifier change arrived while load() was running.
+  bool _accountsRefreshPending = false;
+
+  /// load() was requested while a sync was in flight; retry it once the sync
+  /// completion notification arrives.
+  bool _pendingLoadAfterSync = false;
+
+  /// Whether the catalog has been fetched successfully.
+  bool _catalogLoaded = false;
+
+  /// Whether dispose() has been called.
+  bool _disposed = false;
 
   /// Locally persisted benefit usage: cardId -> {benefitId: used}.
   final Map<String, Map<String, bool>> _benefitUsage = {};
@@ -43,6 +65,7 @@ class WalletNotifier extends ChangeNotifier {
   List<WalletCard> get householdCards => _householdCards;
   WalletSummary? get walletSummary => _accounts.walletSummary;
   bool get isLoading => _isLoading;
+  bool get isSyncing => _accounts.isSyncing;
   String? get error => _error;
   DateTime? get lastUpdated => _lastUpdated;
 
@@ -55,6 +78,16 @@ class WalletNotifier extends ChangeNotifier {
   /// Loads connections, statement cycles, and catalog cards, then assembles the
   /// card panels. Safe to call multiple times; reloads on each invocation.
   Future<void> load() async {
+    // Never read mid-sync snapshots. The sync-completion listener will rerun
+    // this load after the server writes and AccountsNotifier reloads land.
+    if (_accounts.isSyncing) {
+      _pendingLoadAfterSync = true;
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+      return;
+    }
+
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -67,22 +100,76 @@ class WalletNotifier extends ChangeNotifier {
         _loadCatalog(),
       ]);
 
-      _assembleCards();
-      await _loadPersistedState();
-      _applyPersistedState();
-      _lastUpdated = DateTime.now();
+      await _applyAccountsSnapshot();
     } catch (error) {
       _error = error.toString();
     } finally {
       _isLoading = false;
       notifyListeners();
+
+      if (_accountsRefreshPending && !_disposed && !_accounts.isSyncing) {
+        _accountsRefreshPending = false;
+        await _applyAccountsSnapshot();
+      }
+    }
+  }
+
+  /// Listens for AccountsNotifier changes (sync start/stop, snapshot refreshes)
+  /// and relays them so the wallet UI stays current without extra Plaid calls.
+  /// The guard flags prevent re-entrancy loops with load().
+  void _onAccountsChanged() {
+    if (_disposed || _applyingAccountsUpdate) return;
+
+    if (_accounts.isSyncing) {
+      // Surface the sync state to the screen, but do not touch the snapshots
+      // until the sync's post-write reloads have completed.
+      notifyListeners();
+      return;
+    }
+
+    if (_pendingLoadAfterSync) {
+      _pendingLoadAfterSync = false;
+      _isLoading = false;
+      unawaited(load());
+      return;
+    }
+
+    if (_isLoading) {
+      _accountsRefreshPending = true;
+      return;
+    }
+
+    unawaited(_applyAccountsSnapshot());
+  }
+
+  /// Rebuilds the card panels from the connections / statement cycles / wallet
+  /// summary that AccountsNotifier already refreshed. This reads no network
+  /// resources; the only I/O is the local SharedPreferences state.
+  Future<void> _applyAccountsSnapshot() async {
+    if (_disposed || _applyingAccountsUpdate) return;
+    _applyingAccountsUpdate = true;
+
+    try {
+      if (!_catalogLoaded) {
+        await _loadCatalog();
+      }
+      _assembleCards();
+      await _loadPersistedState();
+      if (_disposed) return;
+      _applyPersistedState(); // notifies listeners
+      _lastUpdated = DateTime.now();
+    } finally {
+      _applyingAccountsUpdate = false;
     }
   }
 
   Future<void> _loadCatalog() async {
     final result = await _catalog.getAllCards();
     return result.fold(
-      (cards) => _catalogCards = cards,
+      (cards) {
+        _catalogCards = cards;
+        _catalogLoaded = true;
+      },
       (failure) {
         // Catalog backend may not be deployed yet; degrade gracefully so the
         // connected accounts still show with institution-level info.
@@ -472,6 +559,13 @@ class WalletNotifier extends ChangeNotifier {
   /// Rebuilds the card list from the currently loaded source data, re-applying
   /// locally persisted benefit usage and bonus spend.
   Future<void> refresh() => load();
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _accounts.removeListener(_onAccountsChanged);
+    super.dispose();
+  }
 }
 
 extension _WalletBenefitCopy on WalletBenefit {

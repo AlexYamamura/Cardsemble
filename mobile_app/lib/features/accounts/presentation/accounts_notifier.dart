@@ -16,6 +16,7 @@ class AccountsNotifier extends ChangeNotifier {
   WalletSummary? _walletSummary;
   bool _isLoading = false;
   bool _isLinking = false;
+  bool _isSyncing = false;
   String? _error;
   String? _warning;
   String? _linkToken;
@@ -26,6 +27,7 @@ class AccountsNotifier extends ChangeNotifier {
   WalletSummary? get walletSummary => _walletSummary;
   bool get isLoading => _isLoading;
   bool get isLinking => _isLinking;
+  bool get isSyncing => _isSyncing;
   String? get error => _error;
   String? get warning => _warning;
   String? get linkToken => _linkToken;
@@ -225,6 +227,7 @@ class AccountsNotifier extends ChangeNotifier {
   Future<bool> syncItem(String itemId) async {
     _error = null;
     _warning = null;
+    _isSyncing = true;
     notifyListeners();
 
     try {
@@ -262,12 +265,16 @@ class AccountsNotifier extends ChangeNotifier {
       _warning = null;
       notifyListeners();
       return false;
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
     }
   }
 
   Future<bool> syncConnections() async {
     _error = null;
     _warning = null;
+    _isSyncing = true;
     notifyListeners();
 
     try {
@@ -307,6 +314,9 @@ class AccountsNotifier extends ChangeNotifier {
       _warning = null;
       notifyListeners();
       return false;
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
     }
   }
 
@@ -317,6 +327,7 @@ class AccountsNotifier extends ChangeNotifier {
   }) async {
     _error = null;
     _warning = null;
+    _isSyncing = true;
     notifyListeners();
 
     try {
@@ -377,6 +388,9 @@ class AccountsNotifier extends ChangeNotifier {
       _warning = null;
       notifyListeners();
       return false;
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
     }
   }
 
@@ -436,6 +450,7 @@ class AccountsNotifier extends ChangeNotifier {
     _walletSummary = null;
     _isLoading = false;
     _isLinking = false;
+    _isSyncing = false;
     _error = null;
     _warning = null;
     _linkToken = null;

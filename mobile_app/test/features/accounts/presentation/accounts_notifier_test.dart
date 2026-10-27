@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:cardsemble/core/core.dart';
@@ -39,6 +41,7 @@ class FakeAccountRepository implements AccountRepository {
   }
 
   final List<String> linkTokenItemIds = [];
+  Completer<void>? exchangeGate;
 
   @override
   Future<Result<String>> createPlaidLinkTokenForItem(String platform, String itemId) async {
@@ -48,15 +51,20 @@ class FakeAccountRepository implements AccountRepository {
   }
 
   final List<String> syncedItemIds = [];
+  Completer<void>? syncGate;
 
   @override
   Future<Result<PlaidSyncOutcome>> syncPlaidItem(String itemId) async {
     syncedItemIds.add(itemId);
+    await syncGate?.future;
+    syncGate = null;
     return syncResult ?? const Success(PlaidSyncOutcome());
   }
 
   @override
   Future<Result<PlaidSyncOutcome>> syncPlaidConnections() async {
+    await syncGate?.future;
+    syncGate = null;
     return syncResult ?? const Success(PlaidSyncOutcome());
   }
 
@@ -67,6 +75,8 @@ class FakeAccountRepository implements AccountRepository {
     required String? institutionName,
     required String platform,
   }) async {
+    await exchangeGate?.future;
+    exchangeGate = null;
     exchanges.add({
       'publicToken': publicToken,
       'institutionId': institutionId,
@@ -360,6 +370,123 @@ void main() {
       expect(success, isTrue);
       expect(notifier.error, isNull);
       expect(notifier.warning, isNull);
+    });
+  });
+
+  group('AccountsNotifier.isSyncing', () {
+    test('signals true during syncConnections and false after', () async {
+      final repository = FakeAccountRepository();
+      repository.syncGate = Completer<void>();
+      final notifier = AccountsNotifier(
+        accountRepository: repository,
+        linkLauncher: FakePlaidLinkLauncher(
+          const PlaidLinkResult.success(publicToken: 'public-1'),
+        ),
+      );
+
+      final syncFuture = notifier.syncConnections();
+      // Let the sync get to the gate.
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(notifier.isSyncing, isTrue);
+
+      repository.syncGate!.complete();
+      await syncFuture;
+      expect(notifier.isSyncing, isFalse);
+    });
+
+    test('does not signal syncing for link token creation', () async {
+      final repository = FakeAccountRepository();
+      final notifier = AccountsNotifier(
+        accountRepository: repository,
+        linkLauncher: FakePlaidLinkLauncher(
+          const PlaidLinkResult.success(publicToken: 'public-1'),
+        ),
+      );
+
+      // createLinkToken should not set isSyncing.
+      final hasToken = await notifier.createLinkToken();
+      expect(hasToken, isTrue);
+      expect(notifier.isSyncing, isFalse);
+    });
+
+    test('is false after a failed syncConnections', () async {
+      final repository = FakeAccountRepository(
+        syncResult: const FailureResult<PlaidSyncOutcome>(
+          NetworkFailure('sync failed'),
+        ),
+      );
+      final notifier = AccountsNotifier(
+        accountRepository: repository,
+        linkLauncher: FakePlaidLinkLauncher(
+          const PlaidLinkResult.success(publicToken: 'public-1'),
+        ),
+      );
+
+      final success = await notifier.syncConnections();
+      expect(success, isFalse);
+      expect(notifier.isSyncing, isFalse);
+    });
+
+    test('is false after a failed exchangePublicToken', () async {
+      final repository = FakeAccountRepository(
+        exchangeResult: const FailureResult<PlaidSyncOutcome>(
+          NetworkFailure('exchange failed'),
+        ),
+      );
+      final notifier = AccountsNotifier(
+        accountRepository: repository,
+        linkLauncher: FakePlaidLinkLauncher(
+          const PlaidLinkResult.success(publicToken: 'public-1'),
+        ),
+      );
+
+      final success = await notifier.exchangePublicToken(
+        publicToken: 'public-1',
+      );
+      expect(success, isFalse);
+      expect(notifier.isSyncing, isFalse);
+    });
+
+    test('signals true during exchangePublicToken and false after', () async {
+      final repository = FakeAccountRepository();
+      repository.exchangeGate = Completer<void>();
+      final notifier = AccountsNotifier(
+        accountRepository: repository,
+        linkLauncher: FakePlaidLinkLauncher(
+          const PlaidLinkResult.success(publicToken: 'public-1'),
+        ),
+      );
+
+      final exchangeFuture = notifier.exchangePublicToken(publicToken: 'public-1');
+      // Let the exchange get to the gate.
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(notifier.isSyncing, isTrue);
+
+      repository.exchangeGate!.complete();
+      await exchangeFuture;
+      expect(notifier.isSyncing, isFalse);
+    });
+
+    test('reset clears isSyncing', () async {
+      final repository = FakeAccountRepository();
+      repository.syncGate = Completer<void>();
+      final notifier = AccountsNotifier(
+        accountRepository: repository,
+        linkLauncher: FakePlaidLinkLauncher(
+          const PlaidLinkResult.success(publicToken: 'public-1'),
+        ),
+      );
+
+      unawaited(notifier.syncConnections());
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(notifier.isSyncing, isTrue);
+
+      notifier.reset();
+      expect(notifier.isSyncing, isFalse);
+
+      // Clean up the gate so the test doesn't hang.
+      repository.syncGate!.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
     });
   });
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -216,6 +217,283 @@ void main() {
     expect(chase.welcomeBonus?.spentUnits, 1000);
     expect(chase.welcomeBonus?.progress, 0.25);
   });
+
+  test('isSyncing mirrors AccountsNotifier during sync', () async {
+    final repo = FakeAccountRepository(
+      connectionsResult: const Success(<PlaidConnection>[]),
+      statementCyclesResult: const Success(StatementCycleSummary(
+        status: 'READY',
+        total: null,
+        currency: null,
+        accountCount: 0,
+        accounts: [],
+      )),
+      walletSummaryResult: const Success(WalletSummary(cardCount: 0, currencies: [])),
+    );
+    final accounts = AccountsNotifier(accountRepository: repo, linkLauncher: FakePlaidLinkLauncher());
+    final wallet = WalletNotifier(accounts: accounts, catalog: catalog);
+
+    expect(wallet.isSyncing, isFalse);
+
+    final syncFuture = accounts.syncConnections();
+    // isSyncing is set synchronously before the first await in syncConnections.
+    expect(wallet.isSyncing, isTrue);
+
+    await syncFuture;
+    expect(wallet.isSyncing, isFalse);
+  });
+
+  test('cards rebuild after sync via the accounts listener without extra repo reads', () async {
+    final repo = FakeAccountRepository(
+      connectionsResult: const Success(<PlaidConnection>[
+        PlaidConnection(itemId: 'item-chase', institutionName: 'Chase', status: 'connected'),
+      ]),
+      statementCyclesResult: const Success(StatementCycleSummary(
+        status: 'READY',
+        total: null,
+        currency: null,
+        accountCount: 1,
+        accounts: <StatementAccount>[
+          StatementAccount(
+            accountId: 'acct-chase',
+            accountName: 'Chase Card',
+            mask: '1234',
+            itemId: 'item-chase',
+            institutionName: 'Chase',
+          ),
+        ],
+      )),
+      walletSummaryResult: const Success(WalletSummary(cardCount: 1, currencies: [])),
+    );
+    final accounts = AccountsNotifier(accountRepository: repo, linkLauncher: FakePlaidLinkLauncher());
+    final wallet = WalletNotifier(accounts: accounts, catalog: catalog);
+
+    await wallet.load();
+    final chase = wallet.yourCards.firstWhere((c) => c.id == 'acct-chase');
+    expect(chase.balanceCents, isNull);
+    expect(chase.creditLimitCents, isNull);
+
+    final connectionLoadsBefore = repo.connectionLoads;
+    final statementCycleLoadsBefore = repo.statementCycleLoads;
+    final walletSummaryLoadsBefore = repo.walletSummaryLoads;
+
+    // Update the statement data with balance/limit info.
+    repo.statementCyclesResult = const Success(StatementCycleSummary(
+      status: 'READY',
+      total: null,
+      currency: 'USD',
+      accountCount: 1,
+      accounts: <StatementAccount>[
+        StatementAccount(
+          accountId: 'acct-chase',
+          accountName: 'Chase Card',
+          mask: '1234',
+          itemId: 'item-chase',
+          institutionName: 'Chase',
+          creditLimitCents: 50000,
+          currentBalanceCents: 1234,
+          currency: 'USD',
+        ),
+      ],
+    ));
+
+    await accounts.syncConnections();
+    // Let the unawaited _applyAccountsSnapshot() from the listener complete.
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    final updatedChase = wallet.yourCards.firstWhere((c) => c.id == 'acct-chase');
+    expect(updatedChase.balanceCents, 1234);
+    expect(updatedChase.creditLimitCents, 50000);
+    expect(updatedChase.currency, 'USD');
+
+    // The listener should have used _applyAccountsSnapshot (reads only from
+    // already-fetched AccountsNotifier state), not load() (which would add 3
+    // more repo reads). Only the 3 reloads inside syncConnections should have
+    // occurred.
+    expect(repo.connectionLoads, connectionLoadsBefore + 1);
+    expect(repo.statementCycleLoads, statementCycleLoadsBefore + 1);
+    expect(repo.walletSummaryLoads, walletSummaryLoadsBefore + 1);
+  });
+
+  test('card data does not update mid-sync, only after sync completes', () async {
+    final repo = FakeAccountRepository(
+      connectionsResult: const Success(<PlaidConnection>[
+        PlaidConnection(itemId: 'item-chase', institutionName: 'Chase', status: 'connected'),
+      ]),
+      statementCyclesResult: const Success(StatementCycleSummary(
+        status: 'READY',
+        total: null,
+        currency: null,
+        accountCount: 1,
+        accounts: <StatementAccount>[
+          StatementAccount(
+            accountId: 'acct-chase',
+            accountName: 'Chase Card',
+            mask: '1234',
+            itemId: 'item-chase',
+            institutionName: 'Chase',
+          ),
+        ],
+      )),
+      walletSummaryResult: const Success(WalletSummary(cardCount: 1, currencies: [])),
+    );
+    final accounts = AccountsNotifier(accountRepository: repo, linkLauncher: FakePlaidLinkLauncher());
+    final wallet = WalletNotifier(accounts: accounts, catalog: catalog);
+
+    await wallet.load();
+
+    expect(wallet.yourCards.firstWhere((c) => c.id == 'acct-chase').balanceCents, isNull);
+
+    // Update the statement data with new balance info.
+    repo.statementCyclesResult = const Success(StatementCycleSummary(
+      status: 'READY',
+      total: null,
+      currency: 'USD',
+      accountCount: 1,
+      accounts: <StatementAccount>[
+        StatementAccount(
+          accountId: 'acct-chase',
+          accountName: 'Chase Card',
+          mask: '1234',
+          itemId: 'item-chase',
+          institutionName: 'Chase',
+          creditLimitCents: 50000,
+          currentBalanceCents: 9999,
+          currency: 'USD',
+        ),
+      ],
+    ));
+
+    // Start a gated sync.
+    repo.syncGate = Completer<void>();
+    final syncFuture = accounts.syncConnections();
+
+    // Sync started: isSyncing is true.
+    expect(wallet.isSyncing, isTrue);
+
+    // Mid-sync: data should not yet reflect the updated statement.
+    expect(wallet.yourCards.firstWhere((c) => c.id == 'acct-chase').balanceCents, isNull);
+
+    // Release the sync.
+    repo.syncGate!.complete();
+    await syncFuture;
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    final chase = wallet.yourCards.firstWhere((c) => c.id == 'acct-chase');
+    expect(chase.balanceCents, 9999);
+    expect(chase.creditLimitCents, 50000);
+  });
+
+  test('load() during sync is deferred and runs when sync completes', () async {
+    final repo = FakeAccountRepository(
+      connectionsResult: const Success(<PlaidConnection>[
+        PlaidConnection(itemId: 'item-chase', institutionName: 'Chase', status: 'connected'),
+      ]),
+      statementCyclesResult: const Success(StatementCycleSummary(
+        status: 'READY',
+        total: null,
+        currency: null,
+        accountCount: 1,
+        accounts: <StatementAccount>[
+          StatementAccount(
+            accountId: 'acct-chase',
+            accountName: 'Chase Card',
+            mask: '1234',
+            itemId: 'item-chase',
+            institutionName: 'Chase',
+          ),
+        ],
+      )),
+      walletSummaryResult: const Success(WalletSummary(cardCount: 1, currencies: [])),
+    );
+    final accounts = AccountsNotifier(accountRepository: repo, linkLauncher: FakePlaidLinkLauncher());
+    final wallet = WalletNotifier(accounts: accounts, catalog: catalog);
+
+    // Start a gated sync.
+    repo.syncGate = Completer<void>();
+    final syncFuture = accounts.syncConnections();
+    expect(wallet.isSyncing, isTrue);
+
+    // Calling load() during sync should be deferred — no repo reads.
+    await wallet.load();
+    expect(wallet.isLoading, isTrue);
+    expect(repo.connectionLoads, 0);
+    expect(repo.statementCycleLoads, 0);
+    expect(repo.walletSummaryLoads, 0);
+
+    // Release the sync gate.
+    repo.syncGate!.complete();
+    await syncFuture;
+
+    // Let the deferred load() (triggered by the listener) complete.
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    // The deferred load should have run: each counter went from 1 (sync reload)
+    // to 2 (sync reload + deferred load).
+    expect(repo.connectionLoads, greaterThan(1));
+    expect(repo.statementCycleLoads, greaterThan(1));
+    expect(repo.walletSummaryLoads, greaterThan(1));
+  });
+
+  test('listener is removed on dispose and does not rebuild after sync', () async {
+    final repo = FakeAccountRepository(
+      connectionsResult: const Success(<PlaidConnection>[
+        PlaidConnection(itemId: 'item-chase', institutionName: 'Chase', status: 'connected'),
+      ]),
+      statementCyclesResult: const Success(StatementCycleSummary(
+        status: 'READY',
+        total: null,
+        currency: null,
+        accountCount: 1,
+        accounts: <StatementAccount>[
+          StatementAccount(
+            accountId: 'acct-chase',
+            accountName: 'Chase Card',
+            mask: '1234',
+            itemId: 'item-chase',
+            institutionName: 'Chase',
+          ),
+        ],
+      )),
+      walletSummaryResult: const Success(WalletSummary(cardCount: 1, currencies: [])),
+    );
+    final accounts = AccountsNotifier(accountRepository: repo, linkLauncher: FakePlaidLinkLauncher());
+    final wallet = WalletNotifier(accounts: accounts, catalog: catalog);
+
+    await wallet.load();
+    expect(wallet.yourCards.firstWhere((c) => c.id == 'acct-chase').balanceCents, isNull);
+
+    final lastUpdatedBefore = wallet.lastUpdated;
+
+    wallet.dispose();
+
+    // Update statement data with balance info.
+    repo.statementCyclesResult = const Success(StatementCycleSummary(
+      status: 'READY',
+      total: null,
+      currency: 'USD',
+      accountCount: 1,
+      accounts: <StatementAccount>[
+        StatementAccount(
+          accountId: 'acct-chase',
+          accountName: 'Chase Card',
+          mask: '1234',
+          itemId: 'item-chase',
+          institutionName: 'Chase',
+          creditLimitCents: 50000,
+          currentBalanceCents: 555,
+          currency: 'USD',
+        ),
+      ],
+    ));
+
+    await accounts.syncConnections();
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    // No rebuild should have occurred after dispose.
+    expect(wallet.lastUpdated, lastUpdatedBefore);
+    expect(wallet.yourCards.firstWhere((c) => c.id == 'acct-chase').balanceCents, isNull);
+  });
 }
 
 class FakeAccountRepository implements AccountRepository {
@@ -225,13 +503,20 @@ class FakeAccountRepository implements AccountRepository {
     this.walletSummaryResult,
   });
 
-  final Result<List<PlaidConnection>>? connectionsResult;
-  final Result<StatementCycleSummary>? statementCyclesResult;
-  final Result<WalletSummary>? walletSummaryResult;
+  Result<List<PlaidConnection>>? connectionsResult;
+  Result<StatementCycleSummary>? statementCyclesResult;
+  Result<WalletSummary>? walletSummaryResult;
+
+  int connectionLoads = 0;
+  int statementCycleLoads = 0;
+  int walletSummaryLoads = 0;
+  Completer<void>? syncGate;
 
   @override
-  Future<Result<List<PlaidConnection>>> loadPlaidConnections() async =>
-      connectionsResult ?? const Success(<PlaidConnection>[]);
+  Future<Result<List<PlaidConnection>>> loadPlaidConnections() async {
+    connectionLoads++;
+    return connectionsResult ?? const Success(<PlaidConnection>[]);
+  }
 
   @override
   Future<Result<String>> createPlaidLinkToken(String platform) async =>
@@ -242,8 +527,11 @@ class FakeAccountRepository implements AccountRepository {
       const Success('token');
 
   @override
-  Future<Result<PlaidSyncOutcome>> syncPlaidConnections() async =>
-      const Success(PlaidSyncOutcome());
+  Future<Result<PlaidSyncOutcome>> syncPlaidConnections() async {
+    await syncGate?.future;
+    syncGate = null;
+    return const Success(PlaidSyncOutcome());
+  }
 
   @override
   Future<Result<PlaidSyncOutcome>> syncPlaidItem(String itemId) async =>
@@ -263,25 +551,29 @@ class FakeAccountRepository implements AccountRepository {
       const Success(null);
 
   @override
-  Future<Result<StatementCycleSummary>> loadStatementCycles() async =>
-      statementCyclesResult ??
-      const Success(
-        StatementCycleSummary(
-          status: 'WAITING_FOR_STATEMENTS',
-          total: null,
-          currency: null,
-          accountCount: 0,
-          accounts: [],
-        ),
-      );
+  Future<Result<StatementCycleSummary>> loadStatementCycles() async {
+    statementCycleLoads++;
+    return statementCyclesResult ??
+        const Success(
+          StatementCycleSummary(
+            status: 'WAITING_FOR_STATEMENTS',
+            total: null,
+            currency: null,
+            accountCount: 0,
+            accounts: [],
+          ),
+        );
+  }
 
   @override
-  Future<Result<WalletSummary>> loadWalletSummary() async =>
-      walletSummaryResult ??
-      const Success(
-        WalletSummary(
-          cardCount: 0,
-          currencies: [],
-        ),
-      );
+  Future<Result<WalletSummary>> loadWalletSummary() async {
+    walletSummaryLoads++;
+    return walletSummaryResult ??
+        const Success(
+          WalletSummary(
+            cardCount: 0,
+            currencies: [],
+          ),
+        );
+  }
 }

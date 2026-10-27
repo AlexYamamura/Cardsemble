@@ -91,9 +91,9 @@ class _WalletScreenState extends State<WalletScreen> {
     if (!mounted) return;
 
     if (success) {
-      // relinkItem updates the AccountsNotifier connections (status flips from
-      // 'error' to 'connected'), but WalletNotifier does not listen to it, so
-      // we must explicitly reload the assembled wallet cards.
+      // relinkItem() -> exchangePublicToken() refreshes the AccountsNotifier
+      // snapshots; WalletNotifier's listener also rebuilds automatically.
+      // Reload explicitly so persisted local state is re-applied.
       await wallet.load();
     }
 
@@ -110,6 +110,42 @@ class _WalletScreenState extends State<WalletScreen> {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
+      );
+    }
+  }
+
+  /// Triggers a full Plaid sync (which writes to the Supabase DB) and then
+  /// reloads the wallet. Awaits the sync so the wallet only reads fresh data
+  /// after the backend has finished writing.
+  Future<void> _syncAccounts() async {
+    final accounts = context.read<AccountsNotifier>();
+    final wallet = context.read<WalletNotifier>();
+    if (accounts.isSyncing || wallet.isLoading) return;
+
+    final success = await accounts.syncConnections();
+    if (!mounted) return;
+
+    // Capture the sync result before load() reuses the shared AccountsNotifier
+    // error/warning channels.
+    final syncError = accounts.error;
+    final syncWarning = accounts.warning;
+
+    // syncConnections() resolves only after the Edge Function wrote the sync
+    // results and the notifier re-read the DB. load() is DB-only; it does not
+    // call Plaid.
+    await wallet.load();
+    if (!mounted) return;
+
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(syncError ?? 'Could not sync accounts.')),
+      );
+      return;
+    }
+
+    if (syncWarning != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(syncWarning)),
       );
     }
   }
@@ -132,18 +168,24 @@ class _WalletScreenState extends State<WalletScreen> {
         foregroundColor: AppColors.onPrimary,
         title: const Text('Wallet'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.sync),
-            onPressed: () {
-              context.read<AccountsNotifier>().syncConnections();
-              // Reload wallet summary after sync completes
-              Future.delayed(const Duration(seconds: 2), () {
-                if (context.mounted) {
-                  context.read<WalletNotifier>().load();
-                }
-              });
+          Consumer<WalletNotifier>(
+            builder: (context, wallet, _) {
+              final busy = wallet.isLoading || wallet.isSyncing;
+              return IconButton(
+                icon: busy
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.onPrimary,
+                        ),
+                      )
+                    : const Icon(Icons.sync),
+                onPressed: busy ? null : _syncAccounts,
+                tooltip: busy ? 'Syncing accounts…' : 'Sync Plaid accounts',
+              );
             },
-            tooltip: 'Sync Plaid accounts',
           ),
           SettingsGearMenu(
             onOpenSettings: widget.onOpenSettings,
@@ -154,12 +196,21 @@ class _WalletScreenState extends State<WalletScreen> {
       ),
       body: Consumer<WalletNotifier>(
         builder: (context, notifier, child) {
+          final summaryReady = notifier.walletSummary?.isFullySynced ?? false;
+
+          // Wait for an in-flight sync before rendering the placeholder-heavy
+          // wallet. If fully synced data already exists, keep it visible and
+          // show the progress banner instead of blanking the page.
+          if (notifier.isSyncing && !summaryReady) {
+            return _WalletWaitingView(syncing: true);
+          }
+
           // Show a loading spinner on first load, before any cards have been
           // assembled from the async data sources. Once `load()` has completed
           // at least once, fall back to the normal UI (including the empty
           // state) so pull-to-refresh and retry still render content.
           if (notifier.isLoading && notifier.yourCards.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
+            return _WalletWaitingView(syncing: false);
           }
           final matchedCards = notifier.yourCards
               .where((card) => card.catalogCard != null)
@@ -169,6 +220,8 @@ class _WalletScreenState extends State<WalletScreen> {
             onRefresh: () async => await notifier.load(),
             child: CustomScrollView(
               slivers: [
+                if (notifier.isSyncing)
+                  const SliverToBoxAdapter(child: _SyncProgressBanner()),
                 SliverToBoxAdapter(
                   child: _Header(
                     error: notifier.error,
@@ -179,6 +232,7 @@ class _WalletScreenState extends State<WalletScreen> {
                   child: _WalletSummaryCard(
                     summary: notifier.walletSummary,
                     cards: notifier.yourCards.length,
+                    isSyncing: notifier.isSyncing,
                   ),
                 ),
                 SliverToBoxAdapter(
@@ -385,10 +439,12 @@ class _WalletSummaryCard extends StatelessWidget {
   const _WalletSummaryCard({
     required this.summary,
     required this.cards,
+    required this.isSyncing,
   });
 
   final WalletSummary? summary;
   final int cards;
+  final bool isSyncing;
 
   @override
   Widget build(BuildContext context) {
@@ -458,11 +514,13 @@ class _WalletSummaryCard extends StatelessWidget {
                         ? '${primary.cardCount} card(s)'
                         : null,
                   ),
-                  _SummaryMetric(
-                    label: 'Number of cards',
-                    value: summary?.cardCount.toString() ?? '0',
-                    subtitle: isFullySynced ? 'All synced' : 'Syncing…',
-                  ),
+          _SummaryMetric(
+            label: 'Number of cards',
+            value: summary?.cardCount.toString() ?? '0',
+            subtitle: isFullySynced
+                ? 'All synced'
+                : (isSyncing ? 'Syncing…' : 'Partially synced'),
+          ),
                   _SummaryMetric(
                     label: 'Highest payment',
                     value: paymentText,
@@ -535,6 +593,66 @@ class _SummaryMetric extends StatelessWidget {
             ),
           ],
       ],
+    );
+  }
+}
+
+class _WalletWaitingView extends StatelessWidget {
+  const _WalletWaitingView({required this.syncing});
+
+  final bool syncing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(
+              syncing ? 'Syncing your cards…' : 'Loading your wallet…',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+            if (syncing) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'Waiting for balances and payment dates to finish syncing.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SyncProgressBanner extends StatelessWidget {
+  const _SyncProgressBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: AppColors.cream,
+      child: const Row(
+        children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text('Syncing your cards…', style: TextStyle(fontSize: 13)),
+          ),
+        ],
+      ),
     );
   }
 }
