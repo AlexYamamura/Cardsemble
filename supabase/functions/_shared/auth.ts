@@ -132,59 +132,9 @@ export async function getHouseholdPerson(
   return data && data.length > 0 ? data[0] as Record<string, unknown> : null;
 }
 
-let _defaultPersonCache = new Map<string, { person_id: string; display_name: string }>();
-
-export function clearDefaultPersonCache(userId: string): void {
-  _defaultPersonCache.delete(userId);
-}
-
-export async function getDefaultPerson(
-  userId: string,
-  useCache = true,
-): Promise<{ person_id: string; display_name: string }> {
-  if (useCache && _defaultPersonCache.has(userId)) {
-    return _defaultPersonCache.get(userId)!;
-  }
-  const person = await ensureDefaultPerson(userId);
-  if (useCache) {
-    _defaultPersonCache.set(userId, person);
-  }
-  return person;
-}
-
-export function genericError(message: string): {
-  statusCode: number;
-  error: string;
-} {
-  return { statusCode: 502, error: message };
-}
-
-export function badRequest(message: string): {
-  statusCode: number;
-  error: string;
-} {
-  return { statusCode: 400, error: message };
-}
-
-export function notFound(message: string): {
-  statusCode: number;
-  error: string;
-} {
-  return { statusCode: 404, error: message };
-}
-
-export function forbidden(message: string): {
-  statusCode: number;
-  error: string;
-} {
-  return { statusCode: 403, error: message };
-}
-
 export class ApiError extends Error {
   constructor(public statusCode: number, message: string) {
     super(message);
     this.name = "ApiError";
   }
 }
-
-export async function addHouseholdMember(householdId: string, userId: string, role = "member"): Promise<void> { const { error } = await supabase.from("household_members").insert({ household_id: householdId, user_id: userId, role }); if (error) throw new Error("502:" + error.message); }

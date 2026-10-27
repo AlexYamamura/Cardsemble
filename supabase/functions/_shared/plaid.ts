@@ -869,7 +869,7 @@ export async function syncPlaidItemForUser(userId: string, itemId: string): Prom
     },
     statement_summaries: statementSummaries,
     user_id: userId,
-  };
+  }; 
 }
 
 export async function runPlaidSync(): Promise<PlaidSyncResult> {

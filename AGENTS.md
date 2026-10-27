@@ -2,7 +2,7 @@
 
 Cardsemble is a Flutter household credit-card tracker backed by a Supabase Edge Function, Supabase Postgres/RLS, and Plaid. The app captures Google Wallet notifications on Android (and accepts external card events from an iPhone Shortcut), syncs Plaid transactions, lets people assign/split charges, and shows spending summaries.
 
-This file is a navigation map, not a specification. Verify behavior in the cited source before changing it. Last inspected against the working tree on 2026-10-18.
+This file is a navigation map, not a specification. Verify behavior in the cited source before changing it. Last inspected against the working tree on 2026-10-26.
 
 ## Repository Map
 
@@ -179,7 +179,7 @@ Flutter dependencies declared in `mobile_app/pubspec.yaml` include `provider`, `
 ### Tests and verification
 
 - Unit/widget tests live in `mobile_app/test/`; see "Tests and Commands" below.
-- Backend has no Deno test files or test task in the inspected tree. Validate Edge Function behavior against a deployed/local Supabase project with the required secrets.
+- Backend has no Deno test files or test task in the inspected tree. Run `deno check supabase/functions/api/index.ts` for static type-checking, then validate Edge Function behavior against a deployed/local Supabase project with the required secrets.
 - Android notification parser tests are under `mobile_app/android/app/src/androidTest/` (both `com.plaidtest.cardsemble` and legacy `com.plaidtest.card_household_app` copies). They are instrumented tests, not run by `flutter test`.
 
 ## Architecture and Data Flows
@@ -363,8 +363,8 @@ The following are observed in the current source and are useful before editing; 
 
 ### Backend verification
 
-- Deno test files are under `supabase/functions/_shared/`:
-  - Pre-existing type errors exist in `auth.ts` and `reconcile.ts` (15 errors). Use `--no-check` to skip type-checking for test runs.
+- `deno check supabase/functions/api/index.ts` — Type-check the Edge Function and all transitively imported shared modules. Verified: **0 errors**.
+- No Deno test files exist under `supabase/functions/_shared/`; backend verification is via type-checking and deployed/local Supabase runtime checks.
 - `supabase/config.toml` only provides local function configuration; deployment/secrets (`PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_USER_ID`, `PLAID_ACCESS_TOKEN`, `PLAID_ENV`, `CRON_SECRET`, `CARD_EVENTS_API_TOKEN`, Supabase service-role/anon keys) are environment concerns, not committed configuration.
 - For backend changes, inspect `supabase/functions/api/index.ts` route blocks and the relevant `_shared` module, then verify against a deployed/local Supabase project.
 

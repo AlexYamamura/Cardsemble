@@ -16,7 +16,6 @@ import {
   runPlaidSync,
 } from "../_shared/plaid.ts";
 import {
-  reconcileUserCardEvents,
   refreshWalletAssignments,
   calculateStatementSummaries,
   fetchUserRows,
@@ -46,48 +45,6 @@ function errorResponse(error: unknown): Response {
     return jsonResponse({ detail: error.message }, 500);
   }
   return jsonResponse({ detail: "Internal server error" }, 500);
-}
-
-async function fetchAllRows(
-  table: string,
-  userId: string | null,
-  params: Record<string, string>,
-  selectOverride?: string,
-): Promise<any[] | Response> {
-  const rows: any[] = [];
-  let offset = 0;
-  while (true) {
-    const filters: Record<string, string> = {
-      select: selectOverride || "*",
-      limit: "500",
-      offset: String(offset),
-      ...params,
-    };
-    if (userId) {
-      filters["user_id"] = `eq.${userId}`;
-    } else {
-      filters["user_id"] = "is.null";
-    }
-
-    const query = new URLSearchParams(filters as any).toString();
-    const url = `${Deno.env.get("SUPABASE_URL")}/rest/v1/${table}?${query}`;
-    const res = await fetch(url, {
-      headers: {
-        apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-        Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!}`,
-      },
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      return jsonResponse({ detail: (data as any)?.message || "Database error" }, 502);
-    }
-    if (!Array.isArray(data)) {
-      return jsonResponse({ detail: `Unexpected response type ${typeof data}` }, 502);
-    }
-    rows.push(...data);
-    if (data.length < 500) return rows;
-    offset += data.length;
-  }
 }
 
 Deno.serve(async (req) => {

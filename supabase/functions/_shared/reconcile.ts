@@ -1,6 +1,5 @@
 import { Decimal } from "https://esm.sh/decimal.js@10.4.3";
 import { supabase } from "./supabase.ts";
-import { clearDefaultPersonCache } from "./auth.ts";
 import { normalizeMerchantForMatch } from "./merchant.ts";
 
 async function fetchUserRows(
@@ -128,20 +127,6 @@ export function creditCardDisplayName(account: Record<string, unknown>): string 
     return `Credit card ••${mask.trim()}`;
   }
   return "Credit card";
-}
-
-const PLAID_CREDIT_CARD_NAME_MAPPINGS: Record<string, string> = {
-  "ultimaterewards": "Chase Freedom Unlimited",
-};
-
-export function mappedPlaidCreditCardName(officialName: string | null, name: string | null): string | null {
-  for (const sourceName of [officialName, name]) {
-    if (!sourceName) continue;
-    const key = sourceName.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const mapped = PLAID_CREDIT_CARD_NAME_MAPPINGS[key];
-    if (mapped) return mapped;
-  }
-  return null;
 }
 
 function merchantMatchScore(event: Record<string, unknown>, transaction: Record<string, unknown>): number {
@@ -507,8 +492,6 @@ export async function calculateStatementSummaries(userId: string): Promise<numbe
   const events = await fetchUserRows("card_events", userId, { orderBy: "occurred_at.asc,event_id.asc" });
   const reconciliations = await fetchUserRows("card_event_reconciliations", userId, { orderBy: "event_id.asc" });
 
-  clearDefaultPersonCache(userId);
-
   const peopleById = new Map(people.map((p) => [p.person_id as string, p]));
   const assignmentByTx = new Map(assignments.map((a) => [a.transaction_id as string, a]));
   const eventsById = new Map(events.map((e) => [e.event_id as string, e]));
@@ -684,5 +667,5 @@ export async function calculateStatementSummaries(userId: string): Promise<numbe
   return summaryRows.length;
 }
 
-export { fetchUserRows, statementIssueDate };
+export { fetchUserRows };
 
