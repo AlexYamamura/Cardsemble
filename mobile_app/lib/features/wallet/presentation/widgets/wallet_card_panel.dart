@@ -222,60 +222,96 @@ class _MonthlyInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasBenefits = card.benefits.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: _MetricTile(
-                  label: 'Balance',
-                  value: card.hasBalance
-                      ? formatCurrency(card.balanceCents! / 100, card.currency ?? 'USD')
-                      : '—',
-                  color: color,
-                ),
-              ),
-              Expanded(
-                child: _MetricTile(
-                  label: 'Utilization',
-                  value: card.hasCreditLimit
-                      ? '${(card.utilization! * 100).round()}%'
-                      : '—',
-                  color: color,
-                ),
-              ),
-            ],
+          // Payment due date (retained from the original layout).
+          _MetricTile(
+            label: 'Payment due',
+            value: card.hasPaymentDue
+                ? formatShortDate(card.paymentDueDate!)
+                : '—',
+            color: color,
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _MetricTile(
-                  label: 'Payment due',
-                  value: card.hasPaymentDue
-                      ? formatShortDate(card.paymentDueDate!)
-                      : '—',
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-          if (card.hasCreditLimit) ...[
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: card.utilization,
-                minHeight: 6,
-                backgroundColor: AppColors.outlineVariant,
+          if (hasBenefits) ...[
+            const SizedBox(height: 14),
+            ...card.benefits.map(
+              (benefit) => _BenefitProgressTile(
+                benefit: benefit,
                 color: color,
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Renders a single [WalletBenefit] as a labelled horizontal progress bar.
+///
+/// The bar fills to 100% when the benefit has been used this period, and is
+/// empty when it is still available. Dollar-amount credits use the benefit's
+/// existing `amountLabel` (minor-unit `amount` + `currency`); non-dollar
+/// benefits show a simple "Used"/"Available" label.
+class _BenefitProgressTile extends StatelessWidget {
+  const _BenefitProgressTile({
+    required this.benefit,
+    required this.color,
+  });
+
+  final WalletBenefit benefit;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final used = benefit.used;
+    final barColor = used ? color : color.withValues(alpha: 0.25);
+    final value = benefit.amountLabel ?? (used ? 'Used' : 'Available');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  benefit.title,
+                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: used ? color : Colors.grey,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: used ? 1.0 : 0.0,
+              minHeight: 6,
+              backgroundColor: AppColors.outlineVariant,
+              color: barColor,
+            ),
+          ),
         ],
       ),
     );

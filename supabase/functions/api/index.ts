@@ -7,9 +7,9 @@ import {
   getHouseholdPerson,
   ApiError,
 } from "../_shared/auth.ts";
-import {
+  import {
   createPlaidLinkToken,
-  createLiabilitiesLinkToken,
+  // createLiabilitiesLinkToken, // deprecated: liabilities product no longer used
   exchangePublicToken,
   syncPlaidItemsForUser,
   syncPlaidItemForUser,
@@ -517,19 +517,9 @@ Deno.serve(async (req) => {
       return jsonResponse(result);
     }
 
-    if (method === "POST" && path === "plaid/liabilities/link-token") {
-      const auth = await authenticateRequest(authorization);
-      if (auth.userId === null) {
-        throw new ApiError(403, "A Supabase session is required to link a bank");
-      }
-      const configuredUserId = Deno.env.get("PLAID_USER_ID");
-      const accessToken = Deno.env.get("PLAID_ACCESS_TOKEN");
-      if (!configuredUserId || configuredUserId !== auth.userId || !accessToken) {
-        throw new ApiError(403, "This account is not configured for Plaid");
-      }
-      const linkToken = await createLiabilitiesLinkToken(auth.userId);
-      return jsonResponse({ link_token: linkToken });
-    }
+    // Plaid liabilities link-token route is deprecated (the /liabilities/get
+    // product call is no longer made to avoid extra Plaid costs).
+    // if (method === "POST" && path === "plaid/liabilities/link-token") { ... }
 
     // --- Cron sync ---
     if ((method === "GET" || method === "POST") && path === "cron/plaid-sync") {
@@ -1227,11 +1217,7 @@ Deno.serve(async (req) => {
 
       const buckets = new Map<string, {
         currency: string;
-        creditLimitCents: number;
-        balanceCents: number;
         cardCount: number;
-        accountsWithLimit: number;
-        accountsWithBalance: number;
       }>();
 
       for (const account of connectedAccounts) {
@@ -1240,29 +1226,18 @@ Deno.serve(async (req) => {
         if (!bucket) {
           bucket = {
             currency,
-            creditLimitCents: 0,
-            balanceCents: 0,
             cardCount: 0,
-            accountsWithLimit: 0,
-            accountsWithBalance: 0,
           };
           buckets.set(currency, bucket);
         }
         bucket.cardCount += 1;
-        const limitCents = dollarsToCents(account.credit_limit);
-        const balanceCents = dollarsToCents(account.current_balance);
-        if (limitCents != null && limitCents > 0) {
-          bucket.creditLimitCents += limitCents;
-          bucket.accountsWithLimit += 1;
-        }
-        if (balanceCents != null) {
-          bucket.balanceCents += balanceCents;
-          bucket.accountsWithBalance += 1;
-        }
+        // Credit limit and current balance are no longer aggregated here because
+        // the /liabilities/get endpoint (the reliable source for those fields) has
+        // been deprecated to avoid extra Plaid product costs. Card count is the
+        // only per-currency aggregate retained.
       }
 
       const currencyList = Array.from(buckets.values()).sort((a, b) => {
-        if (b.balanceCents !== a.balanceCents) return b.balanceCents - a.balanceCents;
         if (b.cardCount !== a.cardCount) return b.cardCount - a.cardCount;
         return a.currency.localeCompare(b.currency);
       });
@@ -1350,11 +1325,7 @@ Deno.serve(async (req) => {
         primary_currency: primaryCurrency,
         currencies: currencyList.map((bucket) => ({
           currency: bucket.currency,
-          credit_limit_cents: bucket.creditLimitCents,
-          balance_cents: bucket.balanceCents,
           card_count: bucket.cardCount,
-          accounts_with_limit: bucket.accountsWithLimit,
-          accounts_with_balance: bucket.accountsWithBalance,
         })),
         highest_payment: highestPayment,
       });

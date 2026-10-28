@@ -196,19 +196,9 @@ class _WalletScreenState extends State<WalletScreen> {
       ),
       body: Consumer<WalletNotifier>(
         builder: (context, notifier, child) {
-          final summaryReady = notifier.walletSummary?.isFullySynced ?? false;
-
-          // Wait for an in-flight sync before rendering the placeholder-heavy
-          // wallet. If fully synced data already exists, keep it visible and
-          // show the progress banner instead of blanking the page.
-          if (notifier.isSyncing && !summaryReady) {
-            return _WalletWaitingView(syncing: true);
-          }
-
-          // Show a loading spinner on first load, before any cards have been
-          // assembled from the async data sources. Once `load()` has completed
-          // at least once, fall back to the normal UI (including the empty
-          // state) so pull-to-refresh and retry still render content.
+          // Show a content-ready state when card data has been assembled from the
+          // async data sources. The highest-payment metric still waits for the
+          // TransactionsNotifier list to load before it is meaningful.
           if (notifier.isLoading && notifier.yourCards.isEmpty) {
             return _WalletWaitingView(syncing: false);
           }
@@ -230,9 +220,9 @@ class _WalletScreenState extends State<WalletScreen> {
                 ),
                 SliverToBoxAdapter(
                   child: _WalletSummaryCard(
-                    summary: notifier.walletSummary,
                     cards: notifier.yourCards.length,
-                    isSyncing: notifier.isSyncing,
+                    highestPayment: notifier.highestPayment,
+                    isTransactionsLoading: notifier.isTransactionsLoading,
                   ),
                 ),
                 SliverToBoxAdapter(
@@ -432,47 +422,31 @@ class _SectionHeader extends StatelessWidget {
 
 /// Aggregation card shown above "Your Cards".
 ///
-/// Surfaces real Plaid-derived totals: total credit limit, utilization,
-/// number of cards, and the highest payment in the past 30 days. Renders
-/// placeholders when the data has not yet been synced.
+/// Surfaces the number of connected cards and the largest payment made in the
+/// past 30 days. The payment amount is derived client-side from the loaded
+/// transaction list, so the card shows a "Loading transactions…" placeholder
+/// until the TransactionsNotifier has finished its first load. Credit limit and
+/// utilization are no longer shown because the /liabilities/get Plaid product
+/// that supplied them has been deprecated.
 class _WalletSummaryCard extends StatelessWidget {
   const _WalletSummaryCard({
-    required this.summary,
     required this.cards,
-    required this.isSyncing,
+    required this.highestPayment,
+    required this.isTransactionsLoading,
   });
 
-  final WalletSummary? summary;
   final int cards;
-  final bool isSyncing;
+  final WalletPayment? highestPayment;
+  final bool isTransactionsLoading;
 
   @override
   Widget build(BuildContext context) {
     if (cards == 0) return const SizedBox.shrink();
 
-    final primary = summary?.primary;
-    final isFullySynced = summary?.isFullySynced ?? false;
-
-    final limitText = primary != null && primary.hasLimitData
-        ? formatCurrency(primary.creditLimitCents / 100, primary.currency)
-        : '—';
-    final utilText = primary != null && primary.utilization != null
-        ? '${(primary.utilization! * 100).round()}%'
-        : '—';
-    final payment = summary?.highestPayment;
+    final payment = highestPayment;
     final paymentText = payment != null
         ? formatCurrency(payment.amountCents / 100, payment.currency)
-        : '—';
-
-    final captionParts = <String>[];
-    if (summary != null && summary!.otherCurrencyCount > 0) {
-      captionParts.add(
-          'Showing ${summary!.primaryCurrency} · ${summary!.otherCurrencyCount} other currency not included');
-    }
-    if (!isFullySynced) {
-      captionParts.add(
-          'Partially synced (${primary?.accountsWithLimit ?? 0} of $cards cards)');
-    }
+        : (isTransactionsLoading ? '—' : '—');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -501,42 +475,20 @@ class _WalletSummaryCard extends StatelessWidget {
                 childAspectRatio: 2.0,
                 children: [
                   _SummaryMetric(
-                    label: 'Total credit limit',
-                    value: limitText,
-                    subtitle: primary == null || primary.hasLimitData
-                        ? null
-                        : 'Limit not yet synced',
+                    label: 'Number of cards',
+                    value: cards.toString(),
                   ),
-                  _SummaryMetric(
-                    label: 'Utilization',
-                    value: utilText,
-                    subtitle: primary != null && primary.utilization != null
-                        ? '${primary.cardCount} card(s)'
-                        : null,
-                  ),
-          _SummaryMetric(
-            label: 'Number of cards',
-            value: summary?.cardCount.toString() ?? '0',
-            subtitle: isFullySynced
-                ? 'All synced'
-                : (isSyncing ? 'Syncing…' : 'Partially synced'),
-          ),
                   _SummaryMetric(
                     label: 'Highest payment',
                     value: paymentText,
                     subtitle: payment != null
                         ? 'Last 30 days · ${payment.date != null ? _formatDate(payment.date!) : '—'}'
-                        : 'No payments found',
+                        : (isTransactionsLoading
+                            ? 'Loading transactions…'
+                            : 'No payments found'),
                   ),
                 ],
               ),
-              if (captionParts.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                  Text(
-                    captionParts.join('  •  '),
-                    style: const TextStyle(fontSize: 13, color: Colors.grey),
-                  ),
-              ],
             ],
           ),
         ),

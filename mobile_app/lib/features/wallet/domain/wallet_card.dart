@@ -5,10 +5,11 @@
 // from the card catalog (the same source used by the Research tab), plus
 // household cards owned by other household members.
 //
-// Per-account balance, credit limit, and currency are populated from the synced
-// Plaid credit account (statement cycles) when available; they remain nullable
-// until a sync runs. Benefit usage and welcome-bonus spend are tracked locally
-// in SharedPreferences and can be migrated to backend tables later.
+// Balance, credit limit, and utilization are no longer shown on card panels:
+// they were sourced from the deprecated /liabilities/get Plaid product. The
+// wallet summary now surfaces only card count and the highest recent payment
+// (computed client-side from loaded transactions). Catalog benefits and
+// welcome-bonus spend are tracked locally in SharedPreferences.
 import 'package:cardsemble/features/accounts/domain/entities/account.dart';
 import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
 
@@ -35,9 +36,7 @@ class WalletCard {
     this.status = 'connected',
     this.catalogCard,
     this.statementAccount,
-    this.balanceCents,
     this.currency,
-    this.creditLimitCents,
     this.paymentDueDate,
     this.itemId,
     this.benefits = const [],
@@ -55,14 +54,10 @@ class WalletCard {
   final CardCatalogCard? catalogCard;
   final StatementAccount? statementAccount;
 
-  /// Current balance in minor currency units, null when unavailable.
-  final int? balanceCents;
   final String? currency;
 
-  /// Credit limit in minor currency units, null when unavailable.
-  final int? creditLimitCents;
-
-  /// Payment due date for the current statement cycle, null when unavailable.
+  /// Payment due date for the current statement cycle, null when unavailable
+  /// (sourced from the now-deprecated liabilities sync).
   final DateTime? paymentDueDate;
 
   /// The Plaid item_id for this card's connection. Used to trigger a per-item
@@ -78,17 +73,6 @@ class WalletCard {
   /// Whether this connected card matched a `card_catalog` row. When `unmatched`,
   /// benefits and welcome-bonus tracking are unavailable for this card.
   final CatalogMatchStatus catalogMatchStatus;
-
-  /// Utilization ratio (balance / limit), or null when either is missing.
-  double? get utilization {
-    if (balanceCents == null || creditLimitCents == null || creditLimitCents == 0) {
-      return null;
-    }
-    return (balanceCents! / creditLimitCents!).clamp(0.0, 1.0);
-  }
-
-  bool get hasBalance => balanceCents != null;
-  bool get hasCreditLimit => creditLimitCents != null;
 
   /// Whether a payment due date is available.
   bool get hasPaymentDue => paymentDueDate != null;

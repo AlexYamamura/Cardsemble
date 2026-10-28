@@ -100,6 +100,11 @@ class TransactionsNotifier extends ChangeNotifier {
   final Set<String> _staleSections = {};
   bool _summaryLoaded = false;
 
+  /// Whether the ledger list has finished at least one successful load. Used by
+  /// consumers (e.g. the Wallet tab's highest-payment computation) to avoid
+  /// reading an empty list before the first fetch completes.
+  bool _hasLoadedTransactions = false;
+
   // In-memory cache of split draft percentages keyed by transaction id. Keeps
   // the split dropdown from re-hitting the network on every open/close of the
   // expansion tile; rewritten when a split is saved.
@@ -113,6 +118,7 @@ class TransactionsNotifier extends ChangeNotifier {
   bool get isLoadingMore => _isLoadingMore;
   bool get isSummaryLoading => _isSummaryLoading;
   bool get hasMore => _hasMore;
+  bool get hasLoadedTransactions => _hasLoadedTransactions;
   String? get error => _error;
   DateTime? get lastUpdated => _lastUpdated;
   DateTimeRange? get dateRange => _dateRange;
@@ -372,6 +378,7 @@ class TransactionsNotifier extends ChangeNotifier {
       _transactions = reset ? collected : [..._transactions, ...collected];
       _offset = offset;
       _hasMore = hasMore;
+      _hasLoadedTransactions = true;
       _staleSections.remove('transactions');
       _rememberGoodSection(transactions: _transactions);
       _lastUpdated = DateTime.now();
@@ -688,6 +695,7 @@ class TransactionsNotifier extends ChangeNotifier {
     _isLoadingMore = false;
     _isSummaryLoading = false;
     _hasMore = true;
+    _hasLoadedTransactions = false;
     _offset = 0;
     _summaryRange = null;
     _summaryLoaded = false;

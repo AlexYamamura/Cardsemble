@@ -4,44 +4,6 @@ import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
 
 void main() {
   group('WalletCard', () {
-    test('utilization is balance divided by credit limit', () {
-      final card = WalletCard(
-        id: 'card-1',
-        displayName: 'Chase Sapphire',
-        balanceCents: 250_000,
-        currency: 'USD',
-        creditLimitCents: 1_000_000,
-      );
-      expect(card.utilization, 0.25);
-      expect(card.hasBalance, isTrue);
-      expect(card.hasCreditLimit, isTrue);
-    });
-
-    test('utilization is null when balance or limit is missing', () {
-      expect(
-        WalletCard(id: 'a', displayName: 'A', balanceCents: 100, creditLimitCents: null).utilization,
-        isNull,
-      );
-      expect(
-        WalletCard(id: 'a', displayName: 'A', balanceCents: null, creditLimitCents: 1000).utilization,
-        isNull,
-      );
-      expect(
-        WalletCard(id: 'a', displayName: 'A', balanceCents: 100, creditLimitCents: 0).utilization,
-        isNull,
-      );
-    });
-
-    test('utilization clamps to 0..1', () {
-      final overLimit = WalletCard(
-        id: 'a',
-        displayName: 'A',
-        balanceCents: 1_200_000,
-        creditLimitCents: 1_000_000,
-      );
-      expect(overLimit.utilization, 1.0);
-    });
-
     test('lastFour returns the last four digits of the mask', () {
       expect(
         WalletCard(id: 'a', displayName: 'A', mask: '****1234').lastFour,

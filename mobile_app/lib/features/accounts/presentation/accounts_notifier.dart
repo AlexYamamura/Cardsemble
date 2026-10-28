@@ -240,7 +240,6 @@ class AccountsNotifier extends ChangeNotifier {
           await loadConnections();
           final reloadError = _error;
           await loadStatementCycles();
-          await loadWalletSummary();
           final messages = <String>[];
           if (reloadError != null) {
             messages.add('Sync finished, but the account list could not be reloaded: $reloadError');
@@ -287,7 +286,6 @@ class AccountsNotifier extends ChangeNotifier {
           await loadConnections();
           final reloadError = _error;
           await loadStatementCycles();
-          await loadWalletSummary();
           final messages = <String>[];
           if (itemWarning != null) {
             messages.add('Sync finished with warnings: $itemWarning');
@@ -345,7 +343,6 @@ class AccountsNotifier extends ChangeNotifier {
           await loadConnections();
           final connectionsError = _error;
           await loadStatementCycles();
-          await loadWalletSummary();
           final statementCyclesError = _error;
           final details = [
             if (connectionsError != null) connectionsError,

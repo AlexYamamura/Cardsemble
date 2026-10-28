@@ -3,6 +3,10 @@
 //
 // Amounts are integer minor currency units (cents). Monetary values are
 // bucketed by currency; the first bucket (primaryCurrency) is the headline one.
+//
+// Credit limit and current balance are no longer included here: they were
+// sourced from the deprecated /liabilities/get Plaid product. The wallet now
+// surfaces only card count and the highest recent payment.
 class WalletSummary {
   const WalletSummary({
     required this.cardCount,
@@ -23,17 +27,8 @@ class WalletSummary {
   /// Highest payment in the past 30 days, or null when none is available.
   final WalletPayment? highestPayment;
 
-  /// The headline (primary) currency bucket, if any.
-  WalletCurrencySummary? get primary =>
-      currencies.isEmpty ? null : currencies.first;
-
-  /// Whether every known card has both a credit limit and a balance synced.
-  bool get isFullySynced =>
-      currencies.isNotEmpty &&
-      currencies.every((bucket) => bucket.isComplete);
-
   /// Number of currencies not represented in the headline bucket.
-  int get otherCurrencyCount => currencies.length - (primary == null ? 0 : 1);
+  int get otherCurrencyCount => currencies.length - (primaryCurrency == null ? 0 : 1);
 
   factory WalletSummary.fromJson(Map<String, dynamic> json) {
     final currenciesRaw = json['currencies'];
@@ -85,48 +80,22 @@ class WalletSummary {
 class WalletCurrencySummary {
   const WalletCurrencySummary({
     required this.currency,
-    required this.creditLimitCents,
-    required this.balanceCents,
     required this.cardCount,
-    required this.accountsWithLimit,
-    required this.accountsWithBalance,
   });
 
   final String currency;
-  final int creditLimitCents;
-  final int balanceCents;
   final int cardCount;
-  final int accountsWithLimit;
-  final int accountsWithBalance;
-
-  /// Whether at least one card in this bucket has a synced credit limit.
-  bool get hasLimitData => accountsWithLimit > 0;
-
-  /// Whether every card in this bucket has both a limit and a balance.
-  bool get isComplete =>
-      accountsWithLimit == cardCount && accountsWithBalance == cardCount;
-
-  /// Utilization ratio (balance / limit), or null when no positive limit exists.
-  double? get utilization {
-    if (creditLimitCents <= 0) return null;
-    return (balanceCents / creditLimitCents).clamp(0.0, 1.0);
-  }
 
   factory WalletCurrencySummary.fromJson(Map<String, dynamic> json) {
     return WalletCurrencySummary(
       currency: (json['currency'] as String? ?? 'UNKNOWN'),
-      creditLimitCents: WalletSummary._asInt(json['credit_limit_cents']) ?? 0,
-      balanceCents: WalletSummary._asInt(json['balance_cents']) ?? 0,
       cardCount: WalletSummary._asInt(json['card_count']) ?? 0,
-      accountsWithLimit: WalletSummary._asInt(json['accounts_with_limit']) ?? 0,
-      accountsWithBalance: WalletSummary._asInt(json['accounts_with_balance']) ?? 0,
     );
   }
 
   @override
   String toString() =>
-      'WalletCurrencySummary(currency: $currency, limit: $creditLimitCents, '
-      'balance: $balanceCents, cards: $cardCount)';
+      'WalletCurrencySummary(currency: $currency, cards: $cardCount)';
 }
 
 /// Highest payment in the past 30 days. amountCents is stored as a positive

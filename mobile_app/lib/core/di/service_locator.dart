@@ -199,6 +199,7 @@ class ServiceLocator {
       () => WalletNotifier(
         accounts: sl.get<AccountsNotifier>(),
         catalog: sl.get<CardCatalogRepository>(),
+        transactions: sl.get<TransactionsNotifier>(),
       ),
     );
 

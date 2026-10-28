@@ -20,7 +20,6 @@ export interface PlaidSyncResult {
   removed: number;
   reconciled: number;
   wallet_assigned: number;
-  liabilities: { status: string; accounts: number; statements: number };
   statement_summaries: number;
   user_id: string;
 }
@@ -120,9 +119,8 @@ export async function createPlaidLinkToken(
     client_name: "Cardsemble",
     country_codes: ["US"],
     language: "en",
-    products: ["transactions"],
-    optional_products: ["liabilities"],
-  };
+     products: ["transactions"],
+   };
 
   if (platform === "android") {
     requestOptions["android_package_name"] = "com.plaidtest.cardsemble";
@@ -139,9 +137,8 @@ export async function createPlaidLinkToken(
   // onSuccess still returns a public_token that the caller exchanges to obtain
   // the refreshed access token for the same item_id.
   if (accessToken) {
-    requestOptions["access_token"] = accessToken;
-    delete requestOptions["products"];
-    delete requestOptions["optional_products"];
+     requestOptions["access_token"] = accessToken;
+     delete requestOptions["products"];
   }
 
   const response = await plaidCall("/link/token/create", requestOptions);
@@ -500,8 +497,8 @@ async function resolveInstitutionName(client: any, institutionId: string | null)
   return null;
 }
 
-/// Syncs a single Plaid item for a user: transactions cursor, credit accounts,
-/// and liabilities. Returns aggregate counters and any per-item error. On a
+/// Syncs a single Plaid item for a user: transactions cursor and credit accounts.
+/// Returns aggregate counters and any per-item error. On a
 /// Plaid-reported re-auth error the item is marked `status = 'error'`. This
 /// is the shared workhorse for both full-user sync and per-item resync.
 async function syncPlaidItemOnce(
@@ -511,9 +508,6 @@ async function syncPlaidItemOnce(
   added: number;
   modified: number;
   removed: number;
-  liabilityAccounts: number;
-  liabilityStatements: number;
-  liabilityFailed: boolean;
   itemError: PlaidItemSyncError | null;
 }> {
   try {
@@ -581,20 +575,22 @@ async function syncPlaidItemOnce(
       instName,
     );
 
-    const liabilities = await syncPlaidLiabilities(
-      item.access_token,
-      userId,
-      item.item_id,
-      instName,
-    );
+    // Liabilities endpoint (/liabilities/get) is deprecated to avoid extra Plaid
+    // product costs. Statement-level data (credit limit, current balance, next
+    // payment due date) is now sourced solely from /accounts/get via
+    // syncPlaidCreditAccounts above, which is part of the free transactions
+    // product.
+    // const liabilities = await syncPlaidLiabilities(
+    //   item.access_token,
+    //   userId,
+    //   item.item_id,
+    //   instName,
+    // );
 
     return {
       added,
       modified,
       removed,
-      liabilityAccounts: liabilities.accounts,
-      liabilityStatements: liabilities.statements,
-      liabilityFailed: liabilities.status !== "synced",
       itemError: null,
     };
   } catch (error: unknown) {
@@ -634,9 +630,6 @@ async function syncPlaidItemOnce(
       added: 0,
       modified: 0,
       removed: 0,
-      liabilityAccounts: 0,
-      liabilityStatements: 0,
-      liabilityFailed: true,
       itemError,
     };
   }
@@ -754,9 +747,6 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
   let addedCount = 0;
   let modifiedCount = 0;
   let removedCount = 0;
-  let liabilityAccountCount = 0;
-  let liabilityStatementCount = 0;
-  let liabilityFailures = 0;
   let itemsSynced = 0;
 
   for (const item of connectedItems) {
@@ -769,32 +759,13 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
       addedCount += result.added;
       modifiedCount += result.modified;
       removedCount += result.removed;
-      liabilityAccountCount += result.liabilityAccounts;
-      liabilityStatementCount += result.liabilityStatements;
-      if (result.liabilityFailed) liabilityFailures += 1;
       itemsSynced += 1;
     }
   }
 
-  const liabilityStatus =
-    itemsSynced === 0
-      ? "unavailable"
-      : liabilityStatementCount > 0 || !liabilityFailures
-        ? "synced"
-        : "unavailable";
-
-  const { error: syncStateError } = await supabase
-    .from("plaid_liability_sync_state")
-    .upsert({
-      user_id: userId,
-      status: liabilityStatus,
-      reason: liabilityStatus === "unavailable" ? "LIABILITIES_UNAVAILABLE" : null,
-      account_count: liabilityAccountCount,
-      statement_count: liabilityStatementCount,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id" });
-
-  if (syncStateError) throw new Error(`Could not save liability sync state: ${syncStateError.message}`);
+  // Liabilities sync state is no longer refreshed (the /liabilities/get call is
+  // deprecated). Existing rows in plaid_liability_sync_state / plaid_liability_snapshots
+  // remain untouched so statement-cycle readiness reflects prior syncs.
 
   const { reconciled, walletAssigned, statementSummaries } = await finalizeSync(userId);
 
@@ -806,13 +777,8 @@ export async function syncPlaidItemsForUser(userId: string): Promise<PlaidSyncRe
     added: addedCount,
     modified: modifiedCount,
     removed: removedCount,
-    reconciled,
+     reconciled,
     wallet_assigned: walletAssigned,
-    liabilities: {
-      status: liabilityStatus,
-      accounts: liabilityAccountCount,
-      statements: liabilityStatementCount,
-    },
     statement_summaries: statementSummaries,
     user_id: userId,
   };
@@ -861,12 +827,7 @@ export async function syncPlaidItemForUser(userId: string, itemId: string): Prom
     modified: result.modified,
     removed: result.removed,
     reconciled,
-    wallet_assigned: walletAssigned,
-    liabilities: {
-      status: result.liabilityFailed ? "unavailable" : "synced",
-      accounts: result.liabilityAccounts,
-      statements: result.liabilityStatements,
-    },
+     wallet_assigned: walletAssigned,
     statement_summaries: statementSummaries,
     user_id: userId,
   }; 

@@ -8,28 +8,33 @@ import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
 import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 import 'package:cardsemble/features/card_catalog/data/card_catalog_repository.dart';
 import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
+import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
 
 /// State holder for the Wallet landing tab.
 ///
 /// Loads the connected accounts (Plaid items + statement accounts), matches each
 /// to its card catalog entry (the same reference data used by the Research tab),
-/// and assembles "Your Cards" and "Household cards" lists. Per-account balance,
-/// utilization, benefit usage, and welcome-bonus spend are not yet served by the
-/// backend, so they render as placeholders; benefit usage and bonus spend are
-/// tracked locally in SharedPreferences and can be migrated to backend tables
-/// later.
+/// and assembles "Your Cards" and "Household cards" lists. The wallet summary
+/// metrics (card count, highest payment) are computed client-side: card count
+/// comes from the connected items and highest payment is derived from the loaded
+/// transaction list. Benefit usage and welcome-bonus spend are tracked locally
+/// in SharedPreferences and can be migrated to backend tables later.
 class WalletNotifier extends ChangeNotifier {
   WalletNotifier({
     required AccountsNotifier accounts,
     required CardCatalogRepository catalog,
+    required TransactionsNotifier transactions,
   })  : _accounts = accounts,
-        _catalog = catalog {
+        _catalog = catalog,
+        _transactions = transactions {
     _accounts.addListener(_onAccountsChanged);
+    _transactions.addListener(_onTransactionsChanged);
   }
 
   final AccountsNotifier _accounts;
   final CardCatalogRepository _catalog;
+  final TransactionsNotifier _transactions;
 
   List<WalletCard> _yourCards = [];
   List<WalletCard> _householdCards = [];
@@ -63,11 +68,15 @@ class WalletNotifier extends ChangeNotifier {
 
   List<WalletCard> get yourCards => _yourCards;
   List<WalletCard> get householdCards => _householdCards;
-  WalletSummary? get walletSummary => _accounts.walletSummary;
   bool get isLoading => _isLoading;
   bool get isSyncing => _accounts.isSyncing;
   String? get error => _error;
   DateTime? get lastUpdated => _lastUpdated;
+
+  /// Whether the transaction list has not yet finished its first successful
+  /// load. The highest-payment metric is not meaningful until transactions are
+  /// available.
+  bool get isTransactionsLoading => !_transactions.hasLoadedTransactions;
 
   static const String _benefitUsageKeyPrefix = 'wallet.benefit_usage.v1.';
   static const String _benefitUsedAtKeyPrefix = 'wallet.benefit_used_at.v1.';
@@ -93,10 +102,9 @@ class WalletNotifier extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await Future.wait<void>([
+       await Future.wait<void>([
         _accounts.loadConnections(),
         _accounts.loadStatementCycles(),
-        _accounts.loadWalletSummary(),
         _loadCatalog(),
       ]);
 
@@ -139,7 +147,64 @@ class WalletNotifier extends ChangeNotifier {
       return;
     }
 
-    unawaited(_applyAccountsSnapshot());
+     unawaited(_applyAccountsSnapshot());
+  }
+
+  /// Listens for TransactionsNotifier changes so the highest-payment metric
+  /// (derived from the loaded transaction list) updates when new transactions
+  /// arrive.
+  void _onTransactionsChanged() {
+    if (_disposed) return;
+    notifyListeners();
+  }
+
+  /// The largest payment amount found in the loaded transactions within the past
+  /// 30 days. Prefers rows with `transaction_code == 'payment'`; falls back to
+  /// any negative (payment) transaction. Returns null when no transactions have
+  /// been loaded yet or no payments are found.
+  WalletPayment? get highestPayment {
+    final txs = _transactions.transactions;
+    if (txs.isEmpty) return null;
+
+    final cutoff = DateTime.now().subtract(const Duration(days: 30));
+    WalletPayment? best;
+    double? bestAbs;
+    bool foundCodedPayment = false;
+    WalletPayment? codedBest;
+    double? codedBestAbs;
+
+    for (final tx in txs) {
+      if (tx.pending) continue;
+      final date = tx.parsedDate;
+      if (date == null || date.isBefore(cutoff)) continue;
+      final amount = tx.amountValue;
+      if (amount >= 0) continue; // payments are negative in Plaid
+      final absAmount = amount.abs();
+      final payment = WalletPayment(
+        transactionId: tx.id,
+        accountId: tx.accountId,
+        accountName: tx.displayName ?? tx.accountName ?? tx.plaidName,
+        amountCents: (absAmount * 100).round(),
+        currency: tx.currency,
+        date: date,
+        name: tx.name,
+        merchantName: tx.merchant,
+      );
+      if (tx.isPayment) {
+        foundCodedPayment = true;
+        if (codedBest == null || absAmount > codedBestAbs!) {
+          codedBest = payment;
+          codedBestAbs = absAmount;
+        }
+      } else if (!foundCodedPayment) {
+        if (best == null || absAmount > bestAbs!) {
+          best = payment;
+          bestAbs = absAmount;
+        }
+      }
+    }
+
+    return foundCodedPayment ? codedBest : best;
   }
 
   /// Rebuilds the card panels from the connections / statement cycles / wallet
@@ -243,9 +308,7 @@ class WalletNotifier extends ChangeNotifier {
         status: card.status,
         catalogCard: card.catalogCard,
         statementAccount: card.statementAccount,
-        balanceCents: card.balanceCents,
         currency: card.currency,
-        creditLimitCents: card.creditLimitCents,
         paymentDueDate: card.paymentDueDate,
         itemId: card.itemId,
         benefits: card.benefits.map((b) {
@@ -300,14 +363,7 @@ class WalletNotifier extends ChangeNotifier {
         status: connection.status,
         catalogCard: catalogCard,
         statementAccount: statementAccount,
-        // Per-account balance, credit limit, currency, and payment due date
-        // come from the synced Plaid credit account (fetched via statement
-        // cycles). They are null until a sync has populated
-        // plaid_credit_accounts, in which case the panel renders a "—"
-        // placeholder.
-        balanceCents: statementAccount?.currentBalanceCents,
         currency: statementAccount?.currency,
-        creditLimitCents: statementAccount?.creditLimitCents,
         paymentDueDate: statementAccount?.nextPaymentDueDate,
         itemId: connection.itemId,
         benefits: benefits,
@@ -465,19 +521,17 @@ class WalletNotifier extends ChangeNotifier {
         mask: card.mask,
         subtype: card.subtype,
         status: card.status,
-        catalogCard: card.catalogCard,
-        statementAccount: card.statementAccount,
-        balanceCents: card.balanceCents,
-        currency: card.currency,
-        creditLimitCents: card.creditLimitCents,
-        paymentDueDate: card.paymentDueDate,
-        itemId: card.itemId,
-        benefits: card.benefits.map((b) {
-          if (b.id == benefitId) {
-            return b.copyWith(used: used, usedAt: used ? DateTime.now() : null);
-          }
-          return b;
-        }).toList(growable: false),
+         catalogCard: card.catalogCard,
+         statementAccount: card.statementAccount,
+         currency: card.currency,
+         paymentDueDate: card.paymentDueDate,
+         itemId: card.itemId,
+         benefits: card.benefits.map((b) {
+           if (b.id == benefitId) {
+             return b.copyWith(used: used, usedAt: used ? DateTime.now() : null);
+           }
+           return b;
+         }).toList(growable: false),
         welcomeBonus: card.welcomeBonus,
         catalogMatchStatus: card.catalogMatchStatus,
       );
@@ -506,9 +560,7 @@ class WalletNotifier extends ChangeNotifier {
           status: card.status,
           catalogCard: card.catalogCard,
           statementAccount: card.statementAccount,
-        balanceCents: card.balanceCents,
         currency: card.currency,
-        creditLimitCents: card.creditLimitCents,
         paymentDueDate: card.paymentDueDate,
         itemId: card.itemId,
         benefits: card.benefits,
@@ -564,6 +616,7 @@ class WalletNotifier extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _accounts.removeListener(_onAccountsChanged);
+    _transactions.removeListener(_onTransactionsChanged);
     super.dispose();
   }
 }
