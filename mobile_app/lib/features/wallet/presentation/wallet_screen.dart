@@ -41,7 +41,8 @@ class WalletScreen extends StatefulWidget {
   State<WalletScreen> createState() => _WalletScreenState();
 }
 
-class _WalletScreenState extends State<WalletScreen> {
+class _WalletScreenState extends State<WalletScreen>
+    with WidgetsBindingObserver {
   /// Whether "Your cards" is shown as a horizontal carousel (true) or a
   /// vertical stack (false).
   bool _useCarousel = true;
@@ -155,6 +156,7 @@ class _WalletScreenState extends State<WalletScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final transactions = context.read<TransactionsNotifier>();
@@ -163,6 +165,23 @@ class _WalletScreenState extends State<WalletScreen> {
       }
       context.read<WalletNotifier>().load();
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
+    if (state == AppLifecycleState.resumed) {
+      // The user returned to the app; reload the wallet so externally-updated
+      // account/card data (e.g. a card linked on another device) is reflected
+      // in the carousel instead of showing a stale list.
+      context.read<WalletNotifier>().load();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override
