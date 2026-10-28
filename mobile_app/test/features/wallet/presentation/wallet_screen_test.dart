@@ -138,8 +138,8 @@ void main() {
 
       // The summary card should use Column (no GridView).
       expect(find.byType(GridView), findsNothing);
-      expect(find.text('Number of cards'), findsOneWidget);
-      expect(find.text('Highest cost'), findsOneWidget);
+      expect(find.text('Number of cards:'), findsOneWidget);
+      expect(find.text('Highest cost:'), findsOneWidget);
       // Payment due should no longer exist.
       expect(find.text('Payment due'), findsNothing);
       // Spending toward benefits metric should exist in card panels.

@@ -467,36 +467,40 @@ class _WalletSummaryCard extends StatelessWidget {
       child: Card(
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _SectionHeader(
-                title: 'Your Cards',
-                titleStyle: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primary,
-                ),
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SectionHeader(
+            title: 'Your Cards',
+            titleStyle: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: AppColors.primary,
+            ),
+          ),
               const SizedBox(height: 12),
-              Column(
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _SummaryMetric(
-                    label: 'Number of cards',
-                    value: cards.toString(),
+                  Expanded(
+                    child: _SummaryMetric(
+                      label: 'Number of cards',
+                      value: cards.toString(),
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                   _SummaryMetric(
-                     label: 'Highest cost',
-                     value: costText,
-                     subtitle: cost != null
-                         ? 'Last 30 days · ${cost.date != null ? _formatDate(cost.date!) : '—'}'
-                         : (isTransactionsLoading
-                             ? 'Loading transactions…'
-                             : 'No charges this month'),
-                   ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _SummaryMetric(
+                  label: 'Highest cost',
+                  value: costText,
+                  subtitle: cost != null
+                          ? 'Last 30 days · ${cost.date != null ? _formatDate(cost.date!) : '—'}'
+                          : (isTransactionsLoading
+                              ? 'Loading transactions…'
+                              : 'No charges this month'),
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -525,35 +529,38 @@ class _SummaryMetric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
+        Text(
+          '$label:',
+          style: const TextStyle(fontSize: 12, color: Colors.grey),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: AppColors.charcoal,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 2),
           Text(
-            label,
-            style: const TextStyle(fontSize: 12, color: Colors.grey),
-            maxLines: 1,
+            subtitle!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 3),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: AppColors.charcoal,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              subtitle!,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
+        ],
       ],
     );
   }
