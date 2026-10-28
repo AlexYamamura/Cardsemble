@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cardsemble/core/utils/currency.dart';
-import 'package:cardsemble/core/utils/date_utils.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
+import 'package:cardsemble/features/wallet/domain/benefit_spending.dart';
 import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
 import 'package:cardsemble/features/wallet/presentation/wallet_card_colors.dart';
 
@@ -20,10 +20,11 @@ enum WalletCardPanelMode {
 /// A panel/tile for one wallet card.
 ///
 /// The collapsed pane shows the card name (themed with a bank/card-derived
-/// accent color), issuer/network/last-four, balance and utilization. Tapping
-/// the entire card drops down a details panel with the annual fee, foreign
-/// transaction fee, benefits and travel perks — replacing the previous
-/// "Update spend" button and "Statement Credits" dropdown.
+/// accent color), issuer/network/last-four, spending toward benefits, and an
+/// expando of benefit usage progress bars. Tapping the entire card drops down a
+/// details panel with the annual fee, foreign transaction fee, benefits and
+/// travel perks — replacing the previous "Update spend" button and
+/// "Statement Credits" dropdown.
 class WalletCardPanel extends StatelessWidget {
   const WalletCardPanel({
     super.key,
@@ -32,6 +33,8 @@ class WalletCardPanel extends StatelessWidget {
     this.expanded = false,
     this.onTap,
     this.onResync,
+    this.benefitSpending,
+    this.isTransactionsLoading = false,
   });
 
   final WalletCard card;
@@ -39,6 +42,14 @@ class WalletCardPanel extends StatelessWidget {
   final bool expanded;
   final VoidCallback? onTap;
   final VoidCallback? onResync;
+
+  /// Spending toward this card's benefits, derived from the loaded transaction
+  /// list. May be null when transactions haven't loaded or the card has no
+  /// mappable benefit categories.
+  final WalletBenefitSpending? benefitSpending;
+
+  /// Whether the transaction list is still loading for the first time.
+  final bool isTransactionsLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -68,8 +79,14 @@ class WalletCardPanel extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Divider(height: 1),
-                  _MonthlyInfo(card: card, color: color),
+              const Divider(height: 1),
+              _MonthlyInfo(
+                card: card,
+                color: color,
+                compact: mode == WalletCardPanelMode.collapsed,
+                benefitSpending: benefitSpending,
+                isTransactionsLoading: isTransactionsLoading,
+              ),
                   if (card.catalogCard != null) ...[
                     const SizedBox(height: 12),
                     AnimatedSize(
@@ -214,30 +231,58 @@ class _CardSubtitle extends StatelessWidget {
   }
 }
 
+/// Monthly/period info shown inside a card panel.
+///
+/// In compact mode (used inside the horizontal carousel) only the "Spending
+/// toward benefits" metric is shown, keeping the card height bounded. In
+/// expandable/list mode, the full benefit usage progress bars are also rendered.
 class _MonthlyInfo extends StatelessWidget {
-  const _MonthlyInfo({required this.card, required this.color});
+  const _MonthlyInfo({
+    required this.card,
+    required this.color,
+    this.compact = false,
+    this.benefitSpending,
+    this.isTransactionsLoading = false,
+  });
 
   final WalletCard card;
   final Color color;
+  final bool compact;
+  final WalletBenefitSpending? benefitSpending;
+  final bool isTransactionsLoading;
 
   @override
   Widget build(BuildContext context) {
     final hasBenefits = card.benefits.isNotEmpty;
 
+    // In compact mode, show only the spending-toward-benefits metric to keep
+    // the carousel card height bounded. The full benefit progress bars are
+    // shown in expandable/list mode and the details sheet.
+    if (compact) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildSpendingMetric(),
+            if (hasBenefits) ...[
+              const SizedBox(height: 8),
+              _BenefitsUsedSummary(card: card),
+            ],
+          ],
+        ),
+      );
+    }
+
+    // Expandable/list mode: full benefit progress bars.
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Payment due date (retained from the original layout).
-          _MetricTile(
-            label: 'Payment due',
-            value: card.hasPaymentDue
-                ? formatShortDate(card.paymentDueDate!)
-                : '—',
-            color: color,
-          ),
+          _buildSpendingMetric(),
           if (hasBenefits) ...[
             const SizedBox(height: 14),
             ...card.benefits.map(
@@ -249,6 +294,55 @@ class _MonthlyInfo extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+
+  Widget _buildSpendingMetric() {
+    final spending = benefitSpending;
+    final txCount = spending?.transactionCount ?? 0;
+    final hasSpending = spending != null && txCount > 0;
+
+    final value = isTransactionsLoading
+        ? '—'
+        : hasSpending
+            ? formatCurrency(
+                spending.totalAmountCents / 100,
+                spending.amountCentsByCurrency.keys.first,
+              )
+            : '—';
+
+    final subtitle = isTransactionsLoading
+        ? 'Loading transactions…'
+        : spending == null
+            ? 'No benefits with spending categories'
+            : hasSpending
+                ? '$txCount matching ${txCount == 1 ? 'transaction' : 'transactions'} in the loaded period'
+                : 'No matching transactions yet';
+
+    return _MetricTile(
+      label: 'Spending toward benefits',
+      value: value,
+      subtitle: subtitle,
+      color: color,
+    );
+  }
+}
+
+/// A one-line summary of how many of a card's benefits have been marked used.
+class _BenefitsUsedSummary extends StatelessWidget {
+  const _BenefitsUsedSummary({required this.card});
+
+  final WalletCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final usedCount = card.benefits.where((b) => b.used).length;
+    final totalCount = card.benefits.length;
+    return Text(
+      '$usedCount of $totalCount benefits used',
+      style: const TextStyle(fontSize: 12, color: Colors.grey),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }
@@ -323,11 +417,13 @@ class _MetricTile extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    this.subtitle,
   });
 
   final String label;
   final String value;
   final Color color;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -338,6 +434,8 @@ class _MetricTile extends StatelessWidget {
         Text(
           label,
           style: const TextStyle(fontSize: 12, color: Colors.grey),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 4),
         Text(
@@ -347,7 +445,18 @@ class _MetricTile extends StatelessWidget {
             fontWeight: FontWeight.w600,
             color: color,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            subtitle!,
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ],
     );
   }

@@ -22,6 +22,8 @@ class CardTransaction {
     required this.assignmentSource,
     this.hasSplits = false,
     this.householdVisible = true,
+    this.personalFinanceCategoryPrimary,
+    this.personalFinanceCategoryDetailed,
   });
 
   final String id;
@@ -43,6 +45,14 @@ class CardTransaction {
   final bool hasSplits;
   final bool householdVisible;
 
+  /// Plaid primary personal finance category (e.g. "TRAVEL", "FOOD_AND_DRINK").
+  /// Null when not available or synced from the deprecated liabilities product.
+  final String? personalFinanceCategoryPrimary;
+
+  /// Plaid detailed personal finance category (e.g. "TRAVEL_AIR_AND_NTIRELINE",
+  /// "FOOD_AND_DRINK_RESTAURANTS"). Null when not available.
+  final String? personalFinanceCategoryDetailed;
+
   CardTransaction copyWith({
     String? accountId,
     String? accountName,
@@ -61,6 +71,8 @@ class CardTransaction {
     String? assignmentSource,
     bool? hasSplits,
     bool? householdVisible,
+    String? personalFinanceCategoryPrimary,
+    String? personalFinanceCategoryDetailed,
   }) {
     return CardTransaction(
       id: id,
@@ -83,6 +95,10 @@ class CardTransaction {
       assignmentSource: assignmentSource ?? this.assignmentSource,
       hasSplits: hasSplits ?? this.hasSplits,
       householdVisible: householdVisible ?? this.householdVisible,
+      personalFinanceCategoryPrimary: personalFinanceCategoryPrimary ??
+          this.personalFinanceCategoryPrimary,
+      personalFinanceCategoryDetailed: personalFinanceCategoryDetailed ??
+          this.personalFinanceCategoryDetailed,
     );
   }
 
@@ -104,10 +120,14 @@ class CardTransaction {
       transactionCode: json['transaction_code'] as String?,
       assignedPersonId: json['assigned_person_id'] as String?,
       assignmentSource: json['assignment_source'] as String? ?? 'default',
-      hasSplits: json['has_splits'] as bool? ?? false,
-      householdVisible: json['household_visible'] as bool? ?? true,
-    );
-  }
+       hasSplits: json['has_splits'] as bool? ?? false,
+       householdVisible: json['household_visible'] as bool? ?? true,
+       personalFinanceCategoryPrimary:
+           json['personal_finance_category_primary'] as String?,
+       personalFinanceCategoryDetailed:
+           json['personal_finance_category_detailed'] as String?,
+     );
+   }
 
   Map<String, dynamic> toJson() {
     return {
@@ -127,10 +147,12 @@ class CardTransaction {
       'transaction_code': transactionCode,
       'assigned_person_id': assignedPersonId,
       'assignment_source': assignmentSource,
-      'has_splits': hasSplits,
-      'household_visible': householdVisible,
-    };
-  }
+       'has_splits': hasSplits,
+       'household_visible': householdVisible,
+       'personal_finance_category_primary': personalFinanceCategoryPrimary,
+       'personal_finance_category_detailed': personalFinanceCategoryDetailed,
+     };
+   }
 
   double get amountValue => double.tryParse(amount) ?? 0.0;
   bool get isPositive => amountValue > 0;

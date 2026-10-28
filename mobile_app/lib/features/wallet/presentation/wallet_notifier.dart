@@ -10,6 +10,7 @@ import 'package:cardsemble/features/card_catalog/data/card_catalog_repository.da
 import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
+import 'package:cardsemble/features/wallet/domain/benefit_spending.dart';
 
 /// State holder for the Wallet landing tab.
 ///
@@ -205,6 +206,16 @@ class WalletNotifier extends ChangeNotifier {
     }
 
     return foundCodedPayment ? codedBest : best;
+  }
+
+  /// Computes spending toward this card's benefits from the loaded transaction
+  /// list. Returns null when the card has no statement account or no mappable
+  /// benefit categories.
+  WalletBenefitSpending? benefitSpendingFor(WalletCard card) {
+    return calculateBenefitSpending(
+      card: card,
+      transactions: _transactions.transactions,
+    );
   }
 
   /// Rebuilds the card panels from the connections / statement cycles / wallet

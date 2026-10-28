@@ -8,10 +8,12 @@ import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart
 import 'package:cardsemble/features/card_optimizer/data/card_optimizer_repository.dart';
 import 'package:cardsemble/features/card_optimizer/presentation/card_optimizer_screen.dart';
 import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
+import 'package:cardsemble/features/wallet/domain/benefit_spending.dart';
 import 'package:cardsemble/features/wallet/presentation/wallet_card_colors.dart';
 import 'package:cardsemble/features/wallet/presentation/wallet_notifier.dart';
 import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_panel.dart';
 import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_carousel.dart';
+import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 
 /// Wallet landing tab.
 ///
@@ -155,6 +157,10 @@ class _WalletScreenState extends State<WalletScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final transactions = context.read<TransactionsNotifier>();
+      if (!transactions.hasLoadedTransactions) {
+        transactions.loadAll();
+      }
       context.read<WalletNotifier>().load();
     });
   }
@@ -207,7 +213,13 @@ class _WalletScreenState extends State<WalletScreen> {
               .map((card) => card.catalogCard!)
               .toList(growable: false);
           return RefreshIndicator(
-            onRefresh: () async => await notifier.load(),
+            onRefresh: () async {
+              final transactions = context.read<TransactionsNotifier>();
+              if (!transactions.hasLoadedTransactions) {
+                transactions.loadAll();
+              }
+              await notifier.load();
+            },
             child: CustomScrollView(
               slivers: [
                 if (notifier.isSyncing)
@@ -236,6 +248,8 @@ class _WalletScreenState extends State<WalletScreen> {
                     notifier: notifier,
                     onCardTap: (card) => _showCardDetails(context, card),
                     onResync: (card) => _resyncCard(context, card),
+                    benefitSpendingFor: notifier.benefitSpendingFor,
+                    isTransactionsLoading: notifier.isTransactionsLoading,
                   )
                 else
                   _YourCardsSection(
@@ -446,7 +460,7 @@ class _WalletSummaryCard extends StatelessWidget {
     final payment = highestPayment;
     final paymentText = payment != null
         ? formatCurrency(payment.amountCents / 100, payment.currency)
-        : (isTransactionsLoading ? '—' : '—');
+        : '—';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -466,27 +480,23 @@ class _WalletSummaryCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 2.0,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _SummaryMetric(
                     label: 'Number of cards',
                     value: cards.toString(),
                   ),
-                  _SummaryMetric(
-                    label: 'Highest payment',
-                    value: paymentText,
-                    subtitle: payment != null
-                        ? 'Last 30 days · ${payment.date != null ? _formatDate(payment.date!) : '—'}'
-                        : (isTransactionsLoading
-                            ? 'Loading transactions…'
-                            : 'No payments found'),
-                  ),
+                  const SizedBox(height: 12),
+                   _SummaryMetric(
+                     label: 'Highest payment',
+                     value: paymentText,
+                     subtitle: payment != null
+                         ? 'Last 30 days · ${payment.date != null ? _formatDate(payment.date!) : '—'}'
+                         : (isTransactionsLoading
+                             ? 'Loading transactions…'
+                             : 'No payments this month'),
+                   ),
                 ],
               ),
             ],
@@ -571,7 +581,7 @@ class _WalletWaitingView extends StatelessWidget {
             if (syncing) ...[
               const SizedBox(height: 6),
               const Text(
-                'Waiting for balances and payment dates to finish syncing.',
+                'Waiting for accounts and transactions to finish syncing.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, color: Colors.grey),
               ),
@@ -624,7 +634,7 @@ class _YourCardsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cards = notifier.yourCards;
+final cards = notifier.yourCards;
     if (cards.isEmpty) {
       return SliverToBoxAdapter(
         child: _EmptyState(
@@ -649,6 +659,8 @@ class _YourCardsSection extends StatelessWidget {
                   expanded: expandedIds.contains(card.id),
                   onTap: () => onToggleCard(card.id),
                   onResync: card.needsRelink ? () => onResync(card) : null,
+                  benefitSpending: notifier.benefitSpendingFor(card),
+                  isTransactionsLoading: notifier.isTransactionsLoading,
                 ),
               ),
             ),
@@ -665,11 +677,15 @@ class _YourCardsCarouselSection extends StatelessWidget {
     required this.notifier,
     required this.onCardTap,
     required this.onResync,
+    required this.benefitSpendingFor,
+    required this.isTransactionsLoading,
   });
 
   final WalletNotifier notifier;
   final ValueChanged<WalletCard> onCardTap;
   final Future<void> Function(WalletCard) onResync;
+  final WalletBenefitSpending? Function(WalletCard) benefitSpendingFor;
+  final bool isTransactionsLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -693,6 +709,8 @@ class _YourCardsCarouselSection extends StatelessWidget {
             onCardTap: onCardTap,
             onResync: onResync,
             carouselHeight: _carouselItemHeight,
+            benefitSpendingFor: notifier.benefitSpendingFor,
+            isTransactionsLoading: notifier.isTransactionsLoading,
           ),
         ],
       ),

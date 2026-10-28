@@ -607,7 +607,7 @@ Deno.serve(async (req) => {
       // previously pulled with select("*").
       let pageQuery = supabase
         .from("plaid_transactions")
-        .select("transaction_id,account_id,amount,iso_currency_code,date,name,merchant_name,pending,transaction_code,household_visible")
+        .select("transaction_id,account_id,amount,iso_currency_code,date,name,merchant_name,pending,transaction_code,household_visible,personal_finance_category_primary,personal_finance_category_detailed")
         .eq("user_id", auth.userId)
         .eq("is_removed", false)
         .in("account_id", accountIdFilter ? [accountIdFilter] : creditAccountIds);
