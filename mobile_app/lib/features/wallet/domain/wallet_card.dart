@@ -7,8 +7,8 @@
 //
 // Balance, credit limit, and utilization are no longer shown on card panels:
 // they were sourced from the deprecated /liabilities/get Plaid product. The
-// wallet summary now surfaces only card count and the highest recent payment
-// (computed client-side from loaded transactions). Catalog benefits and
+// wallet summary now surfaces only card count and the highest cost transaction
+// (largest recent charge, computed client-side from loaded transactions). Catalog benefits and
 // welcome-bonus spend are tracked locally in SharedPreferences.
 import 'package:cardsemble/features/accounts/domain/entities/account.dart';
 import 'package:cardsemble/features/card_catalog/domain/entities/card_catalog_card.dart';

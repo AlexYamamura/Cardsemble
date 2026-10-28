@@ -1243,12 +1243,12 @@ Deno.serve(async (req) => {
       });
       const primaryCurrency = currencyList[0]?.currency ?? null;
 
-      // Highest payment in the past 30 days: largest absolute negative amount.
-      // Prefer explicitly-coded payment transactions; fall back to any negative,
-      // non-pending, non-removed transaction. Within the chosen pool, prefer the
-      // primary currency, then the largest payment overall (reported in its own
-      // currency so it is never mislabeled).
-      let highestPayment: {
+      // Highest cost transaction in the past 30 days: largest positive charge.
+      // Exclude pending, removed, and explicit payment rows. Charges are
+      // positive in Plaid, so we query amount > 0 and order descending. Within
+      // the result set, prefer the primary currency, then the largest charge
+      // overall (reported in its own currency so it is never mislabeled).
+      let highestCostTransaction: {
         transaction_id: string;
         account_id: string | null;
         account_name: string;
@@ -1265,53 +1265,41 @@ Deno.serve(async (req) => {
 
       if (activeAccountIds.length > 0) {
         const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-        let paymentRows: any[] = [];
 
-        const poolQuery = (transactionCode: string | null) => {
-          let query = supabase
-            .from("plaid_transactions")
-            .select(
-              "transaction_id,account_id,amount,iso_currency_code,date,name,merchant_name,transaction_code",
-            )
-            .eq("user_id", userId)
-            .eq("is_removed", false)
-            .eq("pending", false)
-            .lt("amount", 0)
-            .gte("date", since)
-            .in("account_id", activeAccountIds)
-            .order("amount", { ascending: true })
-            .limit(500);
-          if (transactionCode) {
-            query = query.eq("transaction_code", transactionCode);
-          }
-          return query;
-        };
+        const { data: costRows, error: costError } = await supabase
+          .from("plaid_transactions")
+          .select(
+            "transaction_id,account_id,amount,iso_currency_code,date,name,merchant_name,transaction_code",
+          )
+          .eq("user_id", userId)
+          .eq("is_removed", false)
+          .eq("pending", false)
+          .gt("amount", 0)
+          .gte("date", since)
+          .in("account_id", activeAccountIds)
+          .or("transaction_code.is.null,transaction_code.neq.payment")
+          .order("amount", { ascending: false })
+          .limit(500);
 
-        const { data: codedPayments, error: codedError } = await poolQuery("payment");
-        if (codedError) throw new ApiError(502, codedError.message);
-        paymentRows = codedPayments ?? [];
-        if (paymentRows.length === 0) {
-          const { data: allPayments, error: allError } = await poolQuery(null);
-          if (allError) throw new ApiError(502, allError.message);
-          paymentRows = allPayments ?? [];
-        }
+        if (costError) throw new ApiError(502, costError.message);
 
-        if (paymentRows.length > 0) {
+        const rows: any[] = costRows ?? [];
+        if (rows.length > 0) {
           const byAccount = new Map(connectedAccounts.map((a) => [a.account_id, a]));
-          let chosen = paymentRows[0];
+          let chosen = rows[0];
           if (primaryCurrency != null) {
-            const primaryRow = paymentRows.find(
+            const primaryRow = rows.find(
               (row) => String(row.iso_currency_code ?? "UNKNOWN") === primaryCurrency,
             );
             if (primaryRow) chosen = primaryRow;
           }
           const amountCents = dollarsToCents(chosen.amount);
           const account = byAccount.get(chosen.account_id ?? undefined);
-          highestPayment = {
+          highestCostTransaction = {
             transaction_id: String(chosen.transaction_id ?? ""),
             account_id: chosen.account_id ?? null,
             account_name: creditCardDisplayName(account ?? {}),
-            amount_cents: amountCents != null ? Math.abs(amountCents) : 0,
+            amount_cents: amountCents ?? 0,
             currency: String(chosen.iso_currency_code ?? "UNKNOWN"),
             date: chosen.date ?? null,
             name: chosen.name ?? null,
@@ -1327,7 +1315,7 @@ Deno.serve(async (req) => {
           currency: bucket.currency,
           card_count: bucket.cardCount,
         })),
-        highest_payment: highestPayment,
+        highest_cost_transaction: highestCostTransaction,
       });
     }
 

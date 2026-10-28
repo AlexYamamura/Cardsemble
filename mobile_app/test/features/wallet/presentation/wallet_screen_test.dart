@@ -139,7 +139,7 @@ void main() {
       // The summary card should use Column (no GridView).
       expect(find.byType(GridView), findsNothing);
       expect(find.text('Number of cards'), findsOneWidget);
-      expect(find.text('Highest payment'), findsOneWidget);
+      expect(find.text('Highest cost'), findsOneWidget);
       // Payment due should no longer exist.
       expect(find.text('Payment due'), findsNothing);
       // Spending toward benefits metric should exist in card panels.
@@ -166,7 +166,7 @@ void main() {
 
     testWidgets('summary uses Column layout, not GridView', (tester) async {
       // Verify the _WalletSummaryCard renders a Column (checked via the
-      // Number of cards and Highest payment metrics being in a Column,
+      // Number of cards and Highest cost metrics being in a Column,
       // not a GridView).
       final repo3 = FakeAccountRepository(
         connectionsResult: Success(<PlaidConnection>[

@@ -6,13 +6,14 @@
 //
 // Credit limit and current balance are no longer included here: they were
 // sourced from the deprecated /liabilities/get Plaid product. The wallet now
-// surfaces only card count and the highest recent payment.
+// surfaces only card count and the highest cost transaction (largest positive
+// charge in the past 30 days, excluding pending and payment rows).
 class WalletSummary {
   const WalletSummary({
     required this.cardCount,
     this.primaryCurrency,
     required this.currencies,
-    this.highestPayment,
+    this.highestCostTransaction,
   });
 
   /// Number of connected credit-card accounts (all currencies).
@@ -24,8 +25,9 @@ class WalletSummary {
   /// Per-currency totals, ordered with the primary bucket first.
   final List<WalletCurrencySummary> currencies;
 
-  /// Highest payment in the past 30 days, or null when none is available.
-  final WalletPayment? highestPayment;
+  /// Highest cost transaction in the past 30 days (largest positive charge),
+  /// or null when none is available.
+  final WalletCostTransaction? highestCostTransaction;
 
   /// Number of currencies not represented in the headline bucket.
   int get otherCurrencyCount => currencies.length - (primaryCurrency == null ? 0 : 1);
@@ -39,12 +41,16 @@ class WalletSummary {
             .toList(growable: false)
         : <WalletCurrencySummary>[];
 
+    // Backward-compatible key parsing: prefer the new key, fall back to the
+    // legacy `highest_payment` key from older deployed API versions.
+    final highestRaw = json['highest_cost_transaction'] ?? json['highest_payment'];
+
     return WalletSummary(
       cardCount: _asInt(json['card_count']) ?? 0,
       primaryCurrency: json['primary_currency'] as String?,
       currencies: currencies,
-      highestPayment: json['highest_payment'] is Map<String, dynamic>
-          ? WalletPayment.fromJson(json['highest_payment'] as Map<String, dynamic>)
+      highestCostTransaction: highestRaw is Map<String, dynamic>
+          ? WalletCostTransaction.fromJson(highestRaw)
           : null,
     );
   }
@@ -60,20 +66,20 @@ class WalletSummary {
     int? cardCount,
     String? primaryCurrency,
     List<WalletCurrencySummary>? currencies,
-    WalletPayment? highestPayment,
+    WalletCostTransaction? highestCostTransaction,
   }) {
     return WalletSummary(
       cardCount: cardCount ?? this.cardCount,
       primaryCurrency: primaryCurrency ?? this.primaryCurrency,
       currencies: currencies ?? this.currencies,
-      highestPayment: highestPayment ?? this.highestPayment,
+      highestCostTransaction: highestCostTransaction ?? this.highestCostTransaction,
     );
   }
 
   @override
   String toString() =>
       'WalletSummary(cardCount: $cardCount, primaryCurrency: $primaryCurrency, '
-      'currencies: ${currencies.length}, highestPayment: $highestPayment)';
+      'currencies: ${currencies.length}, highestCostTransaction: $highestCostTransaction)';
 }
 
 /// One currency bucket of wallet aggregation data.
@@ -98,10 +104,11 @@ class WalletCurrencySummary {
       'WalletCurrencySummary(currency: $currency, cards: $cardCount)';
 }
 
-/// Highest payment in the past 30 days. amountCents is stored as a positive
-/// value (payments are negative in Plaid).
-class WalletPayment {
-  const WalletPayment({
+/// Highest cost transaction in the past 30 days: the largest positive charge
+/// (expenditure). `amountCents` is stored as a positive value — charges are
+/// positive in Plaid, so no absolute-value conversion is needed.
+class WalletCostTransaction {
+  const WalletCostTransaction({
     required this.transactionId,
     this.accountId,
     this.accountName,
@@ -115,14 +122,14 @@ class WalletPayment {
   final String transactionId;
   final String? accountId;
   final String? accountName;
-  final int amountCents; // positive magnitude of the payment
+  final int amountCents; // positive cost amount in minor currency units
   final String currency;
   final DateTime? date;
   final String name;
   final String? merchantName;
 
-  factory WalletPayment.fromJson(Map<String, dynamic> json) {
-    return WalletPayment(
+  factory WalletCostTransaction.fromJson(Map<String, dynamic> json) {
+    return WalletCostTransaction(
       transactionId: json['transaction_id'] as String? ?? '',
       accountId: json['account_id'] as String?,
       accountName: json['account_name'] as String?,
@@ -141,5 +148,5 @@ class WalletPayment {
 
   @override
   String toString() =>
-      'WalletPayment(amountCents: $amountCents, currency: $currency, date: $date)';
+      'WalletCostTransaction(amountCents: $amountCents, currency: $currency, date: $date)';
 }

@@ -203,8 +203,8 @@ class _WalletScreenState extends State<WalletScreen> {
       body: Consumer<WalletNotifier>(
         builder: (context, notifier, child) {
           // Show a content-ready state when card data has been assembled from the
-          // async data sources. The highest-payment metric still waits for the
-          // TransactionsNotifier list to load before it is meaningful.
+          // async data sources. The highest-cost transaction metric still waits
+          // for the TransactionsNotifier list to load before it is meaningful.
           if (notifier.isLoading && notifier.yourCards.isEmpty) {
             return _WalletWaitingView(syncing: false);
           }
@@ -231,11 +231,11 @@ class _WalletScreenState extends State<WalletScreen> {
                   ),
                 ),
                 SliverToBoxAdapter(
-                  child: _WalletSummaryCard(
-                    cards: notifier.yourCards.length,
-                    highestPayment: notifier.highestPayment,
-                    isTransactionsLoading: notifier.isTransactionsLoading,
-                  ),
+                   child: _WalletSummaryCard(
+                     cards: notifier.yourCards.length,
+                     highestCostTransaction: notifier.highestCostTransaction,
+                     isTransactionsLoading: notifier.isTransactionsLoading,
+                   ),
                 ),
                 SliverToBoxAdapter(
                   child: _LayoutToggle(
@@ -436,30 +436,30 @@ class _SectionHeader extends StatelessWidget {
 
 /// Aggregation card shown above "Your Cards".
 ///
-/// Surfaces the number of connected cards and the largest payment made in the
-/// past 30 days. The payment amount is derived client-side from the loaded
-/// transaction list, so the card shows a "Loading transactions…" placeholder
-/// until the TransactionsNotifier has finished its first load. Credit limit and
-/// utilization are no longer shown because the /liabilities/get Plaid product
-/// that supplied them has been deprecated.
+/// Surfaces the number of connected cards and the highest cost transaction
+/// (largest charge) in the past 30 days. The amount is derived client-side from
+/// the loaded transaction list, so the card shows a "Loading transactions…"
+/// placeholder until the TransactionsNotifier has finished its first load.
+/// Credit limit and utilization are no longer shown because the /liabilities/get
+/// Plaid product that supplied them has been deprecated.
 class _WalletSummaryCard extends StatelessWidget {
   const _WalletSummaryCard({
     required this.cards,
-    required this.highestPayment,
+    required this.highestCostTransaction,
     required this.isTransactionsLoading,
   });
 
   final int cards;
-  final WalletPayment? highestPayment;
+  final WalletCostTransaction? highestCostTransaction;
   final bool isTransactionsLoading;
 
   @override
   Widget build(BuildContext context) {
     if (cards == 0) return const SizedBox.shrink();
 
-    final payment = highestPayment;
-    final paymentText = payment != null
-        ? formatCurrency(payment.amountCents / 100, payment.currency)
+    final cost = highestCostTransaction;
+    final costText = cost != null
+        ? formatCurrency(cost.amountCents / 100, cost.currency)
         : '—';
 
     return Padding(
@@ -489,13 +489,13 @@ class _WalletSummaryCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                    _SummaryMetric(
-                     label: 'Highest payment',
-                     value: paymentText,
-                     subtitle: payment != null
-                         ? 'Last 30 days · ${payment.date != null ? _formatDate(payment.date!) : '—'}'
+                     label: 'Highest cost',
+                     value: costText,
+                     subtitle: cost != null
+                         ? 'Last 30 days · ${cost.date != null ? _formatDate(cost.date!) : '—'}'
                          : (isTransactionsLoading
                              ? 'Loading transactions…'
-                             : 'No payments this month'),
+                             : 'No charges this month'),
                    ),
                 ],
               ),

@@ -116,11 +116,20 @@ class _FakeHouseholdRepository implements HouseholdRepository {
 }
 
 class FakeTransactionsNotifier extends TransactionsNotifier {
-  FakeTransactionsNotifier()
-      : super(
+  FakeTransactionsNotifier({List<CardTransaction> transactions = const []})
+      : _injectedTransactions = transactions,
+        super(
           transactionRepository: _FakeTransactionRepository(),
           householdRepository: _FakeHouseholdRepository(),
         );
+
+  final List<CardTransaction> _injectedTransactions;
+
+  @override
+  List<CardTransaction> get transactions => _injectedTransactions;
+
+  @override
+  bool get hasLoadedTransactions => true;
 }
 
 void main() {
@@ -586,6 +595,231 @@ void main() {
     // No listener means no rebuild — the wallet's card data is unchanged.
     expect(wallet.yourCards.length, cardsBefore);
     expect(wallet.yourCards.first.hasPaymentDue, hasPaymentDueBefore);
+  });
+
+  group('highestCostTransaction', () {
+    late AccountsNotifier accounts;
+    late CardCatalogRepository catalog;
+    late WalletNotifier notifier;
+
+    setUp(() {
+      final repo = FakeAccountRepository(
+        connectionsResult: const Success(<PlaidConnection>[]),
+        statementCyclesResult: const Success(StatementCycleSummary(
+          status: 'WAITING_FOR_STATEMENTS',
+          total: null,
+          currency: null,
+          accountCount: 0,
+          accounts: <StatementAccount>[],
+        )),
+      );
+      accounts = AccountsNotifier(
+        accountRepository: repo,
+        linkLauncher: FakePlaidLinkLauncher(),
+      );
+      final source = FakeCardCatalogSource(const []);
+      catalog = CardCatalogRepository(store: FakeCacheStore(), source: source);
+    });
+
+    CardTransaction tx({
+      required String id,
+      required String amount,
+      required String currency,
+      required String date,
+      String? merchant,
+      String? name,
+      String? transactionCode,
+      bool pending = false,
+    }) {
+      return CardTransaction(
+        id: id,
+        accountId: 'acct-1',
+        accountName: 'My Card',
+        displayName: 'My Card',
+        amount: amount,
+        currency: currency,
+        date: date,
+        name: name ?? merchant ?? 'Charge',
+        merchant: merchant,
+        pending: pending,
+        transactionCode: transactionCode,
+        assignmentSource: 'default',
+      );
+    }
+
+    String recentIso(int daysAgo) =>
+        DateTime.now().subtract(Duration(days: daysAgo)).toIso8601String().split('T').first;
+
+    test('returns null when transactions list is empty', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: const []);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+      expect(notifier.highestCostTransaction, isNull);
+    });
+
+    test('returns the largest positive charge', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(id: 't1', amount: '42.50', currency: 'USD', date: recentIso(5), name: 'Dinner'),
+        tx(id: 't2', amount: '128.00', currency: 'USD', date: recentIso(3), name: 'Concert'),
+        tx(id: 't3', amount: '12.99', currency: 'USD', date: recentIso(1), name: 'Coffee'),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      final result = notifier.highestCostTransaction;
+      expect(result, isNotNull);
+      expect(result!.transactionId, 't2');
+      expect(result.amountCents, 12800);
+      expect(result.currency, 'USD');
+      expect(result.name, 'Concert');
+    });
+
+    test('ignores negative amounts (payments)', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(id: 't1', amount: '42.50', currency: 'USD', date: recentIso(5), name: 'Dinner'),
+        tx(id: 'pay1', amount: '-500.00', currency: 'USD', date: recentIso(2), name: 'Payment'),
+        tx(id: 'pay2', amount: '-1200.00', currency: 'USD', date: recentIso(1), name: 'Big Payment'),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      final result = notifier.highestCostTransaction;
+      expect(result, isNotNull);
+      expect(result!.transactionId, 't1');
+      expect(result.amountCents, 4250);
+    });
+
+    test('ignores rows with transaction_code == payment even if amount is positive', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(id: 't1', amount: '42.50', currency: 'USD', date: recentIso(5), name: 'Dinner'),
+        tx(id: 'pay1', amount: '10.00', currency: 'USD', date: recentIso(2), name: 'Payment', transactionCode: 'payment'),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      final result = notifier.highestCostTransaction;
+      expect(result, isNotNull);
+      expect(result!.transactionId, 't1');
+    });
+
+    test('ignores pending transactions', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(id: 't1', amount: '42.50', currency: 'USD', date: recentIso(5), name: 'Dinner', pending: false),
+        tx(id: 'pending1', amount: '9999.99', currency: 'USD', date: recentIso(1), name: 'Pending', pending: true),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      final result = notifier.highestCostTransaction;
+      expect(result, isNotNull);
+      expect(result!.transactionId, 't1');
+    });
+
+    test('ignores transactions older than 30 days', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(id: 't1', amount: '42.50', currency: 'USD', date: recentIso(5), name: 'Dinner'),
+        tx(id: 'old', amount: '5000.00', currency: 'USD', date: recentIso(45), name: 'Old charge'),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      final result = notifier.highestCostTransaction;
+      expect(result, isNotNull);
+      expect(result!.transactionId, 't1');
+    });
+
+    test('ignores transactions with unparseable dates', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(id: 't1', amount: '42.50', currency: 'USD', date: recentIso(5), name: 'Dinner'),
+        tx(id: 'bad', amount: '5000.00', currency: 'USD', date: 'not-a-date', name: 'Bad date'),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      final result = notifier.highestCostTransaction;
+      expect(result, isNotNull);
+      expect(result!.transactionId, 't1');
+    });
+
+    test('ignores zero-amount transactions', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(id: 't1', amount: '42.50', currency: 'USD', date: recentIso(5), name: 'Dinner'),
+        tx(id: 'zero', amount: '0', currency: 'USD', date: recentIso(1), name: 'Zero'),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      final result = notifier.highestCostTransaction;
+      expect(result, isNotNull);
+      expect(result!.transactionId, 't1');
+    });
+
+    test('returns null when only payments/negatives exist', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(id: 'pay1', amount: '-500.00', currency: 'USD', date: recentIso(2), name: 'Payment'),
+        tx(id: 'pay2', amount: '-1200.00', currency: 'USD', date: recentIso(1), name: 'Big Payment'),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      expect(notifier.highestCostTransaction, isNull);
+    });
+
+    test('maps all fields correctly', () {
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(
+          id: 'big',
+          amount: '250.00',
+          currency: 'EUR',
+          date: recentIso(3),
+          merchant: 'Amazon',
+          name: 'Amazon purchase',
+        ),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      final result = notifier.highestCostTransaction;
+      expect(result, isNotNull);
+      expect(result!.transactionId, 'big');
+      expect(result.accountId, 'acct-1');
+      expect(result.accountName, 'My Card');
+      expect(result.amountCents, 25000);
+      expect(result.currency, 'EUR');
+      expect(result.name, 'Amazon purchase');
+      expect(result.merchantName, 'Amazon');
+      expect(result.date, isNotNull);
+    });
   });
 }
 

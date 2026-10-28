@@ -101,7 +101,7 @@ class TransactionsNotifier extends ChangeNotifier {
   bool _summaryLoaded = false;
 
   /// Whether the ledger list has finished at least one successful load. Used by
-  /// consumers (e.g. the Wallet tab's highest-payment computation) to avoid
+  /// consumers (e.g. the Wallet tab's highest-cost computation) to avoid
   /// reading an empty list before the first fetch completes.
   bool _hasLoadedTransactions = false;
 

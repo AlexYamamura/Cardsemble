@@ -17,8 +17,8 @@ import 'package:cardsemble/features/wallet/domain/benefit_spending.dart';
 /// Loads the connected accounts (Plaid items + statement accounts), matches each
 /// to its card catalog entry (the same reference data used by the Research tab),
 /// and assembles "Your Cards" and "Household cards" lists. The wallet summary
-/// metrics (card count, highest payment) are computed client-side: card count
-/// comes from the connected items and highest payment is derived from the loaded
+/// metrics (card count, highest cost transaction) are computed client-side: card count
+/// comes from the connected items and the highest cost transaction is derived from the loaded
 /// transaction list. Benefit usage and welcome-bonus spend are tracked locally
 /// in SharedPreferences and can be migrated to backend tables later.
 class WalletNotifier extends ChangeNotifier {
@@ -75,8 +75,8 @@ class WalletNotifier extends ChangeNotifier {
   DateTime? get lastUpdated => _lastUpdated;
 
   /// Whether the transaction list has not yet finished its first successful
-  /// load. The highest-payment metric is not meaningful until transactions are
-  /// available.
+  /// load. The highest-cost transaction metric is not meaningful until
+  /// transactions are available.
   bool get isTransactionsLoading => !_transactions.hasLoadedTransactions;
 
   static const String _benefitUsageKeyPrefix = 'wallet.benefit_usage.v1.';
@@ -151,61 +151,52 @@ class WalletNotifier extends ChangeNotifier {
      unawaited(_applyAccountsSnapshot());
   }
 
-  /// Listens for TransactionsNotifier changes so the highest-payment metric
-  /// (derived from the loaded transaction list) updates when new transactions
-  /// arrive.
+  /// Listens for TransactionsNotifier changes so the highest-cost transaction
+  /// metric (derived from the loaded transaction list) updates when new
+  /// transactions arrive.
   void _onTransactionsChanged() {
     if (_disposed) return;
     notifyListeners();
   }
 
-  /// The largest payment amount found in the loaded transactions within the past
-  /// 30 days. Prefers rows with `transaction_code == 'payment'`; falls back to
-  /// any negative (payment) transaction. Returns null when no transactions have
-  /// been loaded yet or no payments are found.
-  WalletPayment? get highestPayment {
+  /// The largest charge (cost) found in the loaded transactions within the past
+  /// 30 days. Considers only positive amounts (Plaid charges are positive),
+  /// excluding pending rows, explicit payments (`transaction_code == 'payment'`),
+  /// and transactions older than 30 days or without a parseable date.
+  /// Returns null when no transactions have been loaded yet or no qualifying
+  /// charge is found.
+  WalletCostTransaction? get highestCostTransaction {
     final txs = _transactions.transactions;
     if (txs.isEmpty) return null;
 
     final cutoff = DateTime.now().subtract(const Duration(days: 30));
-    WalletPayment? best;
-    double? bestAbs;
-    bool foundCodedPayment = false;
-    WalletPayment? codedBest;
-    double? codedBestAbs;
+    WalletCostTransaction? best;
+    double? bestAmount;
 
     for (final tx in txs) {
       if (tx.pending) continue;
+      if (tx.isPayment) continue; // skip explicit payment rows
       final date = tx.parsedDate;
       if (date == null || date.isBefore(cutoff)) continue;
       final amount = tx.amountValue;
-      if (amount >= 0) continue; // payments are negative in Plaid
-      final absAmount = amount.abs();
-      final payment = WalletPayment(
-        transactionId: tx.id,
-        accountId: tx.accountId,
-        accountName: tx.displayName ?? tx.accountName ?? tx.plaidName,
-        amountCents: (absAmount * 100).round(),
-        currency: tx.currency,
-        date: date,
-        name: tx.name,
-        merchantName: tx.merchant,
-      );
-      if (tx.isPayment) {
-        foundCodedPayment = true;
-        if (codedBest == null || absAmount > codedBestAbs!) {
-          codedBest = payment;
-          codedBestAbs = absAmount;
-        }
-      } else if (!foundCodedPayment) {
-        if (best == null || absAmount > bestAbs!) {
-          best = payment;
-          bestAbs = absAmount;
-        }
+      if (amount <= 0) continue; // charges are positive in Plaid
+
+      if (best == null || amount > bestAmount!) {
+        best = WalletCostTransaction(
+          transactionId: tx.id,
+          accountId: tx.accountId,
+          accountName: tx.displayName ?? tx.accountName ?? tx.plaidName,
+          amountCents: (amount * 100).round(),
+          currency: tx.currency,
+          date: date,
+          name: tx.name,
+          merchantName: tx.merchant,
+        );
+        bestAmount = amount;
       }
     }
 
-    return foundCodedPayment ? codedBest : best;
+    return best;
   }
 
   /// Computes spending toward this card's benefits from the loaded transaction
