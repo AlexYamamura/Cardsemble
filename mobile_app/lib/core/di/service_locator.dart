@@ -81,6 +81,13 @@ class ServiceLocator {
       baseUrl: supabaseBaseUrl,
       accessTokenProvider: () =>
           supabaseClient.auth.currentSession?.accessToken,
+      // When a request comes back 401 (expired or revoked access token),
+      // silently refresh the session using the stored refresh token and retry
+      // with the new access token instead of surfacing the error to the user.
+      refreshAccessToken: () async {
+        await AppSupabaseClient.instance.auth.refreshSession();
+        return AppSupabaseClient.instance.accessToken;
+      },
     );
     registerSingleton<SupabaseApiClient>(supabaseApiClient);
     registerSingleton<AppSupabaseClient>(AppSupabaseClient.instance);
@@ -125,6 +132,11 @@ class ServiceLocator {
       () => TransactionCache(
         store: cacheStore,
         scopeProvider: () => supabaseClient.auth.currentUser?.id,
+        // Refresh the transaction cache at most about every 6 hours (~4 times a
+        // day). Plaid writes synced transactions to Supabase on its own
+        // schedule; refreshing on a cadence a bit after that means the local
+        // cache catches up shortly after Plaid has updated the database.
+        ttl: const Duration(hours: 6),
       ),
     );
     // Old keys were not user-scoped and cannot be attributed safely.

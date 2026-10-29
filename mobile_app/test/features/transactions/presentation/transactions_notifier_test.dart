@@ -145,6 +145,55 @@ void main() {
     expect(repository.accountLoads, 1);
   });
 
+  test('loadAll skips the network when cached transactions are fresh', () async {
+    late DateTime now;
+    now = DateTime(2026, 1, 1, 12);
+    final cache = TransactionCache(
+      store: FakeCacheStore(),
+      scopeProvider: () => 'user-1',
+      ttl: const Duration(hours: 6),
+      clock: () => now,
+    );
+    await cache.write(scope: 'user-1', transactions: <CardTransaction>[]);
+
+    final repository = FakeTransactionRepository();
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+
+    await notifier.loadAll();
+
+    expect(repository.transactionLoads, 0);
+    expect(notifier.hasLoadedTransactions, isTrue);
+  });
+
+  test('loadAll refreshes the network when cached transactions are expired', () async {
+    late DateTime now;
+    now = DateTime(2026, 1, 1, 12);
+    final cache = TransactionCache(
+      store: FakeCacheStore(),
+      scopeProvider: () => 'user-1',
+      ttl: const Duration(hours: 6),
+      clock: () => now,
+    );
+    await cache.write(scope: 'user-1', transactions: <CardTransaction>[]);
+    now = now.add(const Duration(hours: 7));
+
+    final repository = FakeTransactionRepository();
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+      cache: cache,
+    );
+
+    await notifier.loadAll();
+
+    expect(repository.transactionLoads, 1);
+    expect(notifier.hasLoadedTransactions, isTrue);
+  });
+
   test('does not let an older response overwrite a newer one', () async {
     final firstCompleter = Completer<Result<TransactionPage>>();
     final secondCompleter = Completer<Result<TransactionPage>>();
@@ -361,7 +410,7 @@ void main() {
     expect(notifier.filteredTotal, 142.50);
   });
 
-  test('hydrates a fresh transaction snapshot before the network completes', () async {
+  test('loadAll serves a fresh cached snapshot without refetching the network', () async {
     final store = FakeCacheStore();
     final now = DateTime(2026, 1, 2, 12);
     final cache = TransactionCache(
@@ -373,27 +422,19 @@ void main() {
       scope: 'user-a',
       transactions: [_tx('cached')],
     );
-    final completer = Completer<Result<TransactionPage>>();
-    final repository = FakeTransactionRepository(
-      pageBuilder: (query) => completer.future,
-    );
+    final repository = FakeTransactionRepository();
     final notifier = TransactionsNotifier(
       transactionRepository: repository,
       householdRepository: FakeHouseholdRepository(),
       cache: cache,
     );
 
-    final load = notifier.loadAll();
-    await pumpEventQueue();
+    await notifier.loadAll();
 
+    // A fresh cache is served without a network refetch (~4x/day cadence).
+    expect(repository.transactionLoads, 0);
     expect(notifier.transactions.single.id, 'cached');
-
-    completer.complete(
-      const Success(TransactionPage(items: [], hasMore: false)),
-    );
-    await load;
-
-    expect(notifier.transactions, isEmpty);
+    expect(notifier.hasLoadedTransactions, isTrue);
   });
 
   test('assignment works on a freshly hydrated snapshot', () async {
@@ -535,12 +576,16 @@ void main() {
 
   test('a successful empty load replaces the stale fallback', () async {
     final store = FakeCacheStore();
+    late DateTime now;
+    now = DateTime(2026, 1, 2, 12);
     final cache = TransactionCache(
       store: store,
-      clock: () => DateTime(2026, 1, 2, 12),
+      ttl: const Duration(hours: 1),
+      clock: () => now,
       scopeProvider: () => 'user-a',
     );
     await cache.write(scope: 'user-a', transactions: [_tx('cached')]);
+    now = now.add(const Duration(hours: 2)); // Expire the cache so loadAll refetches.
 
     var fail = false;
     final repository = FakeTransactionRepository(
@@ -559,6 +604,7 @@ void main() {
 
     await notifier.loadAll();
     expect(notifier.transactions, isEmpty);
+    expect(repository.transactionLoads, 1);
 
     fail = true;
     await notifier.loadTransactions(reset: true);

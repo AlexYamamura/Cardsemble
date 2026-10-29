@@ -157,4 +157,39 @@ void main() {
     expect(result.value.length, 3);
     expect(source.fetchAllCalls, 1);
   });
+
+  test('getAllCards serves a fresh snapshot without refetching the source', () async {
+    final repo = repository();
+    await repo.getAllCards();
+    source.fetchAllCalls = 0;
+
+    await repo.getAllCards();
+
+    expect(source.fetchAllCalls, 0);
+  });
+
+  test('getAllCards refreshes from the source after the TTL expires', () async {
+    final repo = repository(ttl: const Duration(hours: 1));
+    await repo.getAllCards();
+    source.fetchAllCalls = 0;
+    now = now.add(const Duration(hours: 2));
+
+    await repo.getAllCards();
+
+    expect(source.fetchAllCalls, 1);
+  });
+
+  test('getAllCards serves an expired snapshot when the source fails', () async {
+    final repo = repository();
+    await repo.getAllCards();
+    source.fetchAllCalls = 0;
+    source.fetchAllResult = const FailureResult(NetworkFailure('offline'));
+    now = now.add(const Duration(hours: 25));
+
+    final result = await repo.getAllCards();
+
+    expect(result.isSuccess, isTrue);
+    expect(result.value.length, 3);
+    expect(source.fetchAllCalls, 1);
+  });
 }

@@ -55,11 +55,30 @@ class WalletNotifier extends ChangeNotifier {
   /// completion notification arrives.
   bool _pendingLoadAfterSync = false;
 
-  /// Whether the catalog has been fetched successfully.
+  /// Whether the catalog has been fetched successfully (success only, so a
+  /// failed load can be retried later).
   bool _catalogLoaded = false;
+
+  /// Whether a load / initial assembly has begun. Distinguishes "not started"
+  /// (show empty state immediately) from "preparing" (show the waiting wheel).
+  bool _hasStarted = false;
+
+  /// Whether the first catalog + accounts + transactions assembly has
+  /// completed. Once true, silent listener-driven reassemblies do not re-show
+  /// the waiting view (cards are retained).
+  bool _initialAssemblyDone = false;
 
   /// Whether dispose() has been called.
   bool _disposed = false;
+
+  /// Whether the wallet is still assembling its initial card data: accounts,
+  /// catalog research data matched to the connected accounts, and the first
+  /// transaction load. While preparing, the screen shows the loading wheel
+  /// instead of an empty/partial wallet. The wheel covers the whole load()
+  /// window (including the final transaction load) via _isLoading, and silent
+  /// reassemblies after the first assembly never re-show it.
+  bool get isPreparing =>
+      _hasStarted && !_disposed && (_isLoading || !_initialAssemblyDone);
 
   /// Locally persisted benefit usage: cardId -> {benefitId: used}.
   final Map<String, Map<String, bool>> _benefitUsage = {};
@@ -92,26 +111,46 @@ class WalletNotifier extends ChangeNotifier {
   /// back to fetching them directly if they haven't been loaded yet (e.g. when
   /// called before startup completes or in tests). No Plaid API is involved —
   /// both calls read from the local Supabase mirror of synced Plaid data.
-  Future<void> load() async {
+  /// Loads (or refreshes) the wallet cards.
+  ///
+  /// When [refreshAccounts] is true the shared account/statement data is
+  /// re-fetched while [_isLoading] is true, so the waiting view/spinner is
+  /// shown until the full card data is reassembled. Existing cards are cleared
+  /// at the start of a refresh so stale cards are not visible during reload.
+  /// The default (cached) load only reassembles from already-loaded accounts
+  /// and does not clear or refetch, avoiding flicker on silent reloads/resume.
+  Future<void> load({bool refreshAccounts = false}) async {
     // Never read mid-sync snapshots. The sync-completion listener will rerun
     // this load after the server writes and AccountsNotifier reloads land.
     if (_accounts.isSyncing) {
       _pendingLoadAfterSync = true;
       _isLoading = true;
       _error = null;
+      _hasStarted = true;
       notifyListeners();
       return;
     }
 
     _isLoading = true;
     _error = null;
+    _hasStarted = true;
+    // Clear existing panels so the waiting view (spinner) shows while fresh
+    // card data is fetched and assembled, instead of leaving stale cards
+    // visible during a reload.
+    if (refreshAccounts) {
+      _yourCards = [];
+      _householdCards = [];
+    }
     notifyListeners();
 
     try {
-      // MainTabs loads accounts once at startup. If they haven't been loaded
-      // yet (direct load() call, retry, tests), fetch them now so the panels
-      // have data to assemble from.
-      if (_accounts.connections.isEmpty && _accounts.statementSummary == null) {
+      // MainTabs loads accounts once at startup. Refreshes (and direct loads
+      // before startup completes) re-fetch the shared account/statement data
+      // so the panels assemble from current data.
+      if (
+        refreshAccounts ||
+        (_accounts.connections.isEmpty && _accounts.statementSummary == null)
+      ) {
         await Future.wait<void>([
           _accounts.loadConnections(),
           _accounts.loadStatementCycles(),
@@ -119,6 +158,13 @@ class WalletNotifier extends ChangeNotifier {
       }
 
       await _applyAccountsSnapshot();
+
+      // The wallet is not ready until the first transaction load has settled.
+      // loadAll() coalesces with MainTabs' startup load and completes on
+      // failure, so this cannot hang on a failed transaction fetch.
+      if (!_transactions.hasLoadedTransactions) {
+        await _transactions.loadAll();
+      }
     } catch (error) {
       _error = error.toString();
     } finally {
@@ -148,6 +194,7 @@ class WalletNotifier extends ChangeNotifier {
     if (_pendingLoadAfterSync) {
       _pendingLoadAfterSync = false;
       _isLoading = false;
+      _hasStarted = true;
       unawaited(load());
       return;
     }
@@ -162,7 +209,23 @@ class WalletNotifier extends ChangeNotifier {
       return;
     }
 
-     unawaited(_applyAccountsSnapshot());
+    // Mark that account activity has begun so the screen shows the waiting
+    // view while the initial catalog research load assembles cards.
+    _hasStarted = true;
+
+    // The initial assembly must run through load() so the spinner covers the
+    // catalog fetch and the first transaction load. Once the wallet has been
+    // assembled once, silent listener-driven reassemblies stay flicker-free.
+    if (!_initialAssemblyDone) {
+      // Defer while AccountsNotifier is still fetching its snapshot; the
+      // load-completion notification will re-enter this listener once
+      // isLoading is false, avoiding duplicate account fetches.
+      if (_accounts.isLoading) return;
+      unawaited(load());
+      return;
+    }
+
+    unawaited(_applyAccountsSnapshot());
   }
 
   /// Listens for TransactionsNotifier changes so the highest-cost transaction
@@ -227,12 +290,15 @@ class WalletNotifier extends ChangeNotifier {
   }
 
   /// Label describing the window [highestCostTransaction] scans: the selected
-  /// month when a date chip is active, otherwise the trailing 30 days. Used by
-  /// the wallet summary card so the subtitle matches the window actually used.
+  /// month when a date chip is active (start of month to current/selected date),
+  /// otherwise the trailing 30 days. Shown without a year. Used by the wallet
+  /// summary card so the subtitle matches the window actually used.
   String get highestCostWindow {
     final selectedRange = _transactions.dateRange;
     if (selectedRange != null) {
-      return '${DateFormat.MMM().format(selectedRange.start)} ${selectedRange.start.year}';
+      final start = DateFormat.MMMd().format(selectedRange.start);
+      final end = DateFormat.MMMd().format(selectedRange.end);
+      return '$start – $end';
     }
     return 'Last 30 days';
   }
@@ -263,6 +329,10 @@ class WalletNotifier extends ChangeNotifier {
       if (_disposed) return;
       _applyPersistedState(); // notifies listeners
       _lastUpdated = DateTime.now();
+      // The first catalog + accounts + persisted-state assembly is complete.
+      // From here on, silent listener-driven reassemblies do not re-show the
+      // waiting view (cards are retained).
+      _initialAssemblyDone = true;
     } finally {
       _applyingAccountsUpdate = false;
       // If an AccountsNotifier change arrived while we were rebuilding, re-apply
@@ -276,7 +346,7 @@ class WalletNotifier extends ChangeNotifier {
 
   Future<void> _loadCatalog() async {
     final result = await _catalog.getAllCards();
-    return result.fold(
+    result.fold(
       (cards) {
         _catalogCards = cards;
         _catalogLoaded = true;

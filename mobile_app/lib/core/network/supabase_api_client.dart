@@ -7,16 +7,23 @@ class SupabaseApiClient {
   SupabaseApiClient({
     required String baseUrl,
     required String? Function() accessTokenProvider,
+    Future<String?> Function()? refreshAccessToken,
     http.Client? client,
   })  : _baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
         _accessTokenProvider = accessTokenProvider,
+        _refreshAccessToken = refreshAccessToken,
         _client = client ?? http.Client();
 
   final String _baseUrl;
   final String? Function() _accessTokenProvider;
+  /// Attempts to obtain a fresh access token (for example via Supabase's
+  /// refresh-session endpoint) when a request comes back 401. May return null
+  /// when there is no refreshable session (for example the refresh token is
+  /// also expired or revoked).
+  final Future<String?> Function()? _refreshAccessToken;
   final http.Client _client;
 
-  String? _getAccessToken() {
+  String _getAccessToken() {
     final token = _accessTokenProvider();
     if (token == null || token.isEmpty) {
       throw const AuthException('Your session has expired. Sign in again.');
@@ -24,8 +31,20 @@ class SupabaseApiClient {
     return token;
   }
 
-  Map<String, String> _headers() {
-    final token = _getAccessToken();
+  /// Performs a single refresh of the access token. Swallows errors so a
+  /// non-refreshable session (expired or revoked refresh token) simply falls
+  /// through to surfacing the original 401 to the caller.
+  Future<String?> _tryRefreshAccessToken() async {
+    if (_refreshAccessToken == null) return null;
+    final refresh = _refreshAccessToken;
+    try {
+      return await refresh();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, String> _headers(String token) {
     return {
       'Authorization': 'Bearer $token',
       'Content-Type': 'application/json',
@@ -51,42 +70,61 @@ class SupabaseApiClient {
     }
   }
 
-  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
-    final response = await _client.post(
-      Uri.parse('$_baseUrl$path'),
-      headers: _headers(),
-      body: jsonEncode(body),
-    );
+  /// Sends [send] with the current access token. On a 401 response it attempts
+  /// to refresh the access token once and retries the request; otherwise the
+  /// original response (success or error) is returned/raised as normal.
+  Future<Map<String, dynamic>> _request(
+    Future<http.Response> Function(String token) send,
+  ) async {
+    final token = _getAccessToken();
+    final response = await send(token);
+
+    if (response.statusCode == 401) {
+      final refreshed = await _tryRefreshAccessToken();
+      if (refreshed != null) {
+        final String fresh = refreshed;
+        final retried = await send(fresh);
+        _checkResponse(retried);
+        return jsonDecode(retried.body) as Map<String, dynamic>;
+      }
+    }
+
     _checkResponse(response);
     return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
+    final response = await _request((token) => _client.post(
+      Uri.parse('$_baseUrl$path'),
+      headers: _headers(token),
+      body: jsonEncode(body),
+    ));
+    return response;
   }
 
   Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) async {
-    final response = await _client.patch(
+    final response = await _request((token) => _client.patch(
       Uri.parse('$_baseUrl$path'),
-      headers: _headers(),
+      headers: _headers(token),
       body: jsonEncode(body),
-    );
-    _checkResponse(response);
-    return jsonDecode(response.body) as Map<String, dynamic>;
+    ));
+    return response;
   }
 
   Future<Map<String, dynamic>> delete(String path) async {
-    final response = await _client.delete(
+    final response = await _request((token) => _client.delete(
       Uri.parse('$_baseUrl$path'),
-      headers: _headers(),
-    );
-    _checkResponse(response);
-    return jsonDecode(response.body) as Map<String, dynamic>;
+      headers: _headers(token),
+    ));
+    return response;
   }
 
   Future<Map<String, dynamic>> get(String path) async {
-    final response = await _client.get(
+    final response = await _request((token) => _client.get(
       Uri.parse('$_baseUrl$path'),
-      headers: _headers(),
-    );
-    _checkResponse(response);
-    return jsonDecode(response.body) as Map<String, dynamic>;
+      headers: _headers(token),
+    ));
+    return response;
   }
 
   Future<Result<Map<String, dynamic>>> safePost(String path, Map<String, dynamic> body) async {

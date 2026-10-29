@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -849,7 +850,10 @@ void main() {
       fakeTx.setDateRange(range);
       expect(notifier.highestCostTransaction?.transactionId, 'old');
       expect(notifier.highestCostTransaction?.amountCents, 500000);
-      expect(notifier.highestCostWindow, isNot(equals('Last 30 days')));
+      expect(
+        notifier.highestCostWindow,
+        '${DateFormat.MMMd().format(range.start)} – ${DateFormat.MMMd().format(range.end)}',
+      );
     });
   });
 }

@@ -105,6 +105,12 @@ class TransactionsNotifier extends ChangeNotifier {
   /// reading an empty list before the first fetch completes.
   bool _hasLoadedTransactions = false;
 
+  /// Whether the in-memory transactions were served from a fresh local cache
+  /// (within TTL). When true, `loadAll()` skips the network refresh so the app
+  /// only refetches transactions about once per cache TTL (e.g. every 6 hours,
+  /// roughly 4 times a day) instead of on every open.
+  bool _transactionsCacheFresh = false;
+
   // In-memory cache of split draft percentages keyed by transaction id. Keeps
   // the split dropdown from re-hitting the network on every open/close of the
   // expansion tile; rewritten when a split is saved.
@@ -402,6 +408,7 @@ class TransactionsNotifier extends ChangeNotifier {
       _offset = offset;
       _hasMore = hasMore;
       _hasLoadedTransactions = true;
+      _transactionsCacheFresh = true;
       _staleSections.remove('transactions');
       _rememberGoodSection(transactions: _transactions);
       _lastUpdated = DateTime.now();
@@ -556,7 +563,15 @@ class TransactionsNotifier extends ChangeNotifier {
     _syncCacheScope();
     await _hydrateFromCache();
     await Future.wait([loadPeople(), loadAccounts()]);
-    await loadTransactions(reset: true);
+    if (_transactionsCacheFresh) {
+      // Transactions were served from a fresh local cache; do not refetch from
+      // the network. This limits refreshes to roughly once per cache TTL
+      // (e.g. every 6 hours, about 4 times a day) so the local cache catches up
+      // shortly after Plaid writes new transactions to Supabase.
+      _hasLoadedTransactions = true;
+    } else {
+      await loadTransactions(reset: true);
+    }
   }
 
   /// Reloads everything the user can see (used after mutations that change
@@ -864,6 +879,7 @@ class TransactionsNotifier extends ChangeNotifier {
           snapshot.transactions.isFresh(now, cache.ttl)) {
         _transactions = snapshot.transactions.items;
         _hasMore = false;
+        _transactionsCacheFresh = true;
         hydratedAny = true;
       }
       if (_summaryTransactions.isEmpty &&

@@ -123,7 +123,7 @@ class _WalletScreenState extends State<WalletScreen>
   Future<void> _syncAccounts() async {
     final accounts = context.read<AccountsNotifier>();
     final wallet = context.read<WalletNotifier>();
-    if (accounts.isSyncing || wallet.isLoading) return;
+    if (accounts.isSyncing || wallet.isLoading || wallet.isPreparing) return;
 
     final success = await accounts.syncConnections();
     if (!mounted) return;
@@ -197,7 +197,7 @@ class _WalletScreenState extends State<WalletScreen>
         actions: [
           Consumer<WalletNotifier>(
             builder: (context, wallet, _) {
-              final busy = wallet.isLoading || wallet.isSyncing;
+              final busy = wallet.isLoading || wallet.isSyncing || wallet.isPreparing;
               return IconButton(
                 icon: busy
                     ? const SizedBox(
@@ -223,11 +223,13 @@ class _WalletScreenState extends State<WalletScreen>
       ),
       body: Consumer<WalletNotifier>(
         builder: (context, notifier, child) {
-          // Show a content-ready state when card data has been assembled from the
-          // async data sources. The highest-cost transaction metric still waits
-          // for the TransactionsNotifier list to load before it is meaningful.
-          if (notifier.isLoading && notifier.yourCards.isEmpty) {
-            return _WalletWaitingView(syncing: false);
+          // Show the waiting wheel until the wallet is fully assembled:
+          // accounts, catalog research data matched to those accounts, and the
+          // first transaction load all must settle first. Retained cards on a
+          // silent reload/resume are never hidden behind the spinner
+          // (yourCards.isEmpty conjunct).
+          if (notifier.isPreparing && notifier.yourCards.isEmpty) {
+            return _WalletWaitingView(syncing: notifier.isSyncing);
           }
           final matchedCards = notifier.yourCards
               .where((card) => card.catalogCard != null)
@@ -235,14 +237,13 @@ class _WalletScreenState extends State<WalletScreen>
               .toList(growable: false);
           return RefreshIndicator(
             onRefresh: () async {
-              final accounts = context.read<AccountsNotifier>();
               final transactions = context.read<TransactionsNotifier>();
               if (!transactions.hasLoadedTransactions) {
                 transactions.loadAll();
               }
-              await accounts.loadConnections();
-              await accounts.loadStatementCycles();
-              await notifier.load();
+              // WalletNotifier.load() owns the account fetches so the waiting
+              // spinner is shown for the whole refresh until card data loads.
+              await notifier.load(refreshAccounts: true);
             },
             child: CustomScrollView(
               slivers: [
@@ -522,7 +523,7 @@ class _WalletSummaryCard extends StatelessWidget {
                   label: 'Highest cost',
                   value: costText,
                   subtitle: cost != null
-                          ? '$windowLabel · ${cost.date != null ? _formatDate(cost.date!) : '—'}'
+                          ? windowLabel
                           : (isTransactionsLoading
                               ? 'Loading transactions…'
                               : 'No charges in this range'),
@@ -536,13 +537,9 @@ class _WalletSummaryCard extends StatelessWidget {
       ),
     );
   }
-
-  String _formatDate(DateTime date) {
-    return '${date.month}/${date.day}/${date.year}';
-  }
 }
 
-class _SummaryMetric extends StatelessWidget {
+  class _SummaryMetric extends StatelessWidget {
   const _SummaryMetric({
     required this.label,
     required this.value,
