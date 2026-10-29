@@ -259,8 +259,9 @@ class _WalletScreenState extends State<WalletScreen>
                      cards: notifier.yourCards.length,
                      highestCostTransaction: notifier.highestCostTransaction,
                      isTransactionsLoading: notifier.isTransactionsLoading,
+                     windowLabel: notifier.highestCostWindow,
                    ),
-                ),
+                 ),
                 SliverToBoxAdapter(
                   child: _LayoutToggle(
                     useCarousel: _useCarousel,
@@ -471,11 +472,13 @@ class _WalletSummaryCard extends StatelessWidget {
     required this.cards,
     required this.highestCostTransaction,
     required this.isTransactionsLoading,
+    required this.windowLabel,
   });
 
   final int cards;
   final WalletCostTransaction? highestCostTransaction;
   final bool isTransactionsLoading;
+  final String windowLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -519,10 +522,10 @@ class _WalletSummaryCard extends StatelessWidget {
                   label: 'Highest cost',
                   value: costText,
                   subtitle: cost != null
-                          ? 'Last 30 days · ${cost.date != null ? _formatDate(cost.date!) : '—'}'
+                          ? '$windowLabel · ${cost.date != null ? _formatDate(cost.date!) : '—'}'
                           : (isTransactionsLoading
                               ? 'Loading transactions…'
-                              : 'No charges this month'),
+                              : 'No charges in this range'),
                     ),
                   ),
                 ],

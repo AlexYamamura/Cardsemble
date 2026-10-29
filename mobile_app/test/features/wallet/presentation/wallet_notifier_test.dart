@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -820,6 +821,35 @@ void main() {
       expect(result.name, 'Amazon purchase');
       expect(result.merchantName, 'Amazon');
       expect(result.date, isNotNull);
+    });
+
+    test('scans the selected date range, so an old month still shows its highest cost', () {
+      final old = DateTime.now().subtract(const Duration(days: 60));
+      final oldIso = old.toIso8601String().split('T').first;
+      final range = DateTimeRange(
+        start: DateTime(old.year, old.month, 1),
+        end: DateTime(old.year, old.month + 1, 0),
+      );
+
+      final fakeTx = FakeTransactionsNotifier(transactions: <CardTransaction>[
+        tx(id: 't1', amount: '42.50', currency: 'USD', date: recentIso(5), name: 'Dinner'),
+        tx(id: 'old', amount: '5000.00', currency: 'USD', date: oldIso, name: 'Old charge'),
+      ]);
+      notifier = WalletNotifier(
+        accounts: accounts,
+        catalog: catalog,
+        transactions: fakeTx,
+      );
+
+      // Default range is the current month, so the 60-day-old charge is
+      // excluded and Dinner wins.
+      expect(notifier.highestCostTransaction?.transactionId, 't1');
+
+      // Selecting the old month brings the old charge back into view.
+      fakeTx.setDateRange(range);
+      expect(notifier.highestCostTransaction?.transactionId, 'old');
+      expect(notifier.highestCostTransaction?.amountCents, 500000);
+      expect(notifier.highestCostWindow, isNot(equals('Last 30 days')));
     });
   });
 }

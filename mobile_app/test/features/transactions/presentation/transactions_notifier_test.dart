@@ -322,6 +322,45 @@ void main() {
     expect(notifier.hasActiveFilters, isTrue);
   });
 
+  test('hiding a transaction excludes it from the Pay total but keeps it visible', () async {
+    final today = DateTime.now().toIso8601String().split('T').first;
+    final repository = FakeTransactionRepository(
+      pageBuilder: (query) async => Success(
+        TransactionPage(
+          items: <CardTransaction>[
+            _tx('t1').copyWith(date: today, amount: '42.50'),
+            _tx('t2').copyWith(date: today, amount: '100.00'),
+          ],
+          hasMore: false,
+        ),
+      ),
+    );
+    final notifier = TransactionsNotifier(
+      transactionRepository: repository,
+      householdRepository: FakeHouseholdRepository(),
+    );
+    await notifier.loadTransactions(reset: true);
+
+    expect(notifier.filteredTransactions.length, 2);
+    expect(notifier.filteredTotalsByCurrency, <String, double>{'USD': 142.50});
+    expect(notifier.filteredTotal, 142.50);
+
+    notifier.toggleTransactionHidden('t1');
+
+    // Still visible in the list (greyed out in the UI).
+    expect(notifier.filteredTransactions.length, 2);
+    expect(notifier.isTransactionHidden('t1'), isTrue);
+    expect(notifier.isTransactionHidden('t2'), isFalse);
+
+    // Excluded from the Pay total.
+    expect(notifier.filteredTotalsByCurrency, <String, double>{'USD': 100.00});
+    expect(notifier.filteredTotal, 100.00);
+
+    // Toggling again restores it to the total.
+    notifier.toggleTransactionHidden('t1');
+    expect(notifier.filteredTotal, 142.50);
+  });
+
   test('hydrates a fresh transaction snapshot before the network completes', () async {
     final store = FakeCacheStore();
     final now = DateTime(2026, 1, 2, 12);

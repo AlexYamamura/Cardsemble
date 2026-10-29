@@ -110,6 +110,11 @@ class TransactionsNotifier extends ChangeNotifier {
   // expansion tile; rewritten when a split is saved.
   final Map<String, Map<String, double>> _splitDraftCache = {};
 
+  /// Transactions the user has long-pressed to hide. Hidden rows stay visible
+  /// in the list (greyed out) but are excluded from `filteredTotalsByCurrency`
+  /// / `filteredTotal`, i.e. the "Pay USD" total.
+  final Set<String> _hiddenTransactionIds = {};
+
   List<CardTransaction> get transactions => _transactions;
   List<CardTransaction> get summaryTransactions => _summaryTransactions;
   List<HouseholdPerson> get people => _people;
@@ -125,6 +130,21 @@ class TransactionsNotifier extends ChangeNotifier {
 
   String? get selectedAccountId => _selectedAccountId;
   String? get selectedPersonId => _selectedPersonId;
+
+  /// Whether [transactionId] has been hidden by a long press. Hidden rows stay
+  /// visible in the list but are greyed out and excluded from the Pay total.
+  bool isTransactionHidden(String transactionId) => _hiddenTransactionIds.contains(transactionId);
+
+  /// Toggles the hidden state of [transactionId]. Notifies listeners so the
+  /// tile and the Pay total rebuild.
+  void toggleTransactionHidden(String transactionId) {
+    if (_hiddenTransactionIds.contains(transactionId)) {
+      _hiddenTransactionIds.remove(transactionId);
+    } else {
+      _hiddenTransactionIds.add(transactionId);
+    }
+    notifyListeners();
+  }
 
   /// True when at least one section was restored from an expired cache after a
   /// failed refresh. The UI can use this to disclose staleness without
@@ -152,10 +172,13 @@ class TransactionsNotifier extends ChangeNotifier {
   }
 
   /// Map of currency code to total amount for positive (charge) transactions
-  /// matching the current filters. Excludes pending and payment transactions.
+  /// matching the current filters. Excludes pending and payment transactions,
+  /// and transactions the user has hidden via long press.
   Map<String, double> get filteredTotalsByCurrency {
     final Map<String, double> totalsByCurrency = {};
     for (final tx in filteredTransactions) {
+      // Hidden (long-pressed) rows stay visible but do not count toward totals.
+      if (_hiddenTransactionIds.contains(tx.id)) continue;
       // Only count positive charges (not pending, not payments)
       if (!tx.pending && tx.isPositive && !tx.isPayment) {
         final currency = tx.currency;

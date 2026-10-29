@@ -220,9 +220,12 @@ class _TransactionsScreenState extends State<TransactionsScreen>
                 );
               }
               final tx = displayTransactions[index];
+              final hidden = notifier.isTransactionHidden(tx.id);
               return _TransactionTile(
                 transaction: tx,
                 people: notifier.people,
+                hidden: hidden,
+                onLongPress: () => notifier.toggleTransactionHidden(tx.id),
                 onAssign: (personId) =>
                     _runAssignment(context, notifier, tx, personId),
                 onSplit: (splits) => _runSplit(context, notifier, tx, splits),
@@ -937,6 +940,8 @@ class _TransactionTile extends StatelessWidget {
     required this.onAssign,
     required this.onSplit,
     required this.onToggleHouseholdVisible,
+    this.hidden = false,
+    this.onLongPress,
   });
 
   final CardTransaction transaction;
@@ -945,30 +950,41 @@ class _TransactionTile extends StatelessWidget {
   final Future<bool> Function(List<TransactionSplit>) onSplit;
   final Future<bool> Function(bool) onToggleHouseholdVisible;
 
+  /// Whether this row is hidden (long-pressed): greyed out and excluded from
+  /// the Pay total, but still visible in the list.
+  final bool hidden;
+  final VoidCallback? onLongPress;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
      final assignedPerson = people.firstWhere(
-       (p) => p.id == transaction.assignedPersonId,
-       orElse: () =>
-           HouseholdPerson(id: '', displayName: 'Unassigned', isDefault: false),
-     );
+        (p) => p.id == transaction.assignedPersonId,
+        orElse: () =>
+            HouseholdPerson(id: '', displayName: 'Unassigned', isDefault: false),
+      );
 
      final assigneeColor = transaction.assignedPersonId == null
-         ? theme.colorScheme.primary
-         : _personColor(transaction.assignedPersonId!, people);
+        ? theme.colorScheme.primary
+        : _personColor(transaction.assignedPersonId!, people);
 
       final String label = transaction.hasSplits ? 'Split' : assignedPerson.displayName;
 
-     final statusColor = transaction.pending
-         ? AppColors.pendingBg
-          : AppColors.sageGreen;
+      final statusColor = transaction.pending
+          ? AppColors.pendingBg
+           : AppColors.sageGreen;
 
-     return Card(
-      color: Colors.white,
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ExpansionTile(
-        leading: Container(
+      // Hidden rows are greyed out to signal a disabled/dismissed state.
+      final Color cardColor = hidden ? Colors.grey.shade100 : Colors.white;
+      final Color mutedText = Colors.grey.shade600;
+
+      return Card(
+       color: cardColor,
+       margin: const EdgeInsets.only(bottom: 8),
+       child: GestureDetector(
+         onLongPress: onLongPress,
+         child: ExpansionTile(
+         leading: Container(
           width: 48,
           height: 48,
           decoration: BoxDecoration(
@@ -984,7 +1000,7 @@ class _TransactionTile extends StatelessWidget {
                       ? DateFormat('MMM').format(transaction.parsedDate!)
                       : '??',
                   style: TextStyle(
-                    color: Colors.black87,
+                    color: hidden ? mutedText : Colors.black87,
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                   ),
@@ -995,7 +1011,7 @@ class _TransactionTile extends StatelessWidget {
                       ? DateFormat('d').format(transaction.parsedDate!)
                       : '',
                   style: TextStyle(
-                    color: Colors.black87,
+                    color: hidden ? mutedText : Colors.black87,
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1010,6 +1026,7 @@ class _TransactionTile extends StatelessWidget {
             style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.w400,
               fontSize: 20,
+              color: hidden ? mutedText : null,
             ),
             overflow: TextOverflow.ellipsis,
             maxLines: 2,
@@ -1133,6 +1150,7 @@ class _TransactionTile extends StatelessWidget {
             transaction.currency,
           ),
           pending: transaction.pending,
+          hidden: hidden,
         ),
          children: [
            Padding(
@@ -1158,10 +1176,11 @@ class _TransactionTile extends StatelessWidget {
                       onSplit: onSplit,
                     ),
                   ],
-               ],
-             ),
-           ),
-         ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1170,14 +1189,17 @@ class _TransactionTile extends StatelessWidget {
 /// Slightly rounded rectangle chip showing the transaction amount in the
 /// tile's trailing area. Color matches the pending/approved state of the box.
 class _TransactionAmountChip extends StatelessWidget {
-  const _TransactionAmountChip({required this.amount, required this.pending});
+  const _TransactionAmountChip({required this.amount, required this.pending, this.hidden = false});
 
   final String amount;
   final bool pending;
+  final bool hidden;
 
   @override
   Widget build(BuildContext context) {
-    final color = pending ? Colors.orange.shade700 : AppColors.sageGreen;
+    final color = hidden
+        ? Colors.grey.shade400
+        : (pending ? Colors.orange.shade700 : AppColors.sageGreen);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(

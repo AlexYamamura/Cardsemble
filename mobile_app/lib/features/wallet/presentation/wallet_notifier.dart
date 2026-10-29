@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:cardsemble/features/accounts/domain/accounts_domain.dart';
@@ -172,17 +173,27 @@ class WalletNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The largest charge (cost) found in the loaded transactions within the past
-  /// 30 days. Considers only positive amounts (Plaid charges are positive),
-  /// excluding pending rows, explicit payments (`transaction_code == 'payment'`),
-  /// and transactions older than 30 days or without a parseable date.
-  /// Returns null when no transactions have been loaded yet or no qualifying
-  /// charge is found.
+  /// The largest charge (cost) found in the loaded transactions within the
+  /// currently selected date range (e.g. a month chip picked in the
+  /// Transactions tab). Falls back to the trailing 30 days from now when no
+  /// range is selected (e.g. after "Clear all"). Considers only positive
+  /// amounts (Plaid charges are positive), excluding pending rows, explicit
+  /// payments (`transaction_code == 'payment'`), and transactions without a
+  /// parseable date. Returns null when no transactions have been loaded yet or
+  /// no qualifying charge is found in the window.
   WalletCostTransaction? get highestCostTransaction {
     final txs = _transactions.transactions;
     if (txs.isEmpty) return null;
 
-    final cutoff = DateTime.now().subtract(const Duration(days: 30));
+    // Respect the active date range so the metric matches the transactions the
+    // user is viewing; otherwise fall back to the trailing 30 days from now.
+    // The +/- 1 day buffer mirrors filteredTransactions so a charge on the
+    // range boundary is still counted.
+    final selectedRange = _transactions.dateRange;
+    final rangeStart = selectedRange?.start;
+    final rangeEnd = selectedRange?.end;
+    final fallbackCutoff = DateTime.now().subtract(const Duration(days: 30));
+
     WalletCostTransaction? best;
     double? bestAmount;
 
@@ -190,7 +201,10 @@ class WalletNotifier extends ChangeNotifier {
       if (tx.pending) continue;
       if (tx.isPayment) continue; // skip explicit payment rows
       final date = tx.parsedDate;
-      if (date == null || date.isBefore(cutoff)) continue;
+      if (date == null) continue;
+      if (rangeStart != null && date.isBefore(rangeStart.subtract(const Duration(days: 1)))) continue;
+      if (rangeEnd != null && date.isAfter(rangeEnd.add(const Duration(days: 1)))) continue;
+      if (rangeStart == null && date.isBefore(fallbackCutoff)) continue;
       final amount = tx.amountValue;
       if (amount <= 0) continue; // charges are positive in Plaid
 
@@ -210,6 +224,17 @@ class WalletNotifier extends ChangeNotifier {
     }
 
     return best;
+  }
+
+  /// Label describing the window [highestCostTransaction] scans: the selected
+  /// month when a date chip is active, otherwise the trailing 30 days. Used by
+  /// the wallet summary card so the subtitle matches the window actually used.
+  String get highestCostWindow {
+    final selectedRange = _transactions.dateRange;
+    if (selectedRange != null) {
+      return '${DateFormat.MMM().format(selectedRange.start)} ${selectedRange.start.year}';
+    }
+    return 'Last 30 days';
   }
 
   /// Computes spending toward this card's benefits from the loaded transaction
