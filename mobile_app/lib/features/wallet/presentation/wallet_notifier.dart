@@ -55,8 +55,9 @@ class WalletNotifier extends ChangeNotifier {
   /// completion notification arrives.
   bool _pendingLoadAfterSync = false;
 
-  /// Whether the catalog has been fetched successfully (success only, so a
-  /// failed load can be retried later).
+  /// Whether the catalog load has completed (success or failure). Once true a
+  /// failed load is not retried, so card colors are determined once at first
+  /// paint and never change on a later retry.
   bool _catalogLoaded = false;
 
   /// Whether a load / initial assembly has begun. Distinguishes "not started"
@@ -353,8 +354,11 @@ class WalletNotifier extends ChangeNotifier {
       },
       (failure) {
         // Catalog backend may not be deployed yet; degrade gracefully so the
-        // connected accounts still show with institution-level info.
+        // connected accounts still show with institution-level info. Mark the
+        // catalog as loaded so a failed load is final — card colors are
+        // determined once at first paint and never change on a later retry.
         _catalogCards = const [];
+        _catalogLoaded = true;
         _error = failure.message;
       },
     );
