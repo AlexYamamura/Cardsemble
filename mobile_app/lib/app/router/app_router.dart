@@ -12,6 +12,7 @@ import 'package:cardsemble/features/summary/presentation/summary_screen.dart';
 import 'package:cardsemble/features/wallet/presentation/wallet_screen.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_screen.dart';
+import 'package:cardsemble/features/accounts/presentation/accounts_notifier.dart';
 
 class _TabInfo {
   const _TabInfo({
@@ -87,6 +88,13 @@ class _MainTabsState extends State<MainTabs>
       // Single entry point for the shared transaction data so both tabs do not
       // fire duplicate multi-page fetches on startup.
       context.read<TransactionsNotifier>().loadAll();
+      // Load connected accounts and statement cycles once at startup so the
+      // Wallet, Summary, and Accounts tabs share a single fetch instead of each
+      // refetching on init. AccountsNotifier notifies its listeners when the
+      // data lands, and WalletNotifier rebuilds its cards from that shared state.
+      final accounts = context.read<AccountsNotifier>();
+      accounts.loadConnections();
+      accounts.loadStatementCycles();
       // Check if we need to show first-run settings
       _checkFirstRunSettings();
     });

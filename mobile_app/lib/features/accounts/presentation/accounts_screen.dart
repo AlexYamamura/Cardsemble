@@ -14,16 +14,10 @@ class _AccountsScreenState extends State<AccountsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadInitialData();
-  }
-
-  Future<void> _loadInitialData() async {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final notifier = context.read<AccountsNotifier>();
-      notifier.loadConnections();
-      notifier.loadStatementCycles();
-    });
+    // Connections and statement cycles are loaded once at app startup
+    // (MainTabs) and shared across tabs via AccountsNotifier; this screen
+    // consumes that state instead of refetching on init. Pull-to-refresh and
+    // sync still reload explicitly.
   }
 
   @override

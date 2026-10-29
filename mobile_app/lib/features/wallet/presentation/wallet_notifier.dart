@@ -85,8 +85,12 @@ class WalletNotifier extends ChangeNotifier {
 
   Future<SharedPreferences> _prefs() async => SharedPreferences.getInstance();
 
-  /// Loads connections, statement cycles, and catalog cards, then assembles the
-  /// card panels. Safe to call multiple times; reloads on each invocation.
+  /// Assembles the card panels from the account / statement-cycle data.
+  /// Connections and statement cycles are fetched once at app startup by
+  /// MainTabs and shared across tabs via AccountsNotifier; this method falls
+  /// back to fetching them directly if they haven't been loaded yet (e.g. when
+  /// called before startup completes or in tests). No Plaid API is involved —
+  /// both calls read from the local Supabase mirror of synced Plaid data.
   Future<void> load() async {
     // Never read mid-sync snapshots. The sync-completion listener will rerun
     // this load after the server writes and AccountsNotifier reloads land.
@@ -103,11 +107,15 @@ class WalletNotifier extends ChangeNotifier {
     notifyListeners();
 
     try {
-       await Future.wait<void>([
-        _accounts.loadConnections(),
-        _accounts.loadStatementCycles(),
-        _loadCatalog(),
-      ]);
+      // MainTabs loads accounts once at startup. If they haven't been loaded
+      // yet (direct load() call, retry, tests), fetch them now so the panels
+      // have data to assemble from.
+      if (_accounts.connections.isEmpty && _accounts.statementSummary == null) {
+        await Future.wait<void>([
+          _accounts.loadConnections(),
+          _accounts.loadStatementCycles(),
+        ]);
+      }
 
       await _applyAccountsSnapshot();
     } catch (error) {
@@ -127,7 +135,7 @@ class WalletNotifier extends ChangeNotifier {
   /// and relays them so the wallet UI stays current without extra Plaid calls.
   /// The guard flags prevent re-entrancy loops with load().
   void _onAccountsChanged() {
-    if (_disposed || _applyingAccountsUpdate) return;
+    if (_disposed) return;
 
     if (_accounts.isSyncing) {
       // Surface the sync state to the screen, but do not touch the snapshots
@@ -140,6 +148,11 @@ class WalletNotifier extends ChangeNotifier {
       _pendingLoadAfterSync = false;
       _isLoading = false;
       unawaited(load());
+      return;
+    }
+
+    if (_applyingAccountsUpdate) {
+      _accountsRefreshPending = true;
       return;
     }
 
@@ -227,6 +240,12 @@ class WalletNotifier extends ChangeNotifier {
       _lastUpdated = DateTime.now();
     } finally {
       _applyingAccountsUpdate = false;
+      // If an AccountsNotifier change arrived while we were rebuilding, re-apply
+      // from the fresh data so the UI never shows a stale empty snapshot.
+      if (_accountsRefreshPending) {
+        _accountsRefreshPending = false;
+        unawaited(_applyAccountsSnapshot());
+      }
     }
   }
 

@@ -163,7 +163,9 @@ class _WalletScreenState extends State<WalletScreen>
       if (!transactions.hasLoadedTransactions) {
         transactions.loadAll();
       }
-      context.read<WalletNotifier>().load();
+      // WalletNotifier.load() is triggered by the AccountsNotifier listener
+      // once MainTabs' startup load of connections / statement cycles lands.
+      // Calling it here would race with the shared startup load.
     });
   }
 
@@ -233,10 +235,13 @@ class _WalletScreenState extends State<WalletScreen>
               .toList(growable: false);
           return RefreshIndicator(
             onRefresh: () async {
+              final accounts = context.read<AccountsNotifier>();
               final transactions = context.read<TransactionsNotifier>();
               if (!transactions.hasLoadedTransactions) {
                 transactions.loadAll();
               }
+              await accounts.loadConnections();
+              await accounts.loadStatementCycles();
               await notifier.load();
             },
             child: CustomScrollView(

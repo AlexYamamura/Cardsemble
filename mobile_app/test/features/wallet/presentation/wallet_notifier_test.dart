@@ -527,11 +527,12 @@ void main() {
     await syncFuture;
 
     // The deferred load() (triggered by the listener after sync completes)
-    // should eventually run: each counter went from 1 (sync reload) to
-    // greaterThan(1) (sync reload + deferred load).
-    await waitFor(() => repo.connectionLoads > 1);
-    expect(repo.connectionLoads, greaterThan(1));
-    expect(repo.statementCycleLoads, greaterThan(1));
+    // reassembles cards from the shared AccountsNotifier state that syncConnections
+    // already populated. It does not fetch accounts again, so the repo counters
+    // stay at 1 (sync reload only).
+    await waitFor(() => wallet.yourCards.isNotEmpty);
+    expect(repo.connectionLoads, 1);
+    expect(repo.statementCycleLoads, 1);
   });
 
   test('listener is removed on dispose and does not rebuild after sync', () async {

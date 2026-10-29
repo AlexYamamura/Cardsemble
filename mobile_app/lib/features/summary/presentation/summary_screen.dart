@@ -42,12 +42,13 @@ class _SummaryScreenState extends State<SummaryScreen> with AutomaticKeepAliveCl
     // list for this range, so we only load the summary slice here.
     final notifier = context.read<TransactionsNotifier>();
     _summaryRange = notifier.dateRange ?? _currentMonthRange();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      notifier.loadSummaryTransactions(_summaryRange);
-      _accountsNotifier!.loadConnections();
-      _accountsNotifier!.loadStatementCycles();
-    });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        notifier.loadSummaryTransactions(_summaryRange);
+        // Connections and statement cycles are loaded once at app startup
+        // (MainTabs) and shared across tabs via AccountsNotifier; the summary
+        // tab consumes that state instead of refetching on every init.
+      });
   }
 
   @override
