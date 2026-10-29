@@ -223,12 +223,12 @@ class _WalletScreenState extends State<WalletScreen>
       ),
       body: Consumer<WalletNotifier>(
         builder: (context, notifier, child) {
-          // Show the waiting wheel until the wallet is fully assembled:
-          // accounts, catalog research data matched to those accounts, and the
-          // first transaction load all must settle first. Retained cards on a
-          // silent reload/resume are never hidden behind the spinner
-          // (yourCards.isEmpty conjunct).
-          if (notifier.isPreparing && notifier.yourCards.isEmpty) {
+          // Show the waiting wheel until the first *complete* assembly has
+          // finished: accounts (connections + statement cycles) settled, catalog
+          // matched, and cards assembled. Retained cards on a silent
+          // reload/resume are never hidden behind the spinner because
+          // _initialAssemblyDone is already true.
+          if (notifier.isInitialAssemblyPending) {
             return _WalletWaitingView(syncing: notifier.isSyncing);
           }
           final matchedCards = notifier.yourCards

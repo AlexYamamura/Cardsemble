@@ -69,6 +69,14 @@ class WalletNotifier extends ChangeNotifier {
   /// the waiting view (cards are retained).
   bool _initialAssemblyDone = false;
 
+  /// Whether the first *complete* assembly is still pending. The screen shows
+  /// the waiting view for this whole window so partially-assembled cards are
+  /// never painted. Unlike [isPreparing], this stays true until accounts have
+  /// fully settled (connections + statement cycles), not just until
+  /// _isLoading flips.
+  bool get isInitialAssemblyPending =>
+      _hasStarted && !_disposed && !_initialAssemblyDone;
+
   /// Whether dispose() has been called.
   bool _disposed = false;
 
@@ -80,6 +88,11 @@ class WalletNotifier extends ChangeNotifier {
   /// reassemblies after the first assembly never re-show it.
   bool get isPreparing =>
       _hasStarted && !_disposed && (_isLoading || !_initialAssemblyDone);
+
+  /// Issuer resolved on the first complete assembly, keyed by the stable Plaid
+  /// item id. Later assemblies (sync, rename, statement reload, catalog retry)
+  /// reuse it, so a card's accent color can never change after first paint.
+  final Map<String, String> _issuerByItemId = {};
 
   /// Locally persisted benefit usage: cardId -> {benefitId: used}.
   final Map<String, Map<String, bool>> _benefitUsage = {};
@@ -147,10 +160,12 @@ class WalletNotifier extends ChangeNotifier {
     try {
       // MainTabs loads accounts once at startup. Refreshes (and direct loads
       // before startup completes) re-fetch the shared account/statement data
-      // so the panels assemble from current data.
+      // so the panels assemble from current data. Only assemble once both
+      // connections and statement cycles have settled so a card's issuer is
+      // resolved from complete data and its color never changes mid-session.
       if (
         refreshAccounts ||
-        (_accounts.connections.isEmpty && _accounts.statementSummary == null)
+        !_accounts.isSnapshotSettled
       ) {
         await Future.wait<void>([
           _accounts.loadConnections(),
@@ -214,14 +229,15 @@ class WalletNotifier extends ChangeNotifier {
     // view while the initial catalog research load assembles cards.
     _hasStarted = true;
 
+    // Never assemble from a half-populated account snapshot. Both connections
+    // and statement cycles must settle first so the issuer (and color) is
+    // resolved from complete data once.
+    if (!_accounts.isSnapshotSettled) return;
+
     // The initial assembly must run through load() so the spinner covers the
     // catalog fetch and the first transaction load. Once the wallet has been
     // assembled once, silent listener-driven reassemblies stay flicker-free.
     if (!_initialAssemblyDone) {
-      // Defer while AccountsNotifier is still fetching its snapshot; the
-      // load-completion notification will re-enter this listener once
-      // isLoading is false, avoiding duplicate account fetches.
-      if (_accounts.isLoading) return;
       unawaited(load());
       return;
     }
@@ -476,7 +492,15 @@ class WalletNotifier extends ChangeNotifier {
       yourCards.add(WalletCard(
         id: id,
         displayName: catalogCard?.name ?? connection.institutionName,
-        issuer: catalogCard?.issuer ?? connection.institutionName,
+        issuer: _issuerByItemId.putIfAbsent(
+          connection.itemId,
+          () {
+            final catalogIssuer = catalogCard?.issuer?.trim();
+            return (catalogIssuer != null && catalogIssuer.isNotEmpty)
+                ? catalogIssuer
+                : connection.institutionName;
+          },
+        ),
         network: catalogCard?.network,
         mask: statementAccount?.mask,
         subtype: statementAccount?.subtype,

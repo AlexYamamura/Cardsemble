@@ -15,6 +15,14 @@ class AccountsNotifier extends ChangeNotifier {
   StatementCycleSummary? _statementSummary;
   WalletSummary? _walletSummary;
   bool _isLoading = false;
+  /// Whether connections have settled (success or failure) since the last
+  /// reset. Used with [_statementCyclesSettled] to gate wallet card assembly
+  /// on a complete account snapshot.
+  bool _connectionsSettled = false;
+  /// Whether statement cycles have settled (success or failure) since the last
+  /// reset. Used with [_connectionsSettled] to gate wallet card assembly on a
+  /// complete account snapshot.
+  bool _statementCyclesSettled = false;
   bool _isLinking = false;
   bool _isSyncing = false;
   String? _error;
@@ -26,6 +34,11 @@ class AccountsNotifier extends ChangeNotifier {
   StatementCycleSummary? get statementSummary => _statementSummary;
   WalletSummary? get walletSummary => _walletSummary;
   bool get isLoading => _isLoading;
+  /// Whether both connections and statement cycles have settled since the last
+  /// reset. The wallet must not assemble cards from a half-populated snapshot,
+  /// so a card's issuer (and therefore its accent color) is resolved once from
+  /// complete data and never changes mid-session.
+  bool get isSnapshotSettled => _connectionsSettled && _statementCyclesSettled;
   bool get isLinking => _isLinking;
   bool get isSyncing => _isSyncing;
   String? get error => _error;
@@ -48,6 +61,7 @@ class AccountsNotifier extends ChangeNotifier {
       _error = e.toString();
     } finally {
       _isLoading = false;
+      _connectionsSettled = true;
       notifyListeners();
     }
   }
@@ -67,6 +81,7 @@ class AccountsNotifier extends ChangeNotifier {
       _error = e.toString();
     } finally {
       _isLoading = false;
+      _statementCyclesSettled = true;
       notifyListeners();
     }
   }
@@ -446,6 +461,8 @@ class AccountsNotifier extends ChangeNotifier {
     _statementSummary = null;
     _walletSummary = null;
     _isLoading = false;
+    _connectionsSettled = false;
+    _statementCyclesSettled = false;
     _isLinking = false;
     _isSyncing = false;
     _error = null;
