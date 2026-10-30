@@ -28,7 +28,9 @@ class _FakeTransactionRepository implements TransactionRepository {
   final Map<String, List<TransactionSplit>> splitsMap;
 
   @override
-  Future<Result<TransactionPage>> loadTransactions(TransactionQuery query) async {
+  Future<Result<TransactionPage>> loadTransactions(
+    TransactionQuery query,
+  ) async {
     return Success(TransactionPage(items: transactions, hasMore: false));
   }
 
@@ -87,7 +89,11 @@ class _FakeHouseholdRepository implements HouseholdRepository {
     bool isDefault = false,
   }) async {
     return Success(
-      HouseholdPerson(id: 'new', displayName: displayName, isDefault: isDefault),
+      HouseholdPerson(
+        id: 'new',
+        displayName: displayName,
+        isDefault: isDefault,
+      ),
     );
   }
 
@@ -116,46 +122,48 @@ class _FakeHouseholdRepository implements HouseholdRepository {
   }
 
   @override
-  Future<Result<JoinHouseholdResult>> joinByInviteCode(String inviteCode) async {
+  Future<Result<JoinHouseholdResult>> joinByInviteCode(
+    String inviteCode,
+  ) async {
     return Success(JoinHouseholdResult(householdId: 'household', member: null));
   }
 }
 
 Future<void> _pumpTransactionsScreen(
-    WidgetTester tester, {
-    required List<HouseholdPerson> people,
-    required CardTransaction transaction,
-  }) async {
-    final emptySplitsMap = <String, List<TransactionSplit>>{};
-    final notifier = TransactionsNotifier(
-      transactionRepository: _FakeTransactionRepository(
+  WidgetTester tester, {
+  required List<HouseholdPerson> people,
+  required CardTransaction transaction,
+}) async {
+  final emptySplitsMap = <String, List<TransactionSplit>>{};
+  final notifier = TransactionsNotifier(
+    transactionRepository: _FakeTransactionRepository(
+      transactions: [transaction],
+      splitsMap: emptySplitsMap,
+    ),
+    householdRepository: _FakeHouseholdRepository(people: people),
+    loadTransactionSplitDraft: LoadTransactionSplitDraft(
+      _FakeTransactionRepository(
         transactions: [transaction],
         splitsMap: emptySplitsMap,
       ),
-      householdRepository: _FakeHouseholdRepository(people: people),
-      loadTransactionSplitDraft: LoadTransactionSplitDraft(
-        _FakeTransactionRepository(
-          transactions: [transaction],
-          splitsMap: emptySplitsMap,
-        ),
+    ),
+    saveTransactionSplit: SaveTransactionSplit(
+      _FakeTransactionRepository(
+        transactions: [transaction],
+        splitsMap: emptySplitsMap,
       ),
-      saveTransactionSplit: SaveTransactionSplit(
-        _FakeTransactionRepository(
-          transactions: [transaction],
-          splitsMap: emptySplitsMap,
-        ),
-      ),
-    );
-    await notifier.loadAll();
+    ),
+  );
+  await notifier.loadAll();
 
-    await tester.pumpWidget(
-      ChangeNotifierProvider<TransactionsNotifier>.value(
-        value: notifier,
-        child: const MaterialApp(home: TransactionsScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
-  }
+  await tester.pumpWidget(
+    ChangeNotifierProvider<TransactionsNotifier>.value(
+      value: notifier,
+      child: const MaterialApp(home: TransactionsScreen()),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
 
 void main() {
   // A narrow but realistic phone width. The ListTile.trailing contract only
@@ -343,28 +351,105 @@ void main() {
         }
       }
 
-       expect(find.byType(UnifiedSplitSlider), findsOneWidget);
-       expect(tester.takeException(), isNull);
-     },
-   );
+      expect(find.byType(UnifiedSplitSlider), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('shows the current-month date chip on first load', (
+    tester,
+  ) async {
+    tester.view.physicalSize = phoneSize;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    const people = [
+      HouseholdPerson(id: 'p1', displayName: 'Me', isDefault: true),
+    ];
+    final transaction = CardTransaction(
+      id: 'tx-1',
+      amount: '-42.50',
+      currency: 'USD',
+      date: _today(),
+      name: 'Coffee',
+      merchant: 'Cafe',
+      pending: false,
+      assignmentSource: 'manual',
+      assignedPersonId: 'p1',
+    );
+
+    await _pumpTransactionsScreen(
+      tester,
+      people: people,
+      transaction: transaction,
+    );
+
+    // The shared notifier defaults to the current month, so the date filter
+    // is active from the first frame and the date chip / Clear all control
+    // renders without the user touching any filter.
+    expect(find.text('Clear all'), findsOneWidget);
+    expect(find.byType(InputChip), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('expanded transaction detail shows the credit card name', (
+    tester,
+  ) async {
+    tester.view.physicalSize = phoneSize;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    const people = [
+      HouseholdPerson(id: 'p1', displayName: 'Me', isDefault: true),
+    ];
+
+    const String cardName = 'Chase Sapphire';
+    final transaction = CardTransaction(
+      id: 'tx-1',
+      amount: '-42.50',
+      currency: 'USD',
+      date: _today(),
+      name: 'Coffee Shop',
+      merchant: 'Blue Bottle Coffee',
+      pending: false,
+      assignmentSource: 'manual',
+      assignedPersonId: 'p1',
+      displayName: cardName,
+    );
+
+    await _pumpTransactionsScreen(
+      tester,
+      people: people,
+      transaction: transaction,
+    );
+
+    // The card name appears in the detail dropdown (ExpansionTile
+    // children) triggered by expanding the transaction tile.
+    await tester.tap(find.byType(ExpansionTile).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text(cardName), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
-    'shows the current-month date chip on first load',
+    'expanded transaction detail falls back to Card when no name fields exist',
     (tester) async {
       tester.view.physicalSize = phoneSize;
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
       const people = [
-        HouseholdPerson(id: 'p1', displayName: 'Me', isDefault: true),
+        HouseholdPerson(id: 'p1', displayName: 'Me', isDefault: false),
       ];
+
       final transaction = CardTransaction(
         id: 'tx-1',
         amount: '-42.50',
         currency: 'USD',
         date: _today(),
-        name: 'Coffee',
-        merchant: 'Cafe',
+        name: 'Coffee Shop',
+        merchant: 'Blue Bottle Coffee',
         pending: false,
         assignmentSource: 'manual',
         assignedPersonId: 'p1',
@@ -376,14 +461,12 @@ void main() {
         transaction: transaction,
       );
 
-      // The shared notifier defaults to the current month, so the date filter
-      // is active from the first frame and the date chip / Clear all control
-      // renders without the user touching any filter.
-      expect(find.text('Clear all'), findsOneWidget);
-      expect(find.byType(InputChip), findsOneWidget);
+      await tester.tap(find.byType(ExpansionTile).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Card'), findsWidgets);
+      expect(find.byIcon(Icons.credit_card), findsWidgets);
       expect(tester.takeException(), isNull);
     },
   );
-
-
 }

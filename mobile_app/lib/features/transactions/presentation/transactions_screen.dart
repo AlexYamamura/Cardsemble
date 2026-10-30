@@ -178,29 +178,29 @@ class _TransactionsScreenState extends State<TransactionsScreen>
       ),
     );
 
-            if (displayTransactions.isEmpty) {
-              return CustomScrollView(
-                controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
-                  filterHeader,
-                  const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const SizedBox(height: 72),
-                        _EmptyState(
-                          hasFilters: notifier.hasActiveFilters,
-                          hasAnyTransactions: notifier.transactions.isNotEmpty,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            }
+    if (displayTransactions.isEmpty) {
+      return CustomScrollView(
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          filterHeader,
+          const SliverToBoxAdapter(child: SizedBox(height: 12)),
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 72),
+                _EmptyState(
+                  hasFilters: notifier.hasActiveFilters,
+                  hasAnyTransactions: notifier.transactions.isNotEmpty,
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
 
     final itemCount = displayTransactions.length + (notifier.hasMore ? 1 : 0);
     return CustomScrollView(
@@ -257,41 +257,40 @@ class _TransactionsScreenState extends State<TransactionsScreen>
     return ok;
   }
 
-   Future<bool> _runSplit(
-     BuildContext context,
-     TransactionsNotifier notifier,
-     CardTransaction tx,
-     List<TransactionSplit> splits,
-   ) async {
-     final messenger = ScaffoldMessenger.of(context);
-     try {
-       final totalAmount = tx.amountValue.abs();
-        final participantIds =
-            notifier.people.take(4).map((p) => p.id).toList();
-       final percentages = percentagesFromExistingSplits(
-         splits,
-         totalAmount,
-         allPersonIds: participantIds,
-       );
-       final ok = await notifier.saveTransactionSplit(
-         transactionId: tx.id,
-         totalAmount: totalAmount,
-         percentages: percentages,
-         orderedPersonIds: participantIds,
-       );
-       if (!ok) {
-         messenger.showSnackBar(
-           SnackBar(content: Text(notifier.error ?? 'Could not save the split')),
-         );
-       }
-       return ok;
-     } catch (e) {
-       messenger.showSnackBar(
-         SnackBar(content: Text('Error processing split: $e')),
-       );
-       return false;
-     }
-   }
+  Future<bool> _runSplit(
+    BuildContext context,
+    TransactionsNotifier notifier,
+    CardTransaction tx,
+    List<TransactionSplit> splits,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final totalAmount = tx.amountValue.abs();
+      final participantIds = notifier.people.take(4).map((p) => p.id).toList();
+      final percentages = percentagesFromExistingSplits(
+        splits,
+        totalAmount,
+        allPersonIds: participantIds,
+      );
+      final ok = await notifier.saveTransactionSplit(
+        transactionId: tx.id,
+        totalAmount: totalAmount,
+        percentages: percentages,
+        orderedPersonIds: participantIds,
+      );
+      if (!ok) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(notifier.error ?? 'Could not save the split')),
+        );
+      }
+      return ok;
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Error processing split: $e')),
+      );
+      return false;
+    }
+  }
 
   Future<bool> _runVisibility(
     BuildContext context,
@@ -799,7 +798,6 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-
 // Sentinel value used by filter menu buttons so the "All" / "Everyone" /
 // reset option is a real, non-null `PopupMenuItem` value. `null` is treated
 // as a menu cancel by `PopupMenuButton.showButtonMenu` and never reaches
@@ -933,8 +931,6 @@ class _DateRangeFilterButton extends StatelessWidget {
   }
 }
 
-
-
 class _TransactionTile extends StatelessWidget {
   const _TransactionTile({
     required this.transaction,
@@ -960,69 +956,71 @@ class _TransactionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-     final assignedPerson = people.firstWhere(
-        (p) => p.id == transaction.assignedPersonId,
-        orElse: () =>
-            HouseholdPerson(id: '', displayName: 'Unassigned', isDefault: false),
-      );
+    final assignedPerson = people.firstWhere(
+      (p) => p.id == transaction.assignedPersonId,
+      orElse: () =>
+          HouseholdPerson(id: '', displayName: 'Unassigned', isDefault: false),
+    );
 
-     final assigneeColor = transaction.assignedPersonId == null
+    final assigneeColor = transaction.assignedPersonId == null
         ? theme.colorScheme.primary
         : _personColor(transaction.assignedPersonId!, people);
 
-      final String label = transaction.hasSplits ? 'Split' : assignedPerson.displayName;
+    final String label = transaction.hasSplits
+        ? 'Split'
+        : assignedPerson.displayName;
 
-      final statusColor = transaction.pending
-          ? AppColors.pendingBg
-           : AppColors.sageGreen;
+    final statusColor = transaction.pending
+        ? AppColors.pendingBg
+        : AppColors.sageGreen;
 
-      // Hidden rows are greyed out to signal a disabled/dismissed state.
-      final Color cardColor = hidden ? Colors.grey.shade100 : Colors.white;
-      final Color mutedText = Colors.grey.shade600;
+    // Hidden rows are greyed out to signal a disabled/dismissed state.
+    final Color cardColor = hidden ? Colors.grey.shade100 : Colors.white;
+    final Color mutedText = Colors.grey.shade600;
 
-      return Card(
-       color: cardColor,
-       margin: const EdgeInsets.only(bottom: 8),
-       child: GestureDetector(
-         onLongPress: onLongPress,
-         child: ExpansionTile(
-         leading: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: statusColor.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  transaction.parsedDate != null
-                      ? DateFormat('MMM').format(transaction.parsedDate!)
-                      : '??',
-                  style: TextStyle(
-                    color: hidden ? mutedText : Colors.black87,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
+    return Card(
+      color: cardColor,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: GestureDetector(
+        onLongPress: onLongPress,
+        child: ExpansionTile(
+          leading: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    transaction.parsedDate != null
+                        ? DateFormat('MMM').format(transaction.parsedDate!)
+                        : '??',
+                    style: TextStyle(
+                      color: hidden ? mutedText : Colors.black87,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  transaction.parsedDate != null
-                      ? DateFormat('d').format(transaction.parsedDate!)
-                      : '',
-                  style: TextStyle(
-                    color: hidden ? mutedText : Colors.black87,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
+                  const SizedBox(height: 2),
+                  Text(
+                    transaction.parsedDate != null
+                        ? DateFormat('d').format(transaction.parsedDate!)
+                        : '',
+                    style: TextStyle(
+                      color: hidden ? mutedText : Colors.black87,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-        // Title shows the merchant when known, otherwise the transaction name.
+          // Title shows the merchant when known, otherwise the transaction name.
           title: Text(
             transaction.merchant ?? transaction.name,
             style: theme.textTheme.titleLarge?.copyWith(
@@ -1033,132 +1031,137 @@ class _TransactionTile extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             maxLines: 2,
           ),
-        // Assignee selector lives in the main row's subtitle: tappable,
-        // indented and "raised" to signal interactivity. Keeping it out of
-        // `trailing` means the fixed-size amount chip can remain the only
-        // trailing child, so ListTile's "trailing consumes the entire tile
-        // width" contract always holds.
+          // Assignee selector lives in the main row's subtitle: tappable,
+          // indented and "raised" to signal interactivity. Keeping it out of
+          // `trailing` means the fixed-size amount chip can remain the only
+          // trailing child, so ListTile's "trailing consumes the entire tile
+          // width" contract always holds.
           subtitle: Align(
             alignment: Alignment.centerLeft,
-             child: InkWell(
-               onTap: () {
-                 final notifier = context.read<TransactionsNotifier>();
-                 final DateTime? lastUpdated = notifier.lastUpdated;
-                 final String updatedText = lastUpdated != null
-                     ? DateFormat.yMMMd().format(lastUpdated)
-                     : '';
-                 final String byWho = transaction.assignmentSource;
-                 showModalBottomSheet(
-                   context: context,
-                   isScrollControlled: true,
-                   backgroundColor: Colors.transparent,
-                   builder: (_) => Container(
-                     decoration: BoxDecoration(
-                       color: Theme.of(context).colorScheme.surface,
-                       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                     ),
-                     child: SafeArea(
-                       child: Column(
-                         mainAxisSize: MainAxisSize.min,
-                         children: [
-                           Padding(
-                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                             child: Row(
-                               children: [
-                                 Expanded(
-                                   child: Text(
-                                     label,
-                                     style: theme.textTheme.titleLarge?.copyWith(
-                                       fontWeight: FontWeight.w700,
-                                     ),
-                                   ),
-                                 ),
-                                 IconButton(
-                                   tooltip: 'Close',
-                                   onPressed: () => Navigator.pop(context),
-                                   icon: const Icon(Icons.close_rounded),
-                                 ),
-                               ],
-                             ),
-                           ),
-                           const Divider(height: 1),
-                           Padding(
-                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                             child: Column(
-                               crossAxisAlignment: CrossAxisAlignment.start,
-                               children: [
-                                 Text(
-                                   'Last updated: $updatedText',
-                                   style: theme.textTheme.bodyMedium,
-                                 ),
-                                 const SizedBox(height: 4),
-                                 Text(
-                                   'Edited by: $byWho',
-                                   style: theme.textTheme.bodyMedium,
-                                 ),
-                               ],
-                             ),
-                           ),
-                           const Divider(height: 1),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                              child: SwitchListTile(
-                                contentPadding: EdgeInsets.zero,
-                                value: !transaction.householdVisible,
-                                onChanged: (value) => onToggleHouseholdVisible(!value),
-                                title: const Text('Hide from household members'),
-                                subtitle: const Text('Not shared with other household members'),
+            child: InkWell(
+              onTap: () {
+                final notifier = context.read<TransactionsNotifier>();
+                final DateTime? lastUpdated = notifier.lastUpdated;
+                final String updatedText = lastUpdated != null
+                    ? DateFormat.yMMMd().format(lastUpdated)
+                    : '';
+                final String byWho = transaction.assignmentSource;
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(24),
+                      ),
+                    ),
+                    child: SafeArea(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    label,
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Close',
+                                  onPressed: () => Navigator.pop(context),
+                                  icon: const Icon(Icons.close_rounded),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Last updated: $updatedText',
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Edited by: $byWho',
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                            child: SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              value: !transaction.householdVisible,
+                              onChanged: (value) =>
+                                  onToggleHouseholdVisible(!value),
+                              title: const Text('Hide from household members'),
+                              subtitle: const Text(
+                                'Not shared with other household members',
                               ),
                             ),
-                         ],
-                       ),
-                     ),
-                   ),
-                 );
-               },
-               borderRadius: BorderRadius.circular(8),
-               child: Container(
-                 margin: const EdgeInsets.only(top: 4),
-                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                 decoration: BoxDecoration(
-                   color: assigneeColor.withValues(alpha: 24 / 255),
-                   borderRadius: BorderRadius.circular(8),
-                   border: Border.all(
-                     color: assigneeColor.withValues(alpha: 150 / 255),
-                     width: 1,
-                   ),
-                   boxShadow: [
-                     BoxShadow(
-                       color: Colors.black.withValues(alpha: 0.08),
-                       blurRadius: 2,
-                       offset: const Offset(0, 1),
-                     ),
-                   ],
-                 ),
-                 child: Text(
-                   label,
-                   style: theme.textTheme.bodySmall?.copyWith(
-                     color: assigneeColor,
-                     fontWeight: FontWeight.w600,
-                   ),
-                 ),
-               ),
-             ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                margin: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: assigneeColor.withValues(alpha: 24 / 255),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: assigneeColor.withValues(alpha: 150 / 255),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 2,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: assigneeColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
           ),
-        // Fixed-size amount chip only, so the ListTile trailing contract holds.
-        trailing: _TransactionAmountChip(
-          amount: formatCurrency(
-            transaction.amountValue,
-            transaction.currency,
+          // Fixed-size amount chip only, so the ListTile trailing contract holds.
+          trailing: _TransactionAmountChip(
+            amount: formatCurrency(
+              transaction.amountValue,
+              transaction.currency,
+            ),
+            pending: transaction.pending,
+            hidden: hidden,
           ),
-          pending: transaction.pending,
-          hidden: hidden,
-        ),
-         children: [
-           Padding(
-             padding: const EdgeInsets.all(16),
-             child: Column(
-               crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
                     transaction.name,
@@ -1170,8 +1173,14 @@ class _TransactionTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 12),
-                 const SizedBox(height: 8),
-                 if (people.length > 1) ...[
+                  _CreditCardBox(
+                    cardName:
+                        transaction.displayName ??
+                        transaction.accountName ??
+                        'Card',
+                  ),
+                  const SizedBox(height: 8),
+                  if (people.length > 1) ...[
                     _SplitSection(
                       transaction: transaction,
                       people: people,
@@ -1188,10 +1197,48 @@ class _TransactionTile extends StatelessWidget {
   }
 }
 
+/// A small inline row displaying the credit card name that originated the
+/// transaction, shown as a distinct visual row in the transaction detail
+/// dropdown (ExpansionTile children).
+class _CreditCardBox extends StatelessWidget {
+  const _CreditCardBox({required this.cardName});
+
+  final String cardName;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(
+          Icons.credit_card,
+          size: 18,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            cardName,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Slightly rounded rectangle chip showing the transaction amount in the
 /// tile's trailing area. Color matches the pending/approved state of the box.
 class _TransactionAmountChip extends StatelessWidget {
-  const _TransactionAmountChip({required this.amount, required this.pending, this.hidden = false});
+  const _TransactionAmountChip({
+    required this.amount,
+    required this.pending,
+    this.hidden = false,
+  });
 
   final String amount;
   final bool pending;
@@ -1240,14 +1287,16 @@ class _SplitSection extends StatefulWidget {
 }
 
 class _SplitSectionState extends State<_SplitSection> {
-   late Future<Result<Map<String, double>>> _splitsFuture;
+  late Future<Result<Map<String, double>>> _splitsFuture;
 
   @override
   void initState() {
     super.initState();
     final notifier = context.read<TransactionsNotifier>();
     final transaction = widget.transaction;
-    final participants = widget.people.length > 4 ? widget.people.take(4).toList() : widget.people;
+    final participants = widget.people.length > 4
+        ? widget.people.take(4).toList()
+        : widget.people;
     final personIds = participants.map((p) => p.id).toList();
     _splitsFuture = notifier.loadSplitDraft(
       transactionId: transaction.id,
@@ -1260,7 +1309,9 @@ class _SplitSectionState extends State<_SplitSection> {
     setState(() {
       final notifier = context.read<TransactionsNotifier>();
       final transaction = widget.transaction;
-      final participants = widget.people.length > 4 ? widget.people.take(4).toList() : widget.people;
+      final participants = widget.people.length > 4
+          ? widget.people.take(4).toList()
+          : widget.people;
       final personIds = participants.map((p) => p.id).toList();
       _splitsFuture = notifier.loadSplitDraft(
         transactionId: transaction.id,
@@ -1273,79 +1324,74 @@ class _SplitSectionState extends State<_SplitSection> {
   @override
   Widget build(BuildContext context) {
     // 2-4 participants; households larger than 4 default to the first 4.
-    final List<HouseholdPerson> participants =
-        widget.people.length > 4 ? widget.people.take(4).toList() : widget.people;
+    final List<HouseholdPerson> participants = widget.people.length > 4
+        ? widget.people.take(4).toList()
+        : widget.people;
     if (participants.length < 2) {
       return const Text('Need at least 2 people to split');
     }
 
     final List<String> personIds = participants.map((p) => p.id).toList();
 
-     return FutureBuilder<Result<Map<String, double>>>(
-       future: _splitsFuture,
-       builder: (context, snapshot) {
-         if (snapshot.connectionState == ConnectionState.waiting) {
-           return const Center(child: CircularProgressIndicator());
-         }
-         if (snapshot.hasError) {
-           return Center(
-             child: Column(
-               mainAxisSize: MainAxisSize.min,
-               children: [
-                 Text(
-                   'Failed to load split data: ${snapshot.error}',
-                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                     color: Theme.of(context).colorScheme.error,
-                   ),
-                 ),
-                 const SizedBox(height: 8),
-                 ElevatedButton(
-                   onPressed: _retry,
-                   child: const Text('Retry'),
-                 ),
-               ],
-             ),
-           );
-         }
-         final result = snapshot.data;
-         if (result == null) {
-           return const Center(child: CircularProgressIndicator());
-         }
+    return FutureBuilder<Result<Map<String, double>>>(
+      future: _splitsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Failed to load split data: ${snapshot.error}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton(onPressed: _retry, child: const Text('Retry')),
+              ],
+            ),
+          );
+        }
+        final result = snapshot.data;
+        if (result == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-         return result.fold(
-           (percentages) {
-             final finalPercentages = percentages.isEmpty
-                 ? equalSplitPercentages(personIds)
-                 : percentages;
+        return result.fold(
+          (percentages) {
+            final finalPercentages = percentages.isEmpty
+                ? equalSplitPercentages(personIds)
+                : percentages;
 
-             return _UnifiedSplitSliderBuilder(
-               transaction: widget.transaction,
-               people: participants,
-               initialPercentages: finalPercentages,
-               onSplit: widget.onSplit,
-             );
-           },
-           (failure) => Center(
-             child: Column(
-               mainAxisSize: MainAxisSize.min,
-               children: [
-                 Text(
-                   'Failed to load split data: ${failure.message}',
-                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                     color: Theme.of(context).colorScheme.error,
-                   ),
-                 ),
-                 const SizedBox(height: 8),
-                 ElevatedButton(
-                   onPressed: _retry,
-                   child: const Text('Retry'),
-                 ),
-               ],
-             ),
-           ),
-         );
-       },
-     );
+            return _UnifiedSplitSliderBuilder(
+              transaction: widget.transaction,
+              people: participants,
+              initialPercentages: finalPercentages,
+              onSplit: widget.onSplit,
+            );
+          },
+          (failure) => Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Failed to load split data: ${failure.message}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton(onPressed: _retry, child: const Text('Retry')),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -1367,7 +1413,8 @@ class _UnifiedSplitSliderBuilder extends StatefulWidget {
       _UnifiedSplitSliderBuilderState();
 }
 
-class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> {
+class _UnifiedSplitSliderBuilderState
+    extends State<_UnifiedSplitSliderBuilder> {
   late Map<String, double> _percentages;
   bool _isLoading = false;
 
@@ -1380,9 +1427,11 @@ class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> 
   Future<void> _saveSplit() async {
     setState(() => _isLoading = true);
     try {
-      final splits =
-          percentagesToCents(widget.transaction.amountValue.abs(), _percentages,
-              widget.people.map((p) => p.id).toList());
+      final splits = percentagesToCents(
+        widget.transaction.amountValue.abs(),
+        _percentages,
+        widget.people.map((p) => p.id).toList(),
+      );
       // Failures are surfaced by the notifier via SnackBar in `_runSplit`.
       await widget.onSplit(splits);
     } finally {
@@ -1419,11 +1468,13 @@ class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> 
           height: 50,
           child: UnifiedSplitSlider(
             participants: widget.people
-                .map((p) => ParticipantInfo(
-                      id: p.id,
-                      name: p.displayName,
-                      color: _personColor(p.id, widget.people),
-                    ))
+                .map(
+                  (p) => ParticipantInfo(
+                    id: p.id,
+                    name: p.displayName,
+                    color: _personColor(p.id, widget.people),
+                  ),
+                )
                 .toList(),
             percentages: _percentages,
             onChanged: (percentages) {
@@ -1433,7 +1484,7 @@ class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> 
             },
           ),
         ),
-         const SizedBox(height: 24),
+        const SizedBox(height: 24),
         // Cancel / Save actions
         Wrap(
           alignment: WrapAlignment.end,
@@ -1463,10 +1514,7 @@ class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> 
 
   /// Builds a single participant's column for the side-by-side header row:
   /// name (truncated with ellipsis) above an enlarged price + percentage.
-  Widget _buildParticipantColumn(
-    BuildContext context,
-    HouseholdPerson person,
-  ) {
+  Widget _buildParticipantColumn(BuildContext context, HouseholdPerson person) {
     final Color personColor = _personColor(person.id, widget.people);
     final double percentage = _percentages[person.id] ?? 0.0;
     final double amount =
@@ -1475,35 +1523,35 @@ class _UnifiedSplitSliderBuilderState extends State<_UnifiedSplitSliderBuilder> 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-         // Person name with bold style, truncated when too long
-         Text(
-           person.displayName,
-           key: ValueKey('split-name-${person.id}'),
-           style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                 color: personColor,
-                 fontWeight: FontWeight.w800,
-                 fontSize: 18,
-               ),
-           maxLines: 1,
-           overflow: TextOverflow.ellipsis,
-         ),
+        // Person name with bold style, truncated when too long
+        Text(
+          person.displayName,
+          key: ValueKey('split-name-${person.id}'),
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            color: personColor,
+            fontWeight: FontWeight.w800,
+            fontSize: 18,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         const SizedBox(height: 4),
         // Enlarged price alongside the percentage
         Text(
           formatCurrency(amount, widget.transaction.currency),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                fontSize: 20,
-              ),
+            fontWeight: FontWeight.w800,
+            fontSize: 20,
+          ),
         ),
         const SizedBox(height: 2),
         Text(
           '${percentage.toStringAsFixed(1)}%',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: personColor,
-                fontWeight: FontWeight.w600,
-                fontSize: 16,
-              ),
+            color: personColor,
+            fontWeight: FontWeight.w600,
+            fontSize: 16,
+          ),
         ),
       ],
     );
