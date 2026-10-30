@@ -475,6 +475,7 @@ class _TransactionFilterBar extends StatelessWidget {
     final theme = Theme.of(context);
     final picked = await showModalBottomSheet<DateTimeRange?>(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
@@ -823,6 +824,7 @@ class _FilterMenuButton extends StatelessWidget {
     final theme = Theme.of(context);
 
     return PopupMenuButton<String>(
+      useRootNavigator: true,
       initialValue: selectedValue ?? _kAllFilter,
       onSelected: (value) => onChanged(value == _kAllFilter ? null : value),
       itemBuilder: (context) => items

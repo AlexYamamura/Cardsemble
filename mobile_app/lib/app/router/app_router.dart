@@ -278,15 +278,15 @@ class _MainTabsState extends State<MainTabs>
               ),
             ),
           ),
-           PageView(
-             controller: _pageController,
-             physics: const _SensitiveTabPhysics(),
-             onPageChanged: (index) {
-               if (_activeTabIndex != index) {
-                 setState(() => _activeTabIndex = index);
-               }
-             },
-            children: [
+            PageView(
+              controller: _pageController,
+              physics: const _SensitiveTabPhysics(),
+              onPageChanged: (index) {
+                if (_activeTabIndex != index) {
+                  setState(() => _activeTabIndex = index);
+                }
+              },
+             children: [
               _buildTabNavigator(
                 index: 0,
                 navigatorKey: _walletNavigatorKey,
