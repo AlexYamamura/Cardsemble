@@ -42,6 +42,10 @@ class WalletCard {
     this.benefits = const [],
     this.welcomeBonus,
     this.catalogMatchStatus = CatalogMatchStatus.unmatched,
+    this.cardType = CardType.individual,
+    this.defaultAssigneeMode = CardAssigneeMode.person,
+    this.defaultAssigneePersonId,
+    this.defaultAssigneeName,
   });
 
   final String id;
@@ -74,10 +78,37 @@ class WalletCard {
   /// benefits and welcome-bonus tracking are unavailable for this card.
   final CatalogMatchStatus catalogMatchStatus;
 
+  /// Whether this card is an individual card or a household card.
+  final CardType cardType;
+
+  /// How the default assignee for this card's transactions is resolved.
+  final CardAssigneeMode defaultAssigneeMode;
+
+  /// The pinned household person for [defaultAssigneeMode] == [CardAssigneeMode.person].
+  /// Null means the household default person ("you"). Null for shared/split.
+  final String? defaultAssigneePersonId;
+
+  /// Resolved display name of the default assignee (for display only).
+  final String? defaultAssigneeName;
+
   /// Whether a payment due date is available.
   bool get hasPaymentDue => paymentDueDate != null;
 
   bool get isCatalogMatched => catalogMatchStatus == CatalogMatchStatus.matched;
+
+  /// Whether this card is an individual card, whose transactions are always
+  /// assigned to the household default person.
+  bool get isIndividualCard => cardType == CardType.individual;
+
+  /// Whether this card is a household card whose transactions are excluded from
+  /// the payer's "Pay" total.
+  bool get isSharedCard =>
+      cardType == CardType.household && defaultAssigneeMode == CardAssigneeMode.shared;
+
+  /// Whether this card is a household card whose transactions are split across
+  /// household people; only the default person's share counts toward "Pay".
+  bool get isSplitCard =>
+      cardType == CardType.household && defaultAssigneeMode == CardAssigneeMode.split;
 
   /// Last four digits when a mask is available.
   String? get lastFour {
@@ -88,6 +119,50 @@ class WalletCard {
 
   /// Whether this card's underlying Plaid connection needs re-authentication.
   bool get needsRelink => status == 'error' || status == 'reauth';
+
+  WalletCard copyWith({
+    String? id,
+    String? displayName,
+    String? issuer,
+    String? network,
+    String? mask,
+    String? subtype,
+    String? status,
+    CardCatalogCard? catalogCard,
+    StatementAccount? statementAccount,
+    String? currency,
+    DateTime? paymentDueDate,
+    String? itemId,
+    List<WalletBenefit>? benefits,
+    WalletBonus? welcomeBonus,
+    CatalogMatchStatus? catalogMatchStatus,
+    CardType? cardType,
+    CardAssigneeMode? defaultAssigneeMode,
+    String? defaultAssigneePersonId,
+    String? defaultAssigneeName,
+  }) {
+    return WalletCard(
+      id: id ?? this.id,
+      displayName: displayName ?? this.displayName,
+      issuer: issuer ?? this.issuer,
+      network: network ?? this.network,
+      mask: mask ?? this.mask,
+      subtype: subtype ?? this.subtype,
+      status: status ?? this.status,
+      catalogCard: catalogCard ?? this.catalogCard,
+      statementAccount: statementAccount ?? this.statementAccount,
+      currency: currency ?? this.currency,
+      paymentDueDate: paymentDueDate ?? this.paymentDueDate,
+      itemId: itemId ?? this.itemId,
+      benefits: benefits ?? this.benefits,
+      welcomeBonus: welcomeBonus ?? this.welcomeBonus,
+      catalogMatchStatus: catalogMatchStatus ?? this.catalogMatchStatus,
+      cardType: cardType ?? this.cardType,
+      defaultAssigneeMode: defaultAssigneeMode ?? this.defaultAssigneeMode,
+      defaultAssigneePersonId: defaultAssigneePersonId ?? this.defaultAssigneePersonId,
+      defaultAssigneeName: defaultAssigneeName ?? this.defaultAssigneeName,
+    );
+  }
 }
 
 /// One catalog benefit with its locally-tracked usage state.

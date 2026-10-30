@@ -119,6 +119,32 @@ class AccountRepositoryImpl implements AccountRepository {
   }
 
   @override
+  Future<Result<void>> updateCreditCardConfig({
+    required String accountId,
+    required CardType cardType,
+    required CardAssigneeMode defaultAssigneeMode,
+    String? defaultAssigneePersonId,
+  }) async {
+    try {
+      await _apiClient.safePatch(
+        '/api/plaid-credit-accounts/${Uri.encodeQueryComponent(accountId)}/config',
+        {
+          'card_type': cardType == CardType.household ? 'household' : 'individual',
+          'default_assignee_mode': defaultAssigneeMode == CardAssigneeMode.shared
+              ? 'shared'
+              : defaultAssigneeMode == CardAssigneeMode.split
+                  ? 'split'
+                  : 'person',
+          'default_assignee_person_id': defaultAssigneePersonId,
+        },
+      );
+      return const Success(null);
+    } catch (error) {
+      return FailureResult(DatabaseFailure('Could not save the card configuration: $error'));
+    }
+  }
+
+  @override
   Future<Result<StatementCycleSummary>> loadStatementCycles() async {
     final result = await _apiClient.safeGet('/api/owed/statement-cycles');
     return result.map(StatementCycleSummary.fromJson);

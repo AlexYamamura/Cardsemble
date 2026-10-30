@@ -14,6 +14,12 @@ abstract class AccountRepository {
     required String platform,
   });
   Future<Result<void>> updateCreditCardDisplayName(String accountId, String? displayName);
+  Future<Result<void>> updateCreditCardConfig({
+    required String accountId,
+    required CardType cardType,
+    required CardAssigneeMode defaultAssigneeMode,
+    String? defaultAssigneePersonId,
+  });
   Future<Result<StatementCycleSummary>> loadStatementCycles();
   Future<Result<WalletSummary>> loadWalletSummary();
 }

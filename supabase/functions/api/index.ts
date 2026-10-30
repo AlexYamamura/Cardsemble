@@ -628,8 +628,9 @@ Deno.serve(async (req) => {
       const pageIds = pageRows.map((tx: any) => tx.transaction_id).filter(Boolean);
 
       // Scope assignment lookups to the current page instead of refetching the
-      // entire assignment table on every 500-row page.
-      const assignmentById = new Map<string, any>();
+      // entire assignment table on every 500-row page. A transaction can have
+      // multiple split rows, so group them by transaction id.
+      const assignmentsById = new Map<string, any[]>();
       const splitCounts = new Map<string, number>();
       if (pageIds.length > 0) {
         const { data: assignments, error: assignmentError } = await supabase
@@ -639,30 +640,57 @@ Deno.serve(async (req) => {
           .in("transaction_id", pageIds);
         if (assignmentError) throw new ApiError(502, assignmentError.message);
         for (const assignment of assignments ?? []) {
-          assignmentById.set(assignment.transaction_id, assignment);
-          splitCounts.set(assignment.transaction_id, (splitCounts.get(assignment.transaction_id) ?? 0) + 1);
+          const rows = assignmentsById.get(assignment.transaction_id) ?? [];
+          rows.push(assignment);
+          assignmentsById.set(assignment.transaction_id, rows);
+          if (assignment.amount != null && Number(assignment.amount) > 0) {
+            splitCounts.set(assignment.transaction_id, (splitCounts.get(assignment.transaction_id) ?? 0) + 1);
+          }
         }
       }
 
       const creditAccountById = new Map(creditAccounts.map((a) => [a.account_id, a]));
       const primary = await ensureDefaultPerson(auth.userId);
+      const defaultPersonId = primary.person_id;
 
-      const result = pageRows.map((tx: any) => ({
-        ...tx,
-        household_visible: tx.household_visible !== false,
-        account_name: creditCardDisplayName(creditAccountById.get(tx.account_id) ?? {}),
-        display_name: creditAccountById.get(tx.account_id)?.display_name ?? null,
-        plaid_name: creditAccountById.get(tx.account_id)?.name ?? null,
-        official_name: creditAccountById.get(tx.account_id)?.official_name ?? null,
-        account_mask: creditAccountById.get(tx.account_id)?.mask ?? null,
-        assigned_person_id: assignmentById.has(tx.transaction_id)
-          ? assignmentById.get(tx.transaction_id)!.person_id
-          : primary.person_id,
-        assignment_source: assignmentById.has(tx.transaction_id)
-          ? assignmentById.get(tx.transaction_id)!.assignment_source
-          : "default",
-        has_splits: (splitCounts.get(tx.transaction_id) ?? 0) > 1,
-      }));
+      // Returns the amount (as a string) owed by the household default person
+      // for a transaction, given its persisted assignments.
+      function defaultPersonAmount(tx: any): string | null {
+        const rows = assignmentsById.get(tx.transaction_id);
+        if (!rows || rows.length === 0) {
+          // No assignment: the default person owes the full amount.
+          return String(tx.amount);
+        }
+        const splitRows = rows.filter((r: any) => r.amount != null && Number(r.amount) > 0);
+        if (splitRows.length > 0) {
+          // Persisted splits: the default person's share, or "0" if they are
+          // not a participant.
+          const defaultRow = splitRows.find((r: any) => r.person_id === defaultPersonId);
+          return defaultRow != null ? String(defaultRow.amount) : "0";
+        }
+        // Single (non-split) assignment: full amount if assigned to the default
+        // person, otherwise nothing.
+        const single = rows[0];
+        return single.person_id === defaultPersonId ? String(tx.amount) : "0";
+      }
+
+      const result = pageRows.map((tx: any) => {
+        const rows = assignmentsById.get(tx.transaction_id);
+        const firstRow = rows ? rows[0] : null;
+        return {
+          ...tx,
+          household_visible: tx.household_visible !== false,
+          account_name: creditCardDisplayName(creditAccountById.get(tx.account_id) ?? {}),
+          display_name: creditAccountById.get(tx.account_id)?.display_name ?? null,
+          plaid_name: creditAccountById.get(tx.account_id)?.name ?? null,
+          official_name: creditAccountById.get(tx.account_id)?.official_name ?? null,
+          account_mask: creditAccountById.get(tx.account_id)?.mask ?? null,
+          assigned_person_id: firstRow ? firstRow.person_id : defaultPersonId,
+          assignment_source: firstRow ? firstRow.assignment_source : "default",
+          assigned_amount: defaultPersonAmount(tx),
+          has_splits: (splitCounts.get(tx.transaction_id) ?? 0) > 1,
+        };
+      });
 
       return jsonResponse({ transactions: result, has_more: pageRows.length === limit });
     }
@@ -1122,6 +1150,96 @@ Deno.serve(async (req) => {
       });
     }
 
+    // --- Credit card configuration (individual/household + default assignee) ---
+    if (method === "PATCH" && path.match(/^plaid-credit-accounts\/[^/]+\/config$/)) {
+      const auth = await authenticateRequest(authorization);
+      if (auth.userId === null) {
+        throw new ApiError(403, "A user-linked device key or Supabase session is required");
+      }
+      const accountId = path.split("/")[1];
+      const body = await req.json().catch(() => ({}));
+      const cardType = body.card_type;
+      let assigneeMode = body.default_assignee_mode;
+      let assigneePersonId = body.default_assignee_person_id ? String(body.default_assignee_person_id) : null;
+
+      if (cardType !== "individual" && cardType !== "household") {
+        throw new ApiError(400, "card_type must be 'individual' or 'household'");
+      }
+      if (assigneeMode !== "person" && assigneeMode !== "shared" && assigneeMode !== "split") {
+        throw new ApiError(400, "default_assignee_mode must be 'person', 'shared', or 'split'");
+      }
+
+      const { data: check, error: checkError } = await supabase
+        .from("plaid_credit_accounts")
+        .select("account_id")
+        .eq("account_id", accountId)
+        .eq("user_id", auth.userId)
+        .limit(1);
+      if (checkError) throw new ApiError(502, checkError.message);
+      if (!check || check.length === 0) throw new ApiError(404, "Credit card not found");
+
+      await ensureDefaultPerson(auth.userId);
+      const people = await supabase
+        .from("household_people")
+        .select("person_id,display_name,is_default")
+        .eq("user_id", auth.userId)
+        .order("created_at", { ascending: true })
+        .order("person_id", { ascending: true });
+
+      if (cardType === "individual") {
+        // Individual cards are always assigned to the household default person.
+        assigneeMode = "person";
+        assigneePersonId = null;
+      } else if (assigneeMode === "person") {
+        if (assigneePersonId != null) {
+          const person = (people?.data ?? []).find((p: any) => p.person_id === assigneePersonId);
+          if (!person) throw new ApiError(404, "Household member not found");
+        }
+      } else {
+        // shared and split carry no pinned person.
+        assigneePersonId = null;
+        if (assigneeMode === "split") {
+          const personCount = (people?.data ?? []).length;
+          if (personCount < 2) {
+            throw new ApiError(400, "Split requires at least two household people");
+          }
+        }
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from("plaid_credit_accounts")
+        .update({
+          card_type: cardType,
+          default_assignee_mode: assigneeMode,
+          default_assignee_person_id: assigneePersonId,
+          config_updated_at: new Date().toISOString(),
+        })
+        .eq("account_id", accountId)
+        .eq("user_id", auth.userId)
+        .select();
+      if (updateError) throw new ApiError(502, updateError.message);
+      if (!updated || updated.length === 0) throw new ApiError(502, "Could not save the card configuration");
+
+      const row = updated[0];
+      let defaultAssigneeName: string | null = null;
+      if (cardType === "household" && assigneeMode === "person" && assigneePersonId != null) {
+        const person = (people?.data ?? []).find((p: any) => p.person_id === assigneePersonId);
+        defaultAssigneeName = (person?.display_name as string | null) ?? null;
+      }
+
+      return jsonResponse({
+        account_id: accountId,
+        config: {
+          account_id: accountId,
+          card_type: cardType,
+          default_assignee_mode: assigneeMode,
+          default_assignee_person_id: assigneePersonId,
+          default_assignee_name: defaultAssigneeName,
+          config_updated_at: row.config_updated_at,
+        },
+      });
+    }
+
     // --- Cycle start ---
     if (method === "PUT" && path.match(/^plaid-credit-accounts\/[^/]+\/cycle-start$/)) {
       const auth = await authenticateRequest(authorization);
@@ -1399,11 +1517,23 @@ Deno.serve(async (req) => {
           account_name: accountNames.get(row.account_id as string) ?? "Card",
           currency: accountCurrency.get(row.account_id as string) ?? "UNKNOWN",
         })),
-        credit_accounts: accounts.map((row) => ({
-          ...row,
-          account_name: creditCardDisplayName(row),
-          plaid_name: row.name,
-        })),
+        credit_accounts: accounts.map((row) => {
+          const personId = row.default_assignee_person_id as string | null | undefined;
+          const mode = row.default_assignee_mode as string | null | undefined;
+          const type = row.card_type as string | null | undefined;
+          let defaultAssigneeName: string | null = null;
+          if (type === "household" && mode === "person" && personId) {
+            const person = people.find((p) => p.person_id === personId);
+            defaultAssigneeName = (person?.display_name as string | null) ?? null;
+          }
+          return {
+            ...row,
+            account_name: creditCardDisplayName(row),
+            plaid_name: row.name,
+            default_assignee_name: defaultAssigneeName,
+            split_participant_count: mode === "split" ? people.length : null,
+          };
+        }),
         current_total_owed: total,
         totals_by_currency: Object.fromEntries(
           Object.entries(totalsByCurrency).map(([k, v]) => [k, (v as Decimal).toFixed(2)])

@@ -434,19 +434,7 @@ class WalletNotifier extends ChangeNotifier {
       final usedMap = _benefitUsage[card.id];
       final spent = _bonusSpend[card.id];
       if ((usedMap == null || usedMap.isEmpty) && spent == null) return card;
-      return WalletCard(
-        id: card.id,
-        displayName: card.displayName,
-        issuer: card.issuer,
-        network: card.network,
-        mask: card.mask,
-        subtype: card.subtype,
-        status: card.status,
-        catalogCard: card.catalogCard,
-        statementAccount: card.statementAccount,
-        currency: card.currency,
-        paymentDueDate: card.paymentDueDate,
-        itemId: card.itemId,
+      return card.copyWith(
         benefits: card.benefits.map((b) {
           final used = usedMap?[b.id] ?? b.used;
           return b.copyWith(used: used);
@@ -462,7 +450,6 @@ class WalletNotifier extends ChangeNotifier {
                 spentUnits: spent,
               )
             : card.welcomeBonus,
-        catalogMatchStatus: card.catalogMatchStatus,
       );
     }).toList(growable: false);
     notifyListeners();
@@ -473,22 +460,65 @@ class WalletNotifier extends ChangeNotifier {
     final statementSummary = _accounts.statementSummary;
     final statementAccounts = statementSummary?.accounts ?? <StatementAccount>[];
 
-    final byItemId = <String, StatementAccount>{};
-    for (final account in statementAccounts) {
-      if (account.itemId != null) {
-        byItemId[account.itemId!] = account;
-      }
+    // Index connections by item_id so each statement account can resolve its
+    // owning Plaid connection (institution name, status, item id).
+    final byItemId = <String, PlaidConnection>{};
+    for (final connection in connections) {
+      byItemId[connection.itemId] = connection;
     }
 
     final yourCards = <WalletCard>[];
-    for (final connection in connections) {
-      final statementAccount = byItemId[connection.itemId];
-      final catalogCard = _matchCatalogCard(connection, statementAccount);
-      final id = statementAccount?.accountId ?? connection.itemId;
+    final coveredItemIds = <String>{};
+    for (final account in statementAccounts) {
+      final connection = byItemId[account.itemId ?? ''];
+      if (account.itemId != null) coveredItemIds.add(account.itemId!);
+      final catalogCard = _matchCatalogCard(connection ?? _placeholderConnection(account), account);
+      final id = account.accountId;
 
       final benefits = _buildBenefits(catalogCard, id);
       final welcomeBonus = _buildBonus(catalogCard, id);
 
+      yourCards.add(WalletCard(
+        id: id,
+        displayName: account.displayName ??
+            catalogCard?.name ??
+            connection?.institutionName ??
+            account.accountName,
+        issuer: _issuerByItemId.putIfAbsent(
+          account.itemId ?? id,
+          () {
+            final catalogIssuer = catalogCard?.issuer?.trim();
+            return (catalogIssuer != null && catalogIssuer.isNotEmpty)
+                ? catalogIssuer
+                : connection?.institutionName ?? account.institutionName ?? account.accountName;
+          },
+        ),
+        network: catalogCard?.network,
+        mask: account.mask,
+        subtype: account.subtype,
+        status: connection?.status ?? 'connected',
+        catalogCard: catalogCard,
+        statementAccount: account,
+        currency: account.currency,
+        paymentDueDate: account.nextPaymentDueDate,
+        itemId: account.itemId,
+        benefits: benefits,
+        welcomeBonus: welcomeBonus,
+        catalogMatchStatus:
+            catalogCard != null ? CatalogMatchStatus.matched : CatalogMatchStatus.unmatched,
+        cardType: account.cardType,
+        defaultAssigneeMode: account.defaultAssigneeMode,
+        defaultAssigneePersonId: account.defaultAssigneePersonId,
+        defaultAssigneeName: account.defaultAssigneeName,
+      ));
+    }
+
+    // Connections without a statement account (e.g. not yet synced) still
+    // appear as cards so no connected card is hidden from the wallet.
+    for (final connection in connections) {
+      if (coveredItemIds.contains(connection.itemId)) continue;
+      final id = connection.itemId;
+      final catalogCard = _matchCatalogCard(connection, null);
       yourCards.add(WalletCard(
         id: id,
         displayName: catalogCard?.name ?? connection.institutionName,
@@ -502,20 +532,19 @@ class WalletNotifier extends ChangeNotifier {
           },
         ),
         network: catalogCard?.network,
-        mask: statementAccount?.mask,
-        subtype: statementAccount?.subtype,
         status: connection.status,
         catalogCard: catalogCard,
-        statementAccount: statementAccount,
-        currency: statementAccount?.currency,
-        paymentDueDate: statementAccount?.nextPaymentDueDate,
+        statementAccount: null,
+        currency: null,
+        paymentDueDate: null,
         itemId: connection.itemId,
-        benefits: benefits,
-        welcomeBonus: welcomeBonus,
+        benefits: _buildBenefits(catalogCard, id),
+        welcomeBonus: _buildBonus(catalogCard, id),
         catalogMatchStatus:
             catalogCard != null ? CatalogMatchStatus.matched : CatalogMatchStatus.unmatched,
       ));
     }
+
     yourCards.sort((a, b) => a.displayName.compareTo(b.displayName));
 
     // Household cards are not yet served by a backend endpoint (transaction and
@@ -523,6 +552,17 @@ class WalletNotifier extends ChangeNotifier {
     // structure is in place for when household account data becomes available.
     _yourCards = yourCards;
     _householdCards = const [];
+  }
+
+  /// A stand-in connection used when a statement account exists but its Plaid
+  /// item is not (yet) in the connections list. Keeps catalog matching working
+  /// using the account's own identifying fields.
+  PlaidConnection _placeholderConnection(StatementAccount account) {
+    return PlaidConnection(
+      itemId: account.itemId ?? account.accountId,
+      institutionName: account.institutionName ?? account.accountName,
+      status: 'connected',
+    );
   }
 
   CardCatalogCard? _matchCatalogCard(
@@ -657,27 +697,13 @@ class WalletNotifier extends ChangeNotifier {
     final index = _yourCards.indexWhere((c) => c.id == cardId);
     if (index != -1) {
       final card = _yourCards[index];
-      _yourCards[index] = WalletCard(
-        id: card.id,
-        displayName: card.displayName,
-        issuer: card.issuer,
-        network: card.network,
-        mask: card.mask,
-        subtype: card.subtype,
-        status: card.status,
-         catalogCard: card.catalogCard,
-         statementAccount: card.statementAccount,
-         currency: card.currency,
-         paymentDueDate: card.paymentDueDate,
-         itemId: card.itemId,
-         benefits: card.benefits.map((b) {
-           if (b.id == benefitId) {
-             return b.copyWith(used: used, usedAt: used ? DateTime.now() : null);
-           }
-           return b;
-         }).toList(growable: false),
-        welcomeBonus: card.welcomeBonus,
-        catalogMatchStatus: card.catalogMatchStatus,
+      _yourCards[index] = card.copyWith(
+        benefits: card.benefits.map((b) {
+          if (b.id == benefitId) {
+            return b.copyWith(used: used, usedAt: used ? DateTime.now() : null);
+          }
+          return b;
+        }).toList(growable: false),
       );
     }
     notifyListeners();
@@ -694,20 +720,7 @@ class WalletNotifier extends ChangeNotifier {
       final card = _yourCards[index];
       final bonus = card.welcomeBonus;
       if (bonus != null) {
-        _yourCards[index] = WalletCard(
-          id: card.id,
-          displayName: card.displayName,
-          issuer: card.issuer,
-          network: card.network,
-          mask: card.mask,
-          subtype: card.subtype,
-          status: card.status,
-          catalogCard: card.catalogCard,
-          statementAccount: card.statementAccount,
-        currency: card.currency,
-        paymentDueDate: card.paymentDueDate,
-        itemId: card.itemId,
-        benefits: card.benefits,
+        _yourCards[index] = card.copyWith(
           welcomeBonus: WalletBonus(
             amountUnits: bonus.amountUnits,
             currency: bonus.currency,
@@ -717,7 +730,6 @@ class WalletNotifier extends ChangeNotifier {
             description: bonus.description,
             spentUnits: spentUnits,
           ),
-          catalogMatchStatus: card.catalogMatchStatus,
         );
       }
     }

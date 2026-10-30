@@ -344,9 +344,39 @@ create table if not exists public.plaid_credit_accounts (
     credit_limit numeric(14, 2),
     current_balance numeric(14, 2),
     next_payment_due_date date,
+    card_type text not null default 'individual',
+    default_assignee_mode text not null default 'person',
+    default_assignee_person_id uuid,
+    config_updated_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     unique (user_id, account_id)
 );
+
+alter table public.plaid_credit_accounts
+    add constraint plaid_credit_accounts_card_type_check
+        check (card_type in ('individual', 'household'));
+
+alter table public.plaid_credit_accounts
+    add constraint plaid_credit_accounts_assignee_mode_check
+        check (default_assignee_mode in ('person', 'shared', 'split'));
+
+alter table public.plaid_credit_accounts
+    add constraint plaid_credit_accounts_individual_mode_check
+        check (card_type = 'household' or default_assignee_mode = 'person');
+
+alter table public.plaid_credit_accounts
+    add constraint plaid_credit_accounts_assignee_person_mode_check
+        check (default_assignee_mode = 'person' or default_assignee_person_id is null);
+
+alter table public.plaid_credit_accounts
+    add constraint plaid_credit_accounts_individual_person_check
+        check (card_type = 'household' or default_assignee_person_id is null);
+
+alter table public.plaid_credit_accounts
+    add constraint plaid_credit_accounts_assignee_person_fk
+        foreign key (user_id, default_assignee_person_id)
+        references public.household_people (user_id, person_id)
+        on delete set null;
 
 alter table public.plaid_credit_accounts
     add column if not exists display_name text;
@@ -374,6 +404,15 @@ where display_name is null
       or regexp_replace(lower(coalesce(name, '')), '[^a-z0-9]', '', 'g')
           = 'ultimaterewards'
   );
+
+update public.plaid_credit_accounts
+set card_type = 'individual',
+    default_assignee_mode = 'person',
+    default_assignee_person_id = null,
+    config_updated_at = now()
+where card_type <> 'individual'
+   or default_assignee_mode <> 'person'
+   or default_assignee_person_id is not null;
 
 alter table public.plaid_credit_accounts enable row level security;
 drop policy if exists "Users can read their own Plaid credit accounts"

@@ -25,6 +25,7 @@ class AccountsNotifier extends ChangeNotifier {
   bool _statementCyclesSettled = false;
   bool _isLinking = false;
   bool _isSyncing = false;
+  bool _isSavingConfig = false;
   String? _error;
   String? _warning;
   String? _linkToken;
@@ -41,6 +42,8 @@ class AccountsNotifier extends ChangeNotifier {
   bool get isSnapshotSettled => _connectionsSettled && _statementCyclesSettled;
   bool get isLinking => _isLinking;
   bool get isSyncing => _isSyncing;
+  /// Whether a per-card configuration save is in flight.
+  bool get isSavingConfig => _isSavingConfig;
   String? get error => _error;
   String? get warning => _warning;
   String? get linkToken => _linkToken;
@@ -455,6 +458,48 @@ class AccountsNotifier extends ChangeNotifier {
     }
   }
 
+  /// Saves per-card configuration (individual/household + default assignee) for
+  /// [accountId], then reloads statement cycles so the wallet reflects the new
+  /// config immediately. Returns true on success.
+  Future<bool> updateCardConfig({
+    required String accountId,
+    required CardType cardType,
+    required CardAssigneeMode defaultAssigneeMode,
+    String? defaultAssigneePersonId,
+  }) async {
+    _isSavingConfig = true;
+    _error = null;
+    _warning = null;
+    notifyListeners();
+
+    try {
+      final result = await _accountRepository.updateCreditCardConfig(
+        accountId: accountId,
+        cardType: cardType,
+        defaultAssigneeMode: defaultAssigneeMode,
+        defaultAssigneePersonId: defaultAssigneePersonId,
+      );
+      return result.fold(
+        (_) async {
+          await loadStatementCycles();
+          return true;
+        },
+        (failure) {
+          _error = failure.message;
+          notifyListeners();
+          return false;
+        },
+      );
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    } finally {
+      _isSavingConfig = false;
+      notifyListeners();
+    }
+  }
+
   /// Drops all user-owned state when the authenticated identity changes.
   void reset() {
     _connections = [];
@@ -465,6 +510,7 @@ class AccountsNotifier extends ChangeNotifier {
     _statementCyclesSettled = false;
     _isLinking = false;
     _isSyncing = false;
+    _isSavingConfig = false;
     _error = null;
     _warning = null;
     _linkToken = null;

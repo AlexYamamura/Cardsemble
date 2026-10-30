@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cardsemble/core/utils/currency.dart';
+import 'package:cardsemble/features/accounts/domain/entities/account.dart';
 import 'package:cardsemble/theme/app_colors.dart';
 import 'package:cardsemble/features/wallet/domain/wallet_card.dart';
 import 'package:cardsemble/features/wallet/domain/benefit_spending.dart';
@@ -33,6 +34,7 @@ class WalletCardPanel extends StatelessWidget {
     this.expanded = false,
     this.onTap,
     this.onResync,
+    this.onConfigure,
     this.benefitSpending,
     this.isTransactionsLoading = false,
   });
@@ -42,6 +44,9 @@ class WalletCardPanel extends StatelessWidget {
   final bool expanded;
   final VoidCallback? onTap;
   final VoidCallback? onResync;
+  /// Opens the per-card configuration sheet (individual/household + default
+  /// assignee). Shown in collapsed/carousel mode as a compact config row.
+  final VoidCallback? onConfigure;
 
   /// Spending toward this card's benefits, derived from the loaded transaction
   /// list. May be null when transactions haven't loaded or the card has no
@@ -87,6 +92,14 @@ class WalletCardPanel extends StatelessWidget {
                 benefitSpending: benefitSpending,
                 isTransactionsLoading: isTransactionsLoading,
               ),
+              if (onConfigure != null) ...[
+                const SizedBox(height: 10),
+                _ConfigRow(
+                  card: card,
+                  color: color,
+                  onConfigure: onConfigure!,
+                ),
+              ],
                   if (card.catalogCard != null) ...[
                     const SizedBox(height: 12),
                     AnimatedSize(
@@ -459,6 +472,78 @@ class _MetricTile extends StatelessWidget {
         ],
       ],
     );
+  }
+}
+
+/// A compact per-card configuration row shown inside the carousel card.
+///
+/// Displays the card type and default assignee, plus a "Configure" affordance
+/// that opens [CardConfigSheet] (handled by the parent screen).
+class _ConfigRow extends StatelessWidget {  const _ConfigRow({
+    required this.card,
+    required this.color,
+    required this.onConfigure,
+  });
+
+  final WalletCard card;
+  final Color color;
+  final VoidCallback onConfigure;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _configLabel(card);
+    return InkWell(
+      onTap: onConfigure,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Row(
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.tune,
+              size: 18,
+              color: color.withValues(alpha: 0.9),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Returns the human-readable config label for a card, e.g. "Individual ·
+/// You", "Household · Shared", "Household · Split", or "Household · member".
+String _configLabel(WalletCard card) {
+  if (card.cardType == CardType.individual) {
+    return 'Individual · You';
+  }
+  switch (card.defaultAssigneeMode) {
+    case CardAssigneeMode.person:
+      final name = card.defaultAssigneeName ??
+          (card.defaultAssigneePersonId == null ? 'You' : 'Member');
+      return 'Household · $name';
+    case CardAssigneeMode.shared:
+      return 'Household · Shared';
+    case CardAssigneeMode.split:
+      return 'Household · Split';
   }
 }
 

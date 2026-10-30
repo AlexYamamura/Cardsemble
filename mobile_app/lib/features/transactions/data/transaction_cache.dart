@@ -88,7 +88,7 @@ class TransactionCache {
 
   static const String namespace = 'transactions';
   static const String snapshotKey = 'snapshot';
-  static const int _snapshotSchemaVersion = 2;
+  static const int _snapshotSchemaVersion = 3;
 
   /// Cache keys written by the previous, unscoped implementation. They cannot
   /// be attributed to a user, so they are discarded rather than migrated.

@@ -95,6 +95,16 @@ class FakeAccountRepository implements AccountRepository {
   }
 
   @override
+  Future<Result<void>> updateCreditCardConfig({
+    required String accountId,
+    required CardType cardType,
+    required CardAssigneeMode defaultAssigneeMode,
+    String? defaultAssigneePersonId,
+  }) async {
+    return const Success<void>(null);
+  }
+
+  @override
   Future<Result<StatementCycleSummary>> loadStatementCycles() async {
     statementCycleLoads++;
     return statementCyclesResult ??

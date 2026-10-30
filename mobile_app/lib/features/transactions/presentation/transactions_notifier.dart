@@ -137,6 +137,30 @@ class TransactionsNotifier extends ChangeNotifier {
   String? get selectedAccountId => _selectedAccountId;
   String? get selectedPersonId => _selectedPersonId;
 
+  /// The household default person id ("you"), or empty when people haven't
+  /// loaded or no default person exists.
+  String? get _defaultPersonId {
+    final defaultPerson = _people.firstWhere(
+      (p) => p.isDefault,
+      orElse: () => const HouseholdPerson(id: '', displayName: '', isDefault: false),
+    );
+    return defaultPerson.id.isEmpty ? null : defaultPerson.id;
+  }
+
+  /// Per-account card configuration keyed by account id, built from the loaded
+  /// statement accounts and household people.
+  Map<String, _CardConfig> get _accountConfigById {
+    final personCount = _people.length;
+    return {for (final account in _accounts)
+      account.accountId:
+          _CardConfig(
+            cardType: account.cardType,
+            mode: account.defaultAssigneeMode,
+            personId: account.defaultAssigneePersonId,
+            participantCount: personCount,
+          )};
+  }
+
   /// Whether [transactionId] has been hidden by a long press. Hidden rows stay
   /// visible in the list but are greyed out and excluded from the Pay total.
   bool isTransactionHidden(String transactionId) => _hiddenTransactionIds.contains(transactionId);
@@ -180,7 +204,21 @@ class TransactionsNotifier extends ChangeNotifier {
   /// Map of currency code to total amount for positive (charge) transactions
   /// matching the current filters. Excludes pending and payment transactions,
   /// and transactions the user has hidden via long press.
+  ///
+  /// The amount contributed by each transaction respects the card's per-account
+  /// configuration (individual vs household + default assignee mode):
+  /// - Shared household cards contribute nothing to the Pay total.
+  /// - Split household cards contribute only the default person's even share.
+  /// - Household cards assigned to someone else contribute nothing unless the
+  ///   transaction is explicitly assigned to the default person.
+  /// - Individual cards always contribute the full amount.
+  /// Persisted transaction assignments (manual or split) override the card
+  /// default: a split contributes the default person's exact share, and a
+  /// single assignment contributes the full amount only when assigned to the
+  /// default person.
   Map<String, double> get filteredTotalsByCurrency {
+    final defaultPersonId = _defaultPersonId;
+    final configById = _accountConfigById;
     final Map<String, double> totalsByCurrency = {};
     for (final tx in filteredTransactions) {
       // Hidden (long-pressed) rows stay visible but do not count toward totals.
@@ -188,10 +226,76 @@ class TransactionsNotifier extends ChangeNotifier {
       // Only count positive charges (not pending, not payments)
       if (!tx.pending && tx.isPositive && !tx.isPayment) {
         final currency = tx.currency;
-        totalsByCurrency[currency] = (totalsByCurrency[currency] ?? 0) + tx.amountValue;
+        final payable = _payableAmount(tx, defaultPersonId, configById);
+        totalsByCurrency[currency] = (totalsByCurrency[currency] ?? 0) + payable;
       }
     }
     return totalsByCurrency;
+  }
+
+  /// The amount of [tx] owed by the household default person, considering both
+  /// the card's per-account configuration and any persisted transaction
+  /// assignment. Returns 0 for transactions on shared household cards.
+  double _payableAmount(
+    CardTransaction tx,
+    String? defaultPersonId,
+    Map<String, _CardConfig> configById,
+  ) {
+    final config = configById[tx.accountId ?? ''];
+
+    // Shared household cards are excluded from the Pay total entirely.
+    if (config != null &&
+        config.cardType == CardType.household &&
+        config.mode == CardAssigneeMode.shared) {
+      return 0.0;
+    }
+
+    // Persisted splits contribute the default person's exact share.
+    if (tx.hasSplits) {
+      final share = tx.assignedAmountValue;
+      if (share != null) return share;
+      // Fallback for stale cache rows without assigned_amount: even share.
+      return _evenShare(tx.amountValue, config?.participantCount ?? 1, defaultPersonId);
+    }
+
+    // A single explicit assignment overrides the card default.
+    final hasExplicitAssignment =
+        tx.assignmentSource != 'default' && tx.assignedPersonId != null;
+    if (hasExplicitAssignment) {
+      return tx.assignedPersonId == defaultPersonId ? tx.amountValue : 0.0;
+    }
+
+    // No explicit assignment: apply the card configuration default.
+    if (config == null) return tx.amountValue;
+
+    switch (config.cardType) {
+      case CardType.individual:
+        return tx.amountValue;
+      case CardType.household:
+        switch (config.mode) {
+          case CardAssigneeMode.person:
+            final personId = config.personId;
+            if (personId == null || personId == defaultPersonId) {
+              return tx.amountValue;
+            }
+            return 0.0;
+          case CardAssigneeMode.shared:
+            return 0.0;
+          case CardAssigneeMode.split:
+            return _evenShare(tx.amountValue, config.participantCount, defaultPersonId);
+        }
+    }
+  }
+
+  /// The default person's even share of [amount] across the household, or the
+  /// full amount when there is only one household person.
+  double _evenShare(
+    double amount,
+    int participantCount,
+    String? defaultPersonId,
+  ) {
+    if (participantCount <= 1 || defaultPersonId == null) return amount;
+    return amount / participantCount;
   }
 
   /// Convenience getter for the total amount in the primary currency.
@@ -982,4 +1086,21 @@ class TransactionsNotifier extends ChangeNotifier {
     _error = null;
     notifyListeners();
   }
+}
+
+/// Per-account card configuration resolved from [StatementAccount].
+class _CardConfig {
+  const _CardConfig({
+    required this.cardType,
+    required this.mode,
+    this.personId,
+    this.participantCount = 1,
+  });
+
+  final CardType cardType;
+  final CardAssigneeMode mode;
+  /// Pinned person for person mode; null means the default person ("you").
+  final String? personId;
+  /// Number of household people (used for split even-share).
+  final int participantCount;
 }

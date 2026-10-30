@@ -119,6 +119,7 @@ class WalletCardCarousel extends StatefulWidget {
     required this.onCardTap,
     required this.onResync,
     required this.carouselHeight,
+    this.onConfigure,
     this.benefitSpendingFor,
     this.isTransactionsLoading = false,
   });
@@ -126,6 +127,7 @@ class WalletCardCarousel extends StatefulWidget {
   final List<WalletCard> cards;
   final ValueChanged<WalletCard> onCardTap;
   final Future<void> Function(WalletCard) onResync;
+  final void Function(WalletCard)? onConfigure;
   final double carouselHeight;
   final WalletBenefitSpending? Function(WalletCard)? benefitSpendingFor;
   final bool isTransactionsLoading;
@@ -182,6 +184,7 @@ class _WalletCardCarouselState extends State<WalletCardCarousel> {
               mode: WalletCardPanelMode.collapsed,
               onTap: () => widget.onCardTap(card),
               onResync: card.needsRelink ? () async => widget.onResync(card) : null,
+              onConfigure: widget.onConfigure != null ? () => widget.onConfigure!(card) : null,
               benefitSpending: widget.benefitSpendingFor?.call(card),
               isTransactionsLoading: widget.isTransactionsLoading,
             );

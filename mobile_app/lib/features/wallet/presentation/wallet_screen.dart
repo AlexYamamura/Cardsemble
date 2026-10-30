@@ -14,6 +14,8 @@ import 'package:cardsemble/features/wallet/presentation/wallet_notifier.dart';
 import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_panel.dart';
 import 'package:cardsemble/features/wallet/presentation/widgets/wallet_card_carousel.dart';
 import 'package:cardsemble/features/transactions/presentation/transactions_notifier.dart';
+import 'package:cardsemble/features/accounts/presentation/card_config_sheet.dart';
+import 'package:cardsemble/features/accounts/presentation/link_card_flow.dart';
 
 /// Wallet landing tab.
 ///
@@ -73,11 +75,13 @@ class _WalletScreenState extends State<WalletScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      // showDragHandle injects a 48px-tall handle above the builder content,
-      // so we drop the top padding to avoid growing the sheet visually.
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        child: CardDetails(card: card, color: color, scrollable: true),
+        child: CardDetails(
+          card: card,
+          color: color,
+          scrollable: true,
+        ),
       ),
     );
   }
@@ -115,6 +119,32 @@ class _WalletScreenState extends State<WalletScreen>
         SnackBar(content: Text(message)),
       );
     }
+  }
+
+  /// Opens the per-card configuration sheet for [card]. After saving, the
+  /// wallet and Pay totals are refreshed by the sheet itself.
+  void _configureCard(BuildContext context, WalletCard card) {
+    final statementAccount = card.statementAccount;
+    if (statementAccount == null) return;
+    final people = context.read<TransactionsNotifier>().people;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => CardConfigSheet(
+        accountId: statementAccount.accountId,
+        accountName: card.displayName,
+        cardType: card.cardType,
+        defaultAssigneeMode: card.defaultAssigneeMode,
+        defaultAssigneePersonId: card.defaultAssigneePersonId,
+        people: people,
+        accountsNotifier: context.read<AccountsNotifier>(),
+        transactionsNotifier: context.read<TransactionsNotifier>(),
+      ),
+    );
   }
 
   /// Triggers a full Plaid sync (which writes to the Supabase DB) and then
@@ -274,6 +304,9 @@ class _WalletScreenState extends State<WalletScreen>
                     notifier: notifier,
                     onCardTap: (card) => _showCardDetails(context, card),
                     onResync: (card) => _resyncCard(context, card),
+                    onConfigure: (card) {
+                      _configureCard(context, card);
+                    },
                     benefitSpendingFor: notifier.benefitSpendingFor,
                     isTransactionsLoading: notifier.isTransactionsLoading,
                   )
@@ -293,7 +326,12 @@ class _WalletScreenState extends State<WalletScreen>
                         children: [
                           Expanded(
                             child: FilledButton.icon(
-                              onPressed: () => context.read<AccountsNotifier>().linkAccount(),
+                              onPressed: () => linkAndConfigureCard(
+                                context: context,
+                                accounts: context.read<AccountsNotifier>(),
+                                transactions: context.read<TransactionsNotifier>(),
+                                wallet: context.read<WalletNotifier>(),
+                              ),
                               icon: const Icon(Icons.add, size: 18),
                               label: const Text('Link a card'),
                               style: FilledButton.styleFrom(
@@ -708,6 +746,7 @@ class _YourCardsCarouselSection extends StatelessWidget {
     required this.notifier,
     required this.onCardTap,
     required this.onResync,
+    required this.onConfigure,
     required this.benefitSpendingFor,
     required this.isTransactionsLoading,
   });
@@ -715,6 +754,7 @@ class _YourCardsCarouselSection extends StatelessWidget {
   final WalletNotifier notifier;
   final ValueChanged<WalletCard> onCardTap;
   final Future<void> Function(WalletCard) onResync;
+  final void Function(WalletCard) onConfigure;
   final WalletBenefitSpending? Function(WalletCard) benefitSpendingFor;
   final bool isTransactionsLoading;
 
@@ -739,6 +779,7 @@ class _YourCardsCarouselSection extends StatelessWidget {
             cards: cards,
             onCardTap: onCardTap,
             onResync: onResync,
+            onConfigure: onConfigure,
             carouselHeight: _carouselItemHeight,
             benefitSpendingFor: notifier.benefitSpendingFor,
             isTransactionsLoading: notifier.isTransactionsLoading,
@@ -841,4 +882,4 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// Height of one collapsed card inside the horizontal carousel.
-const double _carouselItemHeight = 264;
+const double _carouselItemHeight = 300;

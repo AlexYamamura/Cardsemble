@@ -24,6 +24,7 @@ class CardTransaction {
     this.householdVisible = true,
     this.personalFinanceCategoryPrimary,
     this.personalFinanceCategoryDetailed,
+    this.assignedAmount,
   });
 
   final String id;
@@ -53,6 +54,17 @@ class CardTransaction {
   /// "FOOD_AND_DRINK_RESTAURANTS"). Null when not available.
   final String? personalFinanceCategoryDetailed;
 
+  /// The amount (as a string from the backend) owed by the household default
+  /// person for this transaction. For split transactions this is the default
+  /// person's share; for unassigned/single assignments it is the full amount
+  /// when assigned to the default person, or "0" otherwise. Null when the
+  /// server has not projected it (e.g. stale cache).
+  final String? assignedAmount;
+
+  /// `assignedAmount` parsed to a double, or null when unavailable.
+  double? get assignedAmountValue =>
+      assignedAmount == null ? null : double.tryParse(assignedAmount!);
+
   CardTransaction copyWith({
     String? accountId,
     String? accountName,
@@ -73,6 +85,7 @@ class CardTransaction {
     bool? householdVisible,
     String? personalFinanceCategoryPrimary,
     String? personalFinanceCategoryDetailed,
+    String? assignedAmount,
   }) {
     return CardTransaction(
       id: id,
@@ -99,6 +112,7 @@ class CardTransaction {
           this.personalFinanceCategoryPrimary,
       personalFinanceCategoryDetailed: personalFinanceCategoryDetailed ??
           this.personalFinanceCategoryDetailed,
+      assignedAmount: assignedAmount ?? this.assignedAmount,
     );
   }
 
@@ -123,10 +137,11 @@ class CardTransaction {
        hasSplits: json['has_splits'] as bool? ?? false,
        householdVisible: json['household_visible'] as bool? ?? true,
        personalFinanceCategoryPrimary:
-           json['personal_finance_category_primary'] as String?,
-       personalFinanceCategoryDetailed:
-           json['personal_finance_category_detailed'] as String?,
-     );
+            json['personal_finance_category_primary'] as String?,
+        personalFinanceCategoryDetailed:
+            json['personal_finance_category_detailed'] as String?,
+        assignedAmount: json['assigned_amount'] as String?,
+      );
    }
 
   Map<String, dynamic> toJson() {
@@ -151,6 +166,7 @@ class CardTransaction {
        'household_visible': householdVisible,
        'personal_finance_category_primary': personalFinanceCategoryPrimary,
        'personal_finance_category_detailed': personalFinanceCategoryDetailed,
+       'assigned_amount': assignedAmount,
      };
    }
 

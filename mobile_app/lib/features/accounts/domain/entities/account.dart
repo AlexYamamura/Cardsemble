@@ -21,6 +21,27 @@ class PlaidConnection {
   }
 }
 
+/// Whether a connected card is managed as an individual card (assigned to the
+/// household default person / "you") or a household card (shared with or split
+/// across household members).
+enum CardType {
+  individual,
+  household,
+}
+
+/// How the default assignee for a card's transactions is resolved.
+///
+/// - [person]: a single household person (null id = the default person / "you").
+/// - [shared]: the card is a shared household card; its transactions are excluded
+///   from the payer's "Pay" total.
+/// - [split]: the card's transactions are split across household people; only the
+///   default person's share counts toward the "Pay" total.
+enum CardAssigneeMode {
+  person,
+  shared,
+  split,
+}
+
 class StatementAccount {
   const StatementAccount({
     required this.accountId,
@@ -36,6 +57,10 @@ class StatementAccount {
     this.currentBalanceCents,
     this.currency,
     this.nextPaymentDueDate,
+    this.cardType = CardType.individual,
+    this.defaultAssigneeMode = CardAssigneeMode.person,
+    this.defaultAssigneePersonId,
+    this.defaultAssigneeName,
   });
 
   final String accountId;
@@ -61,6 +86,19 @@ class StatementAccount {
   /// null when a liability sync has not populated it. Surfaced on the Wallet
   /// tab's per-card "Payment due" metric.
   final DateTime? nextPaymentDueDate;
+
+  /// Whether this card is an individual card or a household card.
+  final CardType cardType;
+
+  /// How the default assignee for this card's transactions is resolved.
+  final CardAssigneeMode defaultAssigneeMode;
+
+  /// The pinned household person for [defaultAssigneeMode] == [CardAssigneeMode.person].
+  /// Null means the household default person ("you"). Null for shared/split.
+  final String? defaultAssigneePersonId;
+
+  /// Resolved display name of the default assignee (for display only).
+  final String? defaultAssigneeName;
 
   /// Converts a dollar value (as returned by the backend from Plaid's
   /// `balances.current` / `balances.limit` fields) into minor currency
@@ -94,7 +132,30 @@ class StatementAccount {
       nextPaymentDueDate: json['next_payment_due_date'] is String
           ? DateTime.tryParse(json['next_payment_due_date'] as String)
           : null,
+      cardType: _parseCardType(json['card_type']),
+      defaultAssigneeMode: _parseAssigneeMode(json['default_assignee_mode']),
+      defaultAssigneePersonId: json['default_assignee_person_id'] as String?,
+      defaultAssigneeName: json['default_assignee_name'] as String?,
     );
+  }
+
+  static CardType _parseCardType(dynamic value) {
+    if (value == null) return CardType.individual;
+    final s = value.toString().toLowerCase();
+    return s == 'household' ? CardType.household : CardType.individual;
+  }
+
+  static CardAssigneeMode _parseAssigneeMode(dynamic value) {
+    if (value == null) return CardAssigneeMode.person;
+    final s = value.toString().toLowerCase();
+    switch (s) {
+      case 'shared':
+        return CardAssigneeMode.shared;
+      case 'split':
+        return CardAssigneeMode.split;
+      default:
+        return CardAssigneeMode.person;
+    }
   }
 
   Map<String, dynamic> toJson() {
@@ -112,6 +173,14 @@ class StatementAccount {
       'current_balance': currentBalanceCents == null ? null : currentBalanceCents! / 100,
       'iso_currency_code': currency,
       'next_payment_due_date': nextPaymentDueDate?.toIso8601String().split('T').first,
+      'card_type': cardType == CardType.household ? 'household' : 'individual',
+      'default_assignee_mode': defaultAssigneeMode == CardAssigneeMode.shared
+          ? 'shared'
+          : defaultAssigneeMode == CardAssigneeMode.split
+              ? 'split'
+              : 'person',
+      'default_assignee_person_id': defaultAssigneePersonId,
+      'default_assignee_name': defaultAssigneeName,
     };
   }
 }
